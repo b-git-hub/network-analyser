@@ -35,8 +35,12 @@ _Avoid_: Job, scan, session
 ## Access
 
 **Credential Set**:
-One username and secret the operator supplies for a Run. It exists only in memory for that Run and is never written anywhere.
+One username and password the operator supplies for a Run. The password exists only in memory for that Run and is never written anywhere; the username may be.
 _Avoid_: Login, account, profile
+
+**Retired Credential Set**:
+A Credential Set that is no longer tried for the rest of a Run because it used up its allowance of failed logins.
+_Avoid_: Locked set, disabled set
 
 ## Outputs
 
