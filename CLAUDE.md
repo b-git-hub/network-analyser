@@ -1,6 +1,6 @@
 # Network Analyser
 
-An operator-run tool that logs into Cisco (IOS/IOS-XE, NX-OS) and Palo Alto (PAN-OS) devices inside given IP ranges, backs up their running configuration, crawls CDP/LLDP to find more devices, and draws the topology. Use the vocabulary in [GLOSSARY.md](GLOSSARY.md); flag any term that conflicts with it.
+An operator-run tool that logs into Cisco (IOS/IOS-XE, NX-OS) and Palo Alto (PAN-OS) devices inside given IP ranges, backs up their running configuration, crawls CDP/LLDP to find more devices, and draws the topology. **v1 covers Cisco only, over SSH only:** PAN-OS was dropped from v1 on [Get devices to test against](https://github.com/b-git-hub/network-analyser/issues/8), and its earlier decisions are kept for a later effort. Use the vocabulary in [GLOSSARY.md](GLOSSARY.md); flag any term that conflicts with it.
 
 ## Where work is tracked
 
