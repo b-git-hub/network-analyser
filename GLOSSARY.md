@@ -21,7 +21,7 @@ A device the tool has logged into during a Run.
 _Avoid_: Managed device, polled device
 
 **Unvisited Device**:
-A device known to exist (from a Neighbour advertisement, MAC table or ARP table) that was not logged into, because it is outside the Scope, unsupported, or unreachable.
+A device known to exist (from a Neighbour advertisement, MAC table or ARP table) that was not logged into, or not fully examined, because it is outside the Scope, unsupported, unreachable, or refused by the connection safety policy.
 _Avoid_: Unmanaged device, ghost
 
 **Platform**:
@@ -41,6 +41,10 @@ _Avoid_: Login, account, profile
 **Retired Credential Set**:
 A Credential Set that is no longer tried for the rest of a Run because it used up its allowance of failed logins.
 _Avoid_: Locked set, disabled set
+
+**Trust Store**:
+The operator's record, kept between Runs, of trusted SSH host keys and pinned HTTPS certificate fingerprints, against which every device is checked before a password is sent.
+_Avoid_: Known hosts, key cache, trust list
 
 ## Outputs
 
