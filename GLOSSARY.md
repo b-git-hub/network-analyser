@@ -43,7 +43,7 @@ A Credential Set that is no longer tried for the rest of a Run because it used u
 _Avoid_: Locked set, disabled set
 
 **Trust Store**:
-The operator's record, kept between Runs, of trusted SSH host keys and pinned HTTPS certificate fingerprints, against which every device is checked before a password is sent.
+The operator's record, kept between Runs, of trusted SSH host keys (and, once an HTTPS Platform is supported, pinned certificate fingerprints), against which every device is checked before a password is sent.
 _Avoid_: Known hosts, key cache, trust list
 
 ## Outputs
