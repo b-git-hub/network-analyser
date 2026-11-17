@@ -25,7 +25,7 @@ A device known to exist (from a Neighbour advertisement, MAC table or ARP table)
 _Avoid_: Unmanaged device, ghost
 
 **Platform**:
-The operating system family of a device, which decides the commands it is sent: IOS/IOS-XE (Catalyst), NX-OS (Nexus), or PAN-OS (Palo Alto).
+The operating system family of a device, which decides the commands it is sent: IOS/IOS-XE (Catalyst), NX-OS (Nexus), or PAN-OS (Palo Alto). v1 supports only IOS/IOS-XE and NX-OS; a device on any other Platform is an Unvisited Device.
 _Avoid_: Vendor, model, device type
 
 **Run**:
