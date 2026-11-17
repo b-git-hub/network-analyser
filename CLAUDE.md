@@ -11,14 +11,14 @@ Everything lives on GitHub, not Azure DevOps.
 - Board: https://github.com/users/b-git-hub/projects/1
 - Planning map: https://github.com/b-git-hub/network-analyser/issues/1 (label `wayfinder:map`). Its child issues are decision tickets labelled `wayfinder:research|prototype|grilling|task`. Read the map before starting any planning work.
 
-Every task that comes out of a session becomes a GitHub issue in this repo, added to the board. Use the `gh` CLI. On this machine it may only be reachable at `C:\Program Files\GitHub CLI\gh.exe`. Blocking uses GitHub's native "blocked by" relationship, and parent/child uses sub-issues.
+Every task that comes out of a session becomes a GitHub issue in this repo, added to the board. The board's "Auto-add sub-issues to project" workflow adds any sub-issue of an item already on the board, so wayfinder tickets (sub-issues of the map) need no manual step. Cloud sessions cannot reach the board, so an issue that is not a sub-issue must be added by the operator, or by the board's "Auto-add to project" workflow if it is switched on. Use the `gh` CLI. On this machine it may only be reachable at `C:\Program Files\GitHub CLI\gh.exe`. Blocking uses GitHub's native "blocked by" relationship, and parent/child uses sub-issues.
 
 ## Security comes first
 
 Security outranks convenience, speed and features. When a choice trades security for anything else, take the secure option or stop and ask.
 
 - **The tool is read-only.** It never enters configuration mode and never sends a command that changes device state. Commands are sent from an explicit per-Platform allow-list.
-- **Credentials are never stored.** Credential Sets are held in memory for one Run only. They never reach disk, logs, reports, Backups, crash dumps, test fixtures, issues or commits, and neither does any record of which Credential Set worked on which device.
+- **Passwords are never stored.** Credential Set passwords are held in memory for one Run only and are entered at a prompt, never read from environment variables or a store the tool writes. They never reach disk, logs, reports, Backups, crash dumps, test fixtures, issues or commits. Usernames are not secret: they may appear in run reports and logs, including which username logged into which device (decided on [How Credential Sets are supplied and tried](https://github.com/b-git-hub/network-analyser/issues/6)).
 - **Backups are encrypted at rest.** Running configs contain secrets and hashes, so no plaintext config is written to disk.
 - **The Scope is a hard fence.** Never log into a device outside the operator's IP ranges, even when a Neighbour advertises it.
 - **Real device data never goes into the repo.** Test fixtures use sanitised or synthetic output: no real hostnames, IPs, configs or secrets.
