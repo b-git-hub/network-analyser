@@ -25,3 +25,4 @@ How [spec #37](https://github.com/b-git-hub/network-analyser/issues/37) (Network
 - 2026-11-18: merged #43 at `9b7dcc5`; no conflicts, check.py all green, 160 tests passed.
 - 2026-11-18: merged #41 at `4bf7aa7`; no conflicts despite #43 landing in cli/ first, check.py all green, 258 tests passed.
 - 2026-11-18: merged #42 at `f5617ad`; no conflicts, check.py all green, 346 tests passed.
+- 2026-11-18: wave 2 started: #45 and #46 (after #41, #42, #43 merged); #44 still running.

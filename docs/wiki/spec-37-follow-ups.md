@@ -16,3 +16,9 @@ Work that a finished ticket surfaced for a later ticket. The coordinator copies 
 - 2026-11-18, from #41 (merged at `4bf7aa7`): a run label from the run file is only checked to be text; #42 should apply its label allow-list to it (sent to #42's implementer). Target: #42.
 - 2026-11-18, from #41: #45's Ready-to-start block should read `RunRequest`'s per-setting sources and replace #41's interim summary lines. Target: #45.
 - 2026-11-18, from #41: no `--no-sweep` flag, so a run file's `sweep = true` can't be overridden on the command line; link-local (169.254/16) is not refused by `contains()`. Both await the operator. Target: #55 if a flag is wanted.
+- 2026-11-18, from #42 (merged at `f5617ad`): #45 must call `cli.run_folder.create_and_register` after the confirm (nothing calls it yet), and refuse a run label that matches a typed secret. Target: #45.
+- 2026-11-18, from #42: `RunsParentCheck.notices` (location notice, permissions warning) must be folded into the Run report. Targets: #45, #66.
+- 2026-11-18, from #42: pass the Run register's text through the secret scan once it exists. Target: #48.
+- 2026-11-18, from #42: Backup file names should reuse `records.safe_names`. Target: #51.
+- 2026-11-18, from #42: `show-backup` should read the Run register and handle `--run-folder`. Target: #57 (the report said #58; the register lookup belongs to whichever of #57/#58 lists Backups).
+- 2026-11-18, from #42: the only delete in the code is the writability probe folder; `tests/arch/test_no_deletes.py` enforces that. Data-folder file names chosen by #42: `run-register.txt`, `instance.lock`, `passphrase-check.age`, `change-pending.json`, `trust/known_hosts`. Targets: #46 (Trust Store uses `trust/known_hosts`), #58.
