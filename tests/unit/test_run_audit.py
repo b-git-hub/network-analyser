@@ -1,7 +1,8 @@
 """A started Run keeps `audit.log`, and its console is scanned (ticket #48; stories 86, 161-164).
 
-Driven through `main(argv)` with what the operator types. The crawl is not built yet, so a
-started Run writes its Run-start and Run-end events and ends.
+Driven through `main(argv)` with what the operator types. The Seed is a fake device
+(tests/support/run_driver); a started Run writes its Run-start event, the Seed's events and
+its Run-end event.
 """
 
 import json
@@ -52,7 +53,8 @@ def test_a_started_run_records_its_start_and_end_in_audit_log(
 
     assert got.code == ExitCode.CLEAN
     (folder,) = _run_folders()
-    start, end = _audit(folder)
+    lines = _audit(folder)
+    start, end = lines[0], lines[-1]
     assert start["event"] == "run_started"
     assert start["severity"] == "info"
     assert start["tool_version"] == __version__
@@ -67,7 +69,7 @@ def test_a_started_run_records_its_start_and_end_in_audit_log(
         "event": "run_ended",
         "severity": "info",
         "ended": "completed",
-        "devices_visited": 0,
+        "devices_visited": 1,
         "devices_unvisited": 0,
         "backups_written": 0,
         "secret_scan_hits": 0,
@@ -122,7 +124,7 @@ def test_a_username_holding_a_password_is_blocked_everywhere_with_one_warning(
 
     got = run(*FLAGS, typed=answers)
 
-    assert got.code == ExitCode.CLEAN
+    assert got.code == ExitCode.NEEDS_ATTENTION  # a secret-scan hit needs attention (story 157)
     (folder,) = _run_folders()
     # The password prompt names the username before the password exists; from then on, no.
     shown = got.out + got.err.split(f"Password for {username}: ", 1)[1]

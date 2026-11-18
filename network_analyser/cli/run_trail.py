@@ -12,12 +12,15 @@ from collections.abc import Callable
 
 from network_analyser import _winsys, run_output
 from network_analyser._version import __version__
+from network_analyser.cli import run_summary
 from network_analyser.cli.exit_codes import ExitCode
 from network_analyser.credentials import CredentialSets, SecretScan
 from network_analyser.records import RunRequest
+from network_analyser.records.device import DeviceRecord
 from network_analyser.records.events import (
     AuditEvent,
     CtrlCPressed,
+    DeviceOutcome,
     RunEnded,
     RunEnding,
     RunStarted,
@@ -29,7 +32,7 @@ AUDIT_STOP = (
     "share the Run folder is on."
 )
 
-type Crawl = Callable[[run_output.AuditLog], None]
+type Crawl = Callable[[run_output.AuditLog], tuple[DeviceRecord, ...]]
 
 
 def run_with_audit_trail(
@@ -50,8 +53,10 @@ def run_with_audit_trail(
         return _audit_stop()
     try:
         audit.record(_run_started(request, sets, folder))
-        crawl(audit)
-        audit.record(RunEnded(RunEnding.COMPLETED, 0, 0, 0, scan.hits))
+        records = crawl(audit)
+        visited = sum(1 for r in records if r.outcome is not DeviceOutcome.UNVISITED)
+        unvisited = len(records) - visited
+        audit.record(RunEnded(RunEnding.COMPLETED, visited, unvisited, 0, scan.hits))
     except run_output.AuditLogError:
         return _audit_stop()
     except KeyboardInterrupt:
@@ -63,6 +68,9 @@ def run_with_audit_trail(
         raise
     finally:
         audit.close()
+    print(run_summary.summary(records))
+    if run_summary.needs_attention(records) or scan.hits:
+        return ExitCode.NEEDS_ATTENTION
     return ExitCode.CLEAN
 
 

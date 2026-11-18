@@ -38,7 +38,7 @@ One package, `network_analyser/`, with the eleven modules from the spec plus two
 
 [tests/arch/test_module_boundaries.py]. Libraries have one owner each:
 
-- `netmiko`, `paramiko`, `socket`: only `device_gateway` [security test 3: tests/security/test_3_import_rule.py].
+- `netmiko`, `paramiko`, `socket`: only `device_gateway` [security test 3: tests/security/test_3_import_rule.py], and inside it only `device_gateway/ssh.py` [tests/arch/test_module_boundaries.py]. The rest of the gateway works on the plain `link.Dial` seam, which tests fake (tests/support/fake_device.py).
 - `pyrage`: only `backup_store`. `textfsm`, `ntc_templates`: only `platforms`.
 - `ctypes`, `msvcrt`, `winreg`: only `_winsys`. Every Windows-only call sits in `_winsys` behind a function that also runs (or says it can't) on Linux, so tests can inject a fake. Branch on the platform at module level (`if sys.platform == "win32": def f(): ... else: def f(): ...`), as `_winsys/elevation.py` does; a `sys.platform` check inside a function body trips mypy's `warn_unreachable` under `--platform win32`.
 - `tomllib`: only `cli`. `logging`: only `cli/library_loggers.py`, which keeps the netmiko and paramiko loggers silent. Our own code never uses `logging`.
@@ -56,7 +56,7 @@ Changing the import table or an owner is a design decision: say why in the commi
 ## 4. Secrets
 
 - Every Credential Set password and the Backup Passphrase is a `credentials.Secret` from the moment it is typed. Its `str`, `repr` and format show `held in memory`; it cannot be pickled, copied, hashed, compared with `==` (use `same_as`), truth-tested (use `is_empty`) or measured [tests/unit/test_secret.py].
-- **Who may hold the value** (decided 2026-11-18): Credential Set passwords only in `credentials` and `device_gateway`; the Backup Passphrase only in `backup_store`. `.reveal()` may be called only in those three modules, at the last moment, and its result is never stored [tests/arch/test_secret_rules.py]. The `cli` masked reader returns a `Secret` and never keeps the plain value.
+- **Who may hold the value** (decided 2026-11-18): Credential Set passwords only in `credentials` and `device_gateway`; the Backup Passphrase only in `backup_store`. `.reveal()` may be called only in those three modules, at the last moment, and its result is never stored [tests/arch/test_secret_rules.py]. `device_gateway` gets a set's password, still a `Secret`, only through `CredentialSets.password_for_login`, which nothing outside `credentials` and `device_gateway` may call [tests/arch/test_read_only.py] (#49). The `cli` masked reader returns a `Secret` and never keeps the plain value.
 - Secrets never come from options, environment variables or files. Only `_winsys` reads the environment, and only `LOCALAPPDATA`, `USERDOMAIN` and `COMPUTERNAME` by literal name [arch test, ruff TID251]. The one file that reads them gets `"network_analyser/_winsys/<file>.py" = ["TID251"]` in `[tool.ruff.lint.per-file-ignores]`; no other file may. No option name may suggest a secret [tests/unit/test_cli.py].
 - Usernames are not secret.
 
@@ -74,7 +74,7 @@ Changing the import table or an owner is a design decision: say why in the commi
 ## 6. Errors and exit codes
 
 - Exit codes live in `cli/exit_codes.py` (`ExitCode`): 0 clean, 1 needs attention, 2 refused before any device was contacted, 3 stopped or cancelled, 4 internal error. Every command returns one.
-- Exception text can quote device output or a secret. A caught exception is re-raised, chained, type-checked or mapped to a fixed message; its text, `args` and `str()` are never shown, logged or stored [tests/arch/test_secret_rules.py]. The top-level handler shows only the type and a `file:line` stack, in every thread [tests/unit/test_crash_handling.py]. `faulthandler` stays off.
+- Exception text can quote device output or a secret. A caught exception is re-raised, chained, type-checked or mapped to a fixed message; its text, `args` and `str()` are never shown, logged or stored [tests/arch/test_secret_rules.py]. A mapper is registered in `EXCEPTION_SAFE_CALLS` by its full name (module path and function), so a function elsewhere that shares its name is not trusted. The top-level handler shows only the type and a `file:line` stack, in every thread [tests/unit/test_crash_handling.py]. `faulthandler` stays off.
 - Ctrl+C before any device is contacted exits 3 with no traceback.
 
 ## 7. Tests
@@ -88,7 +88,8 @@ Changing the import table or an owner is a design decision: say why in the commi
 
 ## 8. Read-only and allow-list
 
-- Commands reach a device only through `device_gateway`'s single allow-list gate. The allow-list is literals in each `platforms` module, never read from a file or the environment.
+- Commands reach a device only through `device_gateway`'s single allow-list gate, `DeviceSession.send(platform, command)` [security test 1]; the Netmiko connection refuses any write that is not a bare RETURN or a permitted line, so the library's own session set-up passes the same gate. The allow-list is literals in each `platforms/<platform>/commands.py`, never read from a file or the environment: exact strings, or templates whose parameters match a strict pattern that never matches a space.
+- No Netmiko call that enters configuration or enable mode, saves or commits, no `ConnectHandler`/`SSHClient`/`AutoAddPolicy`, and no session log other than None [tests/arch/test_read_only.py].
 - Adding a command to the allow-list is a breaking change (decision #32): bump the minor version, list the command under `### Breaking changes` and `### Allow-list and Device Role` in CHANGELOG.md (the release notes then remind the operator to re-apply the Device Role), and keep security test 2 passing.
 
 ## 9. Commits

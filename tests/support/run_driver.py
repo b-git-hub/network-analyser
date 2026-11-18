@@ -1,5 +1,7 @@
 """Drive `network-analyser run` as the operator would, with what they type on stdin.
 
+The Seed is a fake device at the `device_gateway` seam: no test touches the network.
+
 Standard input is not a console in tests, so every prompt (the hidden ones too) reads one
 line. On Linux the crash-dump guard cannot read the registry, so it always asks for `YES`.
 The secrets are synthetic canaries; `use_fake_age` keeps the check file fast.
@@ -14,9 +16,11 @@ import pytest
 
 from network_analyser import run_output
 from network_analyser.cli import main
+from tests.support import fake_device
+from tests.support.fake_device import FakeNetwork
 
 BACKUP_CANARY = "CANARY-pp-4e7a-backup"
-DEVICE_CANARY = "CANARY-pw-7c1d-device"
+DEVICE_CANARY = fake_device.DEVICE_CANARY
 FLAGS = ("--scope", "192.0.2.0/24", "--seed", "192.0.2.1")
 
 
@@ -43,11 +47,18 @@ def later_run(*, start: str = "y") -> str:
 
 
 class Runner:
-    """Runs `network-analyser run` with what the operator types on stdin."""
+    """Runs `network-analyser run` with what the operator types on stdin.
+
+    The Seed in FLAGS is a fake IOS-XE device that accepts DEVICE_CANARY for any username;
+    add more to `network` (tests/support/fake_device).
+    """
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         self._monkeypatch = monkeypatch
         self._capsys = capsys
+        self.network = FakeNetwork()
+        self.seed = self.network.add(FLAGS[3])
+        self.network.install(monkeypatch)
 
     def __call__(self, *argv: str, typed: str = "") -> Outcome:
         self._monkeypatch.setattr("sys.stdin", io.StringIO(typed))

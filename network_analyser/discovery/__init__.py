@@ -3,4 +3,10 @@
 Owns the crawl queue, Neighbour address choice, the worker pool, de-duplication, the
 Unvisited reasons and stopping. `run(Run request)` yields event records and collected
 device records; it hands device records to `backup_store` and `topology`.
+
+Ticket #49 builds only `visit_seeds`: each Seed visited in turn, with no crawl.
 """
+
+from network_analyser.discovery.seeds import visit_seeds
+
+__all__ = ["visit_seeds"]

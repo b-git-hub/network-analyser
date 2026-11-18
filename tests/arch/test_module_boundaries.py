@@ -46,9 +46,9 @@ ALLOWED: dict[str, frozenset[str]] = {
 # Third-party and risky stdlib imports, and the only places that may make them. An owner
 # ending in "/" is a whole module; otherwise it is one file below the package folder.
 OWNERS: dict[str, frozenset[str]] = {
-    "netmiko": frozenset({"device_gateway/"}),
-    "paramiko": frozenset({"device_gateway/"}),
-    "socket": frozenset({"device_gateway/"}),
+    "netmiko": frozenset({"device_gateway/ssh.py"}),
+    "paramiko": frozenset({"device_gateway/ssh.py"}),
+    "socket": frozenset({"device_gateway/ssh.py"}),
     "pyrage": frozenset({"backup_store/"}),
     "textfsm": frozenset({"platforms/"}),
     "ntc_templates": frozenset({"platforms/"}),

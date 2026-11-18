@@ -36,7 +36,6 @@ EVERY_COMMAND = [
     pytest.param(["render", "runs/2026-01-01T000000Z"], id="render"),
     pytest.param(["show-backup", "backups/sw-a.cfg.age"], id="show-backup"),
     pytest.param(["show-backup"], id="show-backup listing"),
-    pytest.param(["trust-key", "192.0.2.10", "--fingerprint", FINGERPRINT], id="trust-key"),
     pytest.param(["role-snippet", "ios-xe"], id="role-snippet"),
     pytest.param(["change-passphrase"], id="change-passphrase"),
 ]
@@ -78,6 +77,7 @@ def test_every_run_flag_of_the_frozen_surface_parses(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("sys.stdin", io.StringIO(""))  # input ends at the first prompt
+    (Path.cwd() / "known_hosts").write_text("", encoding="utf-8")
     run_file = tmp_path / "site-a.toml"
     run_file.write_text('scope = ["203.0.113.0/24"]\n', encoding="utf-8")
 

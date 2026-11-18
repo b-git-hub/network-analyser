@@ -31,6 +31,21 @@ class Sourced[T]:
 
 
 @dataclass(frozen=True, slots=True)
+class Timeouts:
+    """How long each step with a device may take, in seconds (story 50).
+
+    Attributes:
+        connect: opening the TCP connection.
+        login: from the SSH handshake to the end of the password login.
+        command: one command's output.
+    """
+
+    connect: float = 10
+    login: float = 20
+    command: float = 60
+
+
+@dataclass(frozen=True, slots=True)
 class RunRequest:
     """Everything a Run needs that is not a secret, checked.
 
@@ -42,6 +57,7 @@ class RunRequest:
         parallel: devices worked on at once.
         failure_budget: failed logins a Credential Set may spend before it is retired.
         sweep: whether the Scope is swept on TCP 22 for more Seeds.
+        timeouts: how long each step with a device may take.
     """
 
     scope: Sourced[ScopeRecord]
@@ -51,3 +67,4 @@ class RunRequest:
     parallel: Sourced[int]
     failure_budget: Sourced[int]
     sweep: Sourced[bool]
+    timeouts: Timeouts = Timeouts()
