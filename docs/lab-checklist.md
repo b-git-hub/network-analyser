@@ -1,6 +1,6 @@
 # Lab checklist
 
-v1 is tested by hand on a booked DevNet *Cisco Modeling Labs* (CML) sandbox. Every booking starts from the same lab, [`docs/lab/network-analyser-lab.yaml`](lab/network-analyser-lab.yaml), and records its results here. This page gathers every lab check still open on the decision tickets, then walks through the tool.
+v1 is tested by hand on a booked DevNet *Cisco Modeling Labs* (CML) sandbox. Every booking starts from the same lab, [`lab/network-analyser-lab.yaml`](../lab/network-analyser-lab.yaml), and records its results here. This page gathers every lab check still open on the decision tickets, then walks through the tool.
 
 Decided on [Get devices to test against](https://github.com/b-git-hub/network-analyser/issues/8) and [Testing against recorded device output](https://github.com/b-git-hub/network-analyser/issues/28). Checks were added by [Device-side read-only roles per Platform](https://github.com/b-git-hub/network-analyser/issues/14), [Expected network size and Run limits](https://github.com/b-git-hub/network-analyser/issues/27) and [Release pipeline, signing and versioning](https://github.com/b-git-hub/network-analyser/issues/32).
 
@@ -33,6 +33,8 @@ The lab has five nodes, all IOS-XE or NX-OS:
 | xe-sw2 | `ioll2-xe` (IOL-L2) | IOS-XE | Ethernet0/0, VRF `Mgmt-intf` | 192.0.2.13 |
 | nx-sw1 | `nxosv9000` (NX-OS 9000v) | NX-OS | mgmt0, VRF `management` | 192.0.2.14 |
 | nx-sw2 | `nxosv9000` (NX-OS 9000v) | NX-OS | mgmt0, VRF `management` | 192.0.2.15 |
+
+**Synthetic address ranges.** The lab file uses only the RFC 5737 documentation ranges: 192.0.2.0/24 for management placeholders, and 198.51.100.0/24 and 203.0.113.0/24 for the data plane. Its other IPv4 literals are netmasks and the `0.0.0.0` default route. Any other address in `lab/` is a mistake.
 
 The management gateway placeholder is 192.0.2.1. The management interfaces join an unmanaged switch and the external connector `mgmt-bridge`, with CDP and LLDP turned off on them. The data plane uses 198.51.100.0/24 and 203.0.113.0/24, which never leave the lab:
 
