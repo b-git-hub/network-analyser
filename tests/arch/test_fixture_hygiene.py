@@ -12,16 +12,17 @@ from pathlib import Path
 import pytest
 import yaml
 
+from network_analyser.records import NEVER_TARGETS
 from tests.support.source_scan import PACKAGE_ROOT, REPO_ROOT
 
 DOCUMENTATION = tuple(
     ipaddress.ip_network(n) for n in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24")
 )
-# Addresses tests need to prove a refusal (spec #37, story 41): 0.0.0.0, loopback,
-# multicast and broadcast.
+# Addresses tests need to prove a refusal (spec #37, story 41): the blocks `scope` never lets
+# the tool touch (records.NEVER_TARGETS, #41): 0.0.0.0/8, loopback, multicast, and the
+# reserved block that holds the broadcast 255.255.255.255.
 REFUSAL_TARGETS = tuple(
-    ipaddress.ip_network(n)
-    for n in ("0.0.0.0/32", "127.0.0.0/8", "224.0.0.0/4", "255.255.255.255/32")
+    ipaddress.ip_network(n) for n in ("0.0.0.0/8", "127.0.0.0/8", "224.0.0.0/4", "240.0.0.0/4")
 )
 LAB_FOLDER = REPO_ROOT / "lab"
 PLACEHOLDER = "CHANGE_ME"
@@ -90,6 +91,10 @@ def test_the_lab_holds_only_documentation_addresses() -> None:
     ]
 
     assert broken == []
+
+
+def test_the_refusal_targets_are_exactly_what_the_scope_never_touches() -> None:
+    assert REFUSAL_TARGETS == NEVER_TARGETS
 
 
 def test_the_address_scan_catches_real_looking_addresses() -> None:

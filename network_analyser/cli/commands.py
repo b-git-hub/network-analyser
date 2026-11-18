@@ -4,6 +4,7 @@ import argparse
 import sys
 from collections.abc import Callable
 
+from network_analyser.cli import cmd_run
 from network_analyser.cli.exit_codes import ExitCode
 from network_analyser.cli.parser import PROG
 
@@ -16,7 +17,7 @@ def _not_built_yet(args: argparse.Namespace) -> ExitCode:
 
 
 COMMANDS: dict[str, Command] = {
-    "run": _not_built_yet,
+    "run": cmd_run.run,
     "render": _not_built_yet,
     "show-backup": _not_built_yet,
     "trust-key": _not_built_yet,
