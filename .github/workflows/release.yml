@@ -1,0 +1,154 @@
+# The release build (ticket #47, decision #32). Not CI: it runs only when a v0.y.z tag is
+# pushed, which a Claude session does only when the operator says "release <commit> as v0.y.z"
+# (docs/releasing.md). It runs the same gates as build.ps1 by running build.ps1 itself, then
+# publishes the zip and SHA256SUMS.txt as the Latest GitHub Release.
+#
+# Hardening: every action is pinned to a full commit SHA (the tag is in the comment), the
+# token is read-only except in the publish job, credentials are not left in the checkout,
+# no cache is used, and no ${{ }} expression is expanded inside a script.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v0.[0-9]+.[0-9]+"
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  build:
+    name: Build with build.ps1
+    runs-on: windows-2025
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      commit: ${{ steps.on-main.outputs.commit }}
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: "Gate: the commit is on main"
+        id: on-main
+        run: |
+          $commit = git rev-parse HEAD
+          git merge-base --is-ancestor HEAD refs/remotes/origin/main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Tag $env:TAG points at $commit, which is not on main. Only a commit on main is released (docs/releasing.md)."
+          }
+          Write-Host "Tag $env:TAG points at $commit, which is on main."
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "commit=$commit" -Encoding utf8
+
+      - name: Set up the pinned python.org CPython
+        id: python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+          architecture: x64
+          check-latest: false
+          update-environment: false
+
+      - name: "Gate: the tag matches pyproject.toml and has a CHANGELOG.md entry"
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
+        run: |
+          & $env:PYTHON -E -m scripts.release_gate check --tag $env:TAG
+          if ($LASTEXITCODE -ne 0) { throw 'The release gate refused the tag.' }
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.9"
+          checksum: edd61f7f5728a56cc62455386661860bdfc7bab65872f39b0c25bdcc1d8e1beb
+          enable-cache: false
+
+      - name: Build with build.ps1 under Windows PowerShell 5.1
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Python $env:PYTHON
+          if ($LASTEXITCODE -ne 0) { throw 'build.ps1 failed.' }
+
+      - name: Write the release notes
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
+        run: |
+          $runUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          & $env:PYTHON -E -m scripts.release_gate notes --tag $env:TAG --dist-dir dist --run-url $runUrl --out dist/release-notes.md
+          if ($LASTEXITCODE -ne 0) { throw 'Writing the release notes failed.' }
+
+      - name: Hand the zip to the publish job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: |
+            dist/network-analyser-*-win-x64.zip
+            dist/SHA256SUMS.txt
+            dist/release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  publish:
+    name: Publish the Latest Release
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      COMMIT: ${{ needs.build.outputs.commit }}
+    steps:
+      - name: Fetch the zip from the build job
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: release
+
+      - name: Check the zip against SHA256SUMS.txt and print its SHA-256
+        run: |
+          $version = $env:TAG.Substring(1)
+          $zip = Get-Item -LiteralPath "release\network-analyser-$version-win-x64.zip"
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip.FullName).Hash.ToLowerInvariant()
+          $sums = @(Get-Content -LiteralPath 'release\SHA256SUMS.txt')
+          if (-not ($sums -contains "$hash  $($zip.Name)")) {
+            throw "The zip's SHA-256 $hash is not the one in SHA256SUMS.txt."
+          }
+          $megabytes = '{0:N1}' -f ($zip.Length / 1MB)
+          $summary = @(
+            "## Network Analyser $version",
+            '',
+            "- Tag: ``$env:TAG``, commit ``$env:COMMIT``",
+            "- Zip: ``$($zip.Name)`` ($megabytes MB)",
+            "- **SHA-256: ``$hash``**",
+            '',
+            'Check a download in PowerShell before unzipping it; the hash must match the one above:',
+            '',
+            '```powershell',
+            "(Get-FileHash -Algorithm SHA256 .\$($zip.Name)).Hash.ToLowerInvariant()",
+            '```'
+          )
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary -Encoding utf8
+          Write-Host "Zip SHA-256: $hash"
+
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:TAG.Substring(1)
+          gh release create $env:TAG "release\network-analyser-$version-win-x64.zip" 'release\SHA256SUMS.txt' --repo $env:GITHUB_REPOSITORY --verify-tag --latest --title "Network Analyser $version" --notes-file 'release\release-notes.md'
+          if ($LASTEXITCODE -ne 0) { throw 'gh release create failed.' }
