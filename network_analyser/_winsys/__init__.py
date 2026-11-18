@@ -15,6 +15,7 @@ from network_analyser._winsys.folders import (
     current_user_sid,
     drive_kind,
     modify_grants,
+    read_grants,
     sync_roots,
 )
 from network_analyser._winsys.lock import lock_exclusively, unlock
@@ -41,6 +42,7 @@ __all__ = [
     "modify_grants",
     "open_console",
     "os_path",
+    "read_grants",
     "read_machine_key",
     "suppress_error_reporting",
     "sync_roots",

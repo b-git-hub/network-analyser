@@ -4,7 +4,8 @@
     -> Credential Sets -> Ready to start -> Run folder created and registered -> crawl
 
 Before any prompt it takes the single-instance lock, checks a Run folder can be made where
-it will go (#42) and refuses while a `change-passphrase` is unfinished (story 112); the lock
+it will go (#42) and refuses while a `change-passphrase` is unfinished (story 112) or while
+anyone but the operator can read or change the Trust Store folder (#69); the lock
 is held until `run` ends. Every refusal before the confirm exits 2, and Ctrl+C, input that
 ends, or `n` at the confirm exits 3, with nothing contacted (stories 15, 29).
 
@@ -33,6 +34,7 @@ from network_analyser.cli.run_folder import (
     refuse,
 )
 from network_analyser.cli.text import escape_controls
+from network_analyser.cli.trust_folder import check_trust_folder
 from network_analyser.credentials import CredentialSets
 from network_analyser.records import RunRequest, Source, Sourced
 
@@ -53,6 +55,7 @@ def run(args: argparse.Namespace) -> ExitCode:
         data = find_data_folder()
         with hold_instance_lock(data):
             check = check_where_run_folder_goes(data, args.runs_dir)
+            check_trust_folder(data)  # #69: only the operator may reach the Trust Store
             _refuse_while_a_change_is_pending(data)
             return _after_folder_checks(args, data, check)
     except RefusedError as error:
