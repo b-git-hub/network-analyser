@@ -49,7 +49,7 @@ def test_the_lock_is_let_go_when_the_command_ends(command: str) -> None:
 def test_a_run_first_makes_the_default_runs_folder_and_leaves_it_empty(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    code = main(["run"])
+    code = main(["run", "--scope", "192.0.2.0/24", "--seed", "192.0.2.1"])
 
     assert NOT_BUILT in capsys.readouterr().err  # the later steps come in other tickets
     assert code == ExitCode.INTERNAL_ERROR
@@ -70,13 +70,13 @@ def test_a_place_that_cannot_hold_a_run_folder_is_refused_before_any_prompt(
     not_a_folder = tmp_path / "file.txt"
     not_a_folder.write_text("", encoding="utf-8")
 
-    code = main(["run", "--runs-dir", str(not_a_folder / "runs")])
+    code = main(["run", "--runs-dir", str(not_a_folder / "runs")])  # Scope would be asked
 
-    err = capsys.readouterr().err
+    captured = capsys.readouterr()
     assert code == ExitCode.REFUSED
-    assert "cannot be created and written" in err
-    assert str(not_a_folder / "runs") in err
-    assert NOT_BUILT not in err
+    assert "cannot be created and written" in captured.err
+    assert str(not_a_folder / "runs") in captured.err
+    assert "Scope" not in captured.out + captured.err  # refused before the first prompt
 
 
 def test_permissions_the_tool_cannot_read_are_warned_about(

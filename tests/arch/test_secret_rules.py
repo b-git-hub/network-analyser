@@ -91,7 +91,8 @@ def _is_allowed_name(node: ast.expr | None) -> bool:
 # `e` may only be re-raised, chained, type-checked, passed to one of these functions, or have
 # one of these numeric attributes read.
 EXCEPTION_SAFE_CALLS = frozenset({"type", "isinstance", "describe_internal_error", "fixed_message"})
-EXCEPTION_SAFE_ATTRIBUTES = frozenset({"code", "errno", "winerror"})
+# `lineno` and `colno` are where a TOML run file failed to parse (#41): numbers only.
+EXCEPTION_SAFE_ATTRIBUTES = frozenset({"code", "errno", "winerror", "lineno", "colno"})
 
 
 def exception_text_used(relative: str, tree: ast.Module) -> list[str]:
