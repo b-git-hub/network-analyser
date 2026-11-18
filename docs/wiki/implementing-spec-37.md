@@ -6,6 +6,7 @@ How [spec #37](https://github.com/b-git-hub/network-analyser/issues/37) (Network
 - Follows the mattpocock `implement-spec` procedure: the 29 tickets #38–#66 form a task graph (GitHub "blocked by" edges); the coordinator keeps a frontier of ready tickets and runs one fresh implementer subagent per ticket in its own git worktree, building with `tdd`.
 - A merger subagent merges each finished ticket branch into the integration branch, one at a time, and pushes.
 - Every implementer follows [implementer-brief](implementer-brief.md).
+- (Added 2026-11-18 after the #38 retro, which found about 45 of its 149 calls wasted.) Dispatch a ticket only after the wiki pages its brief names are committed on the integration tip. Implementer prompts add nothing that a closed decision ticket already settles; the #38 prompt asked for CI and a src layout that #28/#32 had ruled out.
 - About one in five implementer sessions gets a retro; findings go into this wiki and into repo guardrails.
 
 ## Task graph (from ticket bodies, 2026-11-18)
@@ -20,3 +21,5 @@ How [spec #37](https://github.com/b-git-hub/network-analyser/issues/37) (Network
 - 2026-11-18: operator went AFK asking for a CML-testable build; started #38 before exploration notes landed so the frontier keeps moving.
 - 2026-11-18: merged #39 at `2c4c9e3`; lab file and checklist only, no conflicts; yamllint not installed, so the YAML was only checked to parse (all secrets in it are CHANGE_ME placeholders).
 - 2026-11-18: merged #38 at `fc2a616`; no conflicts; first merge with tests and linters: `uv run --locked python scripts/check.py` (ruff format, ruff lint, mypy strict for Linux and win32, pytest) all green, 128 tests passed.
+- 2026-11-18: 12:40–15:30 UTC the 5-hour usage limit stopped implementers #41–#44 mid-ticket; resumed at 15:37 with SendMessage. See [usage-limits](usage-limits.md).
+- 2026-11-18: merged #43 at `9b7dcc5`; no conflicts, check.py all green, 160 tests passed.

@@ -38,7 +38,7 @@ One package, `network_analyser/`, with the eleven modules from the spec plus two
 
 - `netmiko`, `paramiko`, `socket`: only `device_gateway` [security test 3: tests/security/test_3_import_rule.py].
 - `pyrage`: only `backup_store`. `textfsm`, `ntc_templates`: only `platforms`.
-- `ctypes`, `msvcrt`, `winreg`: only `_winsys`. Every Windows-only call sits in `_winsys` behind a function that also runs (or says it can't) on Linux, so tests can inject a fake.
+- `ctypes`, `msvcrt`, `winreg`: only `_winsys`. Every Windows-only call sits in `_winsys` behind a function that also runs (or says it can't) on Linux, so tests can inject a fake. Branch on the platform at module level (`if sys.platform == "win32": def f(): ... else: def f(): ...`), as `_winsys/elevation.py` does; a `sys.platform` check inside a function body trips mypy's `warn_unreachable` under `--platform win32`.
 - `tomllib`: only `cli`. `logging`: only `cli/library_loggers.py`, which keeps the netmiko and paramiko loggers silent. Our own code never uses `logging`.
 - Never: `getpass`, `pickle`, `shelve`, `marshal`, `subprocess`, `http`, `urllib`, `requests`, `ftplib`, `telnetlib`, `faulthandler.enable`, `paramiko.AutoAddPolicy`/`WarningPolicy` [ruff TID251 and the arch test].
 
@@ -55,7 +55,7 @@ Changing the import table or an owner is a design decision: say why in the commi
 
 - Every Credential Set password and the Backup Passphrase is a `credentials.Secret` from the moment it is typed. Its `str`, `repr` and format show `held in memory`; it cannot be pickled, copied, hashed, compared with `==` (use `same_as`), truth-tested (use `is_empty`) or measured [tests/unit/test_secret.py].
 - **Who may hold the value** (decided 2026-11-18): Credential Set passwords only in `credentials` and `device_gateway`; the Backup Passphrase only in `backup_store`. `.reveal()` may be called only in those three modules, at the last moment, and its result is never stored [tests/arch/test_secret_rules.py]. The `cli` masked reader returns a `Secret` and never keeps the plain value.
-- Secrets never come from options, environment variables or files. Only `_winsys` reads the environment, and only `LOCALAPPDATA`, `USERDOMAIN` and `COMPUTERNAME` by literal name [arch test, ruff TID251]. No option name may suggest a secret [tests/unit/test_cli.py].
+- Secrets never come from options, environment variables or files. Only `_winsys` reads the environment, and only `LOCALAPPDATA`, `USERDOMAIN` and `COMPUTERNAME` by literal name [arch test, ruff TID251]. The one file that reads them gets `"network_analyser/_winsys/<file>.py" = ["TID251"]` in `[tool.ruff.lint.per-file-ignores]`; no other file may. No option name may suggest a secret [tests/unit/test_cli.py].
 - Usernames are not secret.
 
 ## 5. Output

@@ -11,3 +11,5 @@ Caveats:
 - A fresh container loses the shim. A future session should save the same setup as the environment's setup script rather than re-deriving it.
 
 Found by ticket #38's implementer, see [agent-worktree-friction](agent-worktree-friction.md).
+
+- 2026-11-18: `gh api` returned 403 for any repo other than b-git-hub/network-analyser (public action repos included); `git ls-remote` and anonymous shallow clones worked.

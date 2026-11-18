@@ -180,8 +180,11 @@ From [Python network automation libraries and packaging as a Windows exe](https:
 | G2 | Cold start to the first prompt, with Defender on, on a PC at the smallest supported spec (Windows 11 64-bit, 8 GiB, 4 cores). Target under 5 s; a miss is a warning. | | |
 | G3 | Long paths: a Run folder path over 260 characters (a deep `--runs-dir`) works through `\\?\` paths, without relying on the Windows `LongPathsEnabled` setting. | | |
 | G4 | Does the unsigned build run at all? Record whether Smart App Control is on (Windows Security → App & browser control) and whether any IT policy blocks the exe, a `.pyd` or a DLL. A block is the trigger to bring signing forward. | | |
-| G5 | Masked prompt, paste: a password pasted from your password manager arrives whole, with one `*` per character. | | |
-| G6 | Masked prompt, keys: Ctrl+C at any secret prompt cancels cleanly, with no traceback, nothing saved and exit code 3. Backspace removes a character; arrow and function keys put nothing into the password. | | |
+| G5 | Masked prompt, paste: a password pasted from your password manager arrives whole, with one `*` per character. Try Ctrl+V and right-click paste, in both Windows Terminal and the classic console host (`conhost.exe`). | | |
+| G6 | Masked prompt, keys: Ctrl+C at any secret prompt cancels cleanly, with no traceback, nothing saved and exit code 3. Backspace removes a character; arrow and function keys (try Left, Up, Home, Delete, F1 and F11) put nothing into the password. Also type a test password containing `à`: the reader is expected to drop it and the key after it, because `msvcrt.getwch()` sends `à` as the same code that starts an arrow key. Record what happens. | | |
+| G7 | Masked prompt, redirected input: with input piped in (for example `"answer" \| network-analyser ...`), the prompt says input is not a console and reads one line; nothing typed or piped is printed. | | |
+| G8 | Crash-dump guard, clean PC: with no `LocalDumps` key and no AeDebug `Debugger` value (check with `reg query "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps"` and `reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AeDebug"`), no warning is shown before the first secret prompt. Record whether AeDebug holds a `Debugger` value on a clean PC. | | |
+| G9 | Crash-dump guard, dumps on: on a test PC where you (not the tool) have created the `LocalDumps` key, the warning names LocalDumps; `YES` carries on, and anything else stops with exit code 2 before any secret prompt. Check with Process Monitor or `reg query` that the tool wrote nothing to the registry. Remove the key afterwards. | | |
 
 ## Walkthrough of the tool
 
