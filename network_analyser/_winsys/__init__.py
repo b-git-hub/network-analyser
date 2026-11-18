@@ -19,7 +19,13 @@ from network_analyser._winsys.folders import (
     sync_roots,
 )
 from network_analyser._winsys.lock import lock_exclusively, unlock
-from network_analyser._winsys.paths import extended_length, local_app_data, os_path
+from network_analyser._winsys.paths import (
+    extended_length,
+    local_app_data,
+    os_path,
+    pc_name,
+    windows_account,
+)
 from network_analyser._winsys.wer import (
     RegistryUnreadableError,
     RegistryView,
@@ -42,9 +48,11 @@ __all__ = [
     "modify_grants",
     "open_console",
     "os_path",
+    "pc_name",
     "read_grants",
     "read_machine_key",
     "suppress_error_reporting",
     "sync_roots",
     "unlock",
+    "windows_account",
 ]

@@ -19,7 +19,13 @@ from network_analyser.cli.parser import PROG
 from network_analyser.cli.prompts import Prompter
 from network_analyser.cli.run_folder import console_text, fixed_message
 from network_analyser.cli.text import escape_controls
-from network_analyser.credentials import MAX_SETS, CredentialSet, CredentialSets, Secret
+from network_analyser.credentials import (
+    MAX_SETS,
+    CredentialSet,
+    CredentialSets,
+    Secret,
+    SecretScan,
+)
 from network_analyser.records import Platform
 
 TRIES = 3
@@ -89,8 +95,13 @@ def _unlock(check_file: Path, ask: Prompter) -> BackupPassphrase | ExitCode:
 # -- Credential Sets ---------------------------------------------------------------------
 
 
-def credential_sets(ask: Prompter, passphrase: BackupPassphrase) -> CredentialSets | ExitCode:
-    """Ask for one to five Credential Sets, one at a time (stories 23-24, 27)."""
+def credential_sets(
+    ask: Prompter, passphrase: BackupPassphrase, scan: SecretScan
+) -> CredentialSets | ExitCode:
+    """Ask for one to five Credential Sets, one at a time (stories 23-24, 27).
+
+    Each password joins the secret scan the moment it is typed, before anything else is shown.
+    """
     ask.say(f"Credential Sets: up to {MAX_SETS}, tried in the order you give them.")
     sets: list[CredentialSet] = []
     while True:
@@ -98,6 +109,7 @@ def credential_sets(ask: Prompter, passphrase: BackupPassphrase) -> CredentialSe
         username = _username(ask, number)
         shown = escape_controls(username, limit=_USERNAME_SHOWN_AT_MOST)
         password = _password(ask, shown)
+        scan.watch(password)
         if passphrase.same_as(password):
             _stop(
                 f"Refused: the password for {shown} is the same as the Backup Passphrase. "

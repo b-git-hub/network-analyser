@@ -9,6 +9,11 @@ anyone but the operator can read or change the Trust Store folder (#69); the loc
 is held until `run` ends. Every refusal before the confirm exits 2, and Ctrl+C, input that
 ends, or `n` at the confirm exits 3, with nothing contacted (stories 15, 29).
 
+From the first prompt on, everything printed passes through the Run's secret scan (#48):
+each secret joins the scan the moment it is typed, and a match shows as `[blocked]`, with one
+warning at the end. Once the Run folder is created and registered, `audit.log` records the
+Run's start and end (`cli.run_trail`).
+
 Until the device tickets land, the Run ends cleanly once its folder is created and
 registered: no packet is ever sent.
 """
@@ -18,7 +23,8 @@ import sys
 from datetime import UTC, datetime
 
 from network_analyser import backup_store, run_output
-from network_analyser.cli import ready, run_file, run_secrets, run_start
+from network_analyser.cli import ready, run_file, run_secrets, run_start, run_trail
+from network_analyser.cli.console import scanned_console
 from network_analyser.cli.crash_dump_guard import guard_crash_dumps
 from network_analyser.cli.exit_codes import ExitCode
 from network_analyser.cli.parser import PROG
@@ -35,7 +41,7 @@ from network_analyser.cli.run_folder import (
 )
 from network_analyser.cli.text import escape_controls
 from network_analyser.cli.trust_folder import check_trust_folder
-from network_analyser.credentials import CredentialSets
+from network_analyser.credentials import CredentialSets, SecretScan
 from network_analyser.records import RunRequest, Source, Sourced
 
 _CHANGE_PENDING = (
@@ -47,20 +53,30 @@ _LABEL_IS_A_SECRET = (
     "label goes\ninto the Run folder name and the Run register, so it must never be a "
     f"secret. {run_secrets.NOTHING_CONTACTED}"
 )
+_FOLDER_HOLDS_A_SECRET = (
+    "Refused: the Run folder's path would hold text that is a password or the Backup "
+    "Passphrase you typed.\nThe path goes into the Run register and audit.log, so it must "
+    "never hold a secret. Choose another\n--runs-dir or --label; if a Credential Set "
+    f"password is common text, change it. {run_secrets.NOTHING_CONTACTED}"
+)
 
 
 def run(args: argparse.Namespace) -> ExitCode:
     """Start a Run from flags, a run file and prompts; return its exit code."""
-    try:
-        data = find_data_folder()
-        with hold_instance_lock(data):
-            check = check_where_run_folder_goes(data, args.runs_dir)
-            check_trust_folder(data)  # #69: only the operator may reach the Trust Store
-            _refuse_while_a_change_is_pending(data)
-            return _after_folder_checks(args, data, check)
-    except RefusedError as error:
-        refuse(args.command, fixed_message(error))
-        return ExitCode.REFUSED
+    scan = SecretScan()  # empty until the first secret is typed
+    with scanned_console(scan):
+        try:
+            data = find_data_folder()
+            with hold_instance_lock(data):
+                check = check_where_run_folder_goes(data, args.runs_dir)
+                check_trust_folder(data)  # #69: only the operator may reach the Trust Store
+                _refuse_while_a_change_is_pending(data)
+                return _after_folder_checks(args, data, check, scan)
+        except RefusedError as error:
+            refuse(args.command, fixed_message(error))
+            return ExitCode.REFUSED
+        finally:
+            run_trail.warn_of_scan_hits(scan)
 
 
 def _refuse_while_a_change_is_pending(data: run_output.DataFolder) -> None:
@@ -69,7 +85,10 @@ def _refuse_while_a_change_is_pending(data: run_output.DataFolder) -> None:
 
 
 def _after_folder_checks(
-    args: argparse.Namespace, data: run_output.DataFolder, check: run_output.RunsParentCheck
+    args: argparse.Namespace,
+    data: run_output.DataFolder,
+    check: run_output.RunsParentCheck,
+    scan: SecretScan,
 ) -> ExitCode:
     loaded = _load_run_file(args.run_file)
     if isinstance(loaded, ExitCode):
@@ -78,37 +97,48 @@ def _after_folder_checks(
     request = run_start.scope_and_seeds(args, loaded, ask)
     if isinstance(request, ExitCode):
         return request
-    sets = _secrets(request, data, ask)
+    sets = _secrets(request, data, ask, scan)
     if isinstance(sets, ExitCode):
         return sets
     started = datetime.now(UTC)
+    planned = check.parent / run_output.run_folder_name(started, request.label.value)
+    if scan.holds_secret(str(planned)):
+        print(_FOLDER_HOLDS_A_SECRET, file=sys.stderr)
+        return ExitCode.REFUSED
     source = Source.COMMAND_LINE if args.runs_dir is not None else Source.DEFAULT
     print(ready.ready_block(request, sets.views(), Sourced(check.parent, source), started))
     if not ready.confirm_start(ask):
         print("Run cancelled. Nothing was contacted.", file=sys.stderr)
         return ExitCode.STOPPED
-    folder = create_and_register(data, check, started, request.label.value)
+    folder = create_and_register(data, check, started, request.label.value, scan)
     print(f"Run folder created: {console_text(str(folder.path))}")
-    # Next, from the device tickets (#49 on): the crawl, with the Backup Passphrase going to
-    # backup_store's locking worker, and `check.notices` and the Credential Sets' views to
-    # the Run report (#66).
+    return run_trail.run_with_audit_trail(request, sets, folder, scan, _crawl)
+
+
+def _crawl(_audit: run_output.AuditLog) -> None:
+    # Next, from the device tickets (#49 on): the crawl, emitting its events to `_audit`,
+    # with the Backup Passphrase going to backup_store's locking worker, and `check.notices`
+    # and the Credential Sets' views to the Run report (#66).
     print(
         f"{PROG} run: the crawl is not built yet, so the Run ends here. No device was contacted.",
         file=sys.stderr,
     )
-    return ExitCode.CLEAN
 
 
 def _secrets(
-    request: RunRequest, data: run_output.DataFolder, ask: Prompter
+    request: RunRequest, data: run_output.DataFolder, ask: Prompter, scan: SecretScan
 ) -> CredentialSets | ExitCode:
-    """The crash-dump check, the Backup Passphrase, then the Credential Sets (ADR 0004)."""
+    """The crash-dump check, the Backup Passphrase, then the Credential Sets (ADR 0004).
+
+    Each secret joins the scan as soon as it is accepted or typed.
+    """
     if not guard_crash_dumps(ask):
         return ExitCode.REFUSED
     passphrase = run_secrets.backup_passphrase(data.check_file, ask)
     if isinstance(passphrase, ExitCode):
         return passphrase
-    sets = run_secrets.credential_sets(ask, passphrase)
+    passphrase.add_to_scan(scan)
+    sets = run_secrets.credential_sets(ask, passphrase, scan)
     if isinstance(sets, ExitCode):
         return sets
     if run_secrets.label_is_a_secret(request.label.value, passphrase, sets):

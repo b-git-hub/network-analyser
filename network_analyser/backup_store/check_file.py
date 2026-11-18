@@ -20,7 +20,7 @@ from typing import Final, NoReturn, final, override
 
 import pyrage
 
-from network_analyser.credentials import Secret
+from network_analyser.credentials import Secret, SecretScan
 from network_analyser.credentials.secret import HELD_IN_MEMORY
 
 PASSPHRASE_MIN: Final = 15
@@ -81,6 +81,14 @@ class BackupPassphrase:
     def same_as(self, secret: Secret) -> bool:
         """Say, in constant time, whether `secret` is the Backup Passphrase (story 27)."""
         return self.__secret.same_as(secret)
+
+    def add_to_scan(self, scan: SecretScan) -> None:
+        """Have the secret scan look for the passphrase in everything written (#30, #48).
+
+        The passphrase goes straight from here to `credentials`, never through a record or
+        the cli, so it stays held only by `backup_store` and the scan.
+        """
+        scan.watch(self.__secret)
 
     @override
     def __init_subclass__(cls) -> NoReturn:

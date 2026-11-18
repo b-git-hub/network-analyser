@@ -6,6 +6,14 @@ append-only Audit log, whose writer passes every line through the secret scan. N
 raw device output.
 """
 
+from network_analyser.run_output.audit import (
+    AUDIT_LOG_NAME,
+    AUDIT_SCHEMA,
+    AuditEventRefusedError,
+    AuditLog,
+    AuditLogError,
+    open_audit_log,
+)
 from network_analyser.run_output.data_folder import DataFolder, locate_data_folder
 from network_analyser.run_output.folder import (
     LABEL_MAX,
@@ -22,7 +30,12 @@ from network_analyser.run_output.lock import InstanceLock, take_instance_lock
 from network_analyser.run_output.trust_folder import TrustFolderCheck, check_trust_folder
 
 __all__ = [
+    "AUDIT_LOG_NAME",
+    "AUDIT_SCHEMA",
     "LABEL_MAX",
+    "AuditEventRefusedError",
+    "AuditLog",
+    "AuditLogError",
     "DataFolder",
     "FolderFacts",
     "InstanceLock",
@@ -35,6 +48,7 @@ __all__ = [
     "create_run_folder",
     "label_problem",
     "locate_data_folder",
+    "open_audit_log",
     "run_folder_name",
     "take_instance_lock",
 ]
