@@ -7,7 +7,8 @@ This file holds the Scope and Seeds step (ticket #41). It comes before every sec
 so a typo in the Scope or a Seed is caught before any secret is typed (story 11). Each
 setting comes from a flag, else the run file, else a prompt or its default (stories 2-4).
 A Scope or Seeds given by flag or run file is refused in full on any bad entry (story 8);
-at the prompt, a bad line is asked again (story 6).
+at the prompt, a bad line is asked again (story 6). Questions go through the cli
+`Prompter` (#43), so input that ends at a prompt cancels the Run with exit 3.
 """
 
 import argparse
@@ -19,6 +20,7 @@ from ipaddress import IPv4Address
 from network_analyser import scope
 from network_analyser.cli.exit_codes import ExitCode
 from network_analyser.cli.parser import FAILURE_BUDGET_DEFAULT, PARALLEL_DEFAULT
+from network_analyser.cli.prompts import Prompter
 from network_analyser.cli.run_file import RunFile
 from network_analyser.cli.text import escape_controls
 from network_analyser.records import RunRequest, ScopeRecord, Source, Sourced
@@ -28,25 +30,16 @@ NOTHING_CONTACTED = "Nothing was contacted."
 _SEED_SEPARATORS = re.compile(r"[,\s]+")
 
 
-class _InputEndedError(Exception):
-    """Standard input ended while the tool was still asking."""
-
-
-def scope_and_seeds(args: argparse.Namespace, run_file: RunFile | None) -> RunRequest | ExitCode:
+def scope_and_seeds(
+    args: argparse.Namespace, run_file: RunFile | None, ask: Prompter
+) -> RunRequest | ExitCode:
     """Gather, check and show the Scope, Seeds and run-file options; refuse with exit 2."""
     from_file = run_file or RunFile(path="")
-    try:
-        fence = _scope(args, from_file)
-        if isinstance(fence, ExitCode):
-            return fence
-        _show_scope(fence.value, args, from_file)
-        seeds = _seeds(args, from_file, fence.value)
-    except _InputEndedError:
-        print(
-            f"Input ended before the Scope and Seeds were complete. {NOTHING_CONTACTED}",
-            file=sys.stderr,
-        )
-        return ExitCode.REFUSED
+    fence = _scope(args, from_file, ask)
+    if isinstance(fence, ExitCode):
+        return fence
+    _show_scope(fence.value, args, from_file)
+    seeds = _seeds(args, from_file, fence.value, ask)
     if isinstance(seeds, ExitCode):
         return seeds
     print(f"Seeds ({seeds.source.value}): {', '.join(str(s) for s in seeds.value)}")
@@ -68,12 +61,14 @@ def scope_and_seeds(args: argparse.Namespace, run_file: RunFile | None) -> RunRe
 # -- Scope ---------------------------------------------------------------------------------
 
 
-def _scope(args: argparse.Namespace, from_file: RunFile) -> Sourced[ScopeRecord] | ExitCode:
+def _scope(
+    args: argparse.Namespace, from_file: RunFile, ask: Prompter
+) -> Sourced[ScopeRecord] | ExitCode:
     exclusions = _given(args.exclude, from_file.exclude)
     excluded = list(exclusions.value) if exclusions else []
     entries = _given(args.scope, from_file.scope)
     if entries is None:
-        return Sourced(_ask_scope(excluded), Source.PROMPT)
+        return Sourced(_ask_scope(excluded, ask), Source.PROMPT)
     result = scope.parse(entries.value, excluded)
     if isinstance(result, ScopeRefused):
         sources = {entries.source} | ({exclusions.source} if exclusions else set())
@@ -82,8 +77,8 @@ def _scope(args: argparse.Namespace, from_file: RunFile) -> Sourced[ScopeRecord]
     return Sourced(result, entries.source)
 
 
-def _ask_scope(given_exclusions: Sequence[str]) -> ScopeRecord:
-    print(
+def _ask_scope(given_exclusions: Sequence[str], ask: Prompter) -> ScopeRecord:
+    ask.say(
         "No Scope given. Enter the IPv4 ranges this Run may touch, one per line:\n"
         "  CIDR (192.0.2.0/24), range (192.0.2.10-192.0.2.20) or one IP.\n"
         "  Start a line with ! to exclude it (!192.0.2.128/25). Empty line when done."
@@ -91,28 +86,28 @@ def _ask_scope(given_exclusions: Sequence[str]) -> ScopeRecord:
     entries: list[str] = []
     typed_exclusions: list[str] = []
     while True:
-        text = _ask("Scope> ").strip()
+        text = ask.line("Scope> ").strip()
         if text:
             exclusion = text.startswith("!")
             entry = text[1:].strip() if exclusion else text
             refusal = scope.check_entry(entry, exclusion=exclusion)
             if refusal is not None:
-                print(f"  Refused: {_describe(refusal)}. Enter that line again.")
+                ask.say(f"  Refused: {_describe(refusal)}. Enter that line again.")
             else:
                 (typed_exclusions if exclusion else entries).append(entry)
             continue
         if not entries:
-            print("  At least one Scope entry is needed.")
+            ask.say("  At least one Scope entry is needed.")
             continue
         for dropped in scope.unmatched_exclusions(entries, typed_exclusions):
-            print(f"  Dropped !{escape_controls(dropped)}: it matches nothing in the Scope.")
+            ask.say(f"  Dropped !{escape_controls(dropped)}: it matches nothing in the Scope.")
             typed_exclusions.remove(dropped)
         result = scope.parse(entries, [*given_exclusions, *typed_exclusions])
         if isinstance(result, ScopeRecord):
             return result
         for refusal in result.refusals:
-            print(f"  Refused: {_describe(refusal)}.")
-        print("  Add more lines, or press Ctrl+C to cancel.")
+            ask.say(f"  Refused: {_describe(refusal)}.")
+        ask.say("  Add more lines, or press Ctrl+C to cancel.")
 
 
 def _exclusions_source(
@@ -145,11 +140,11 @@ def _show_scope(fence: ScopeRecord, args: argparse.Namespace, from_file: RunFile
 
 
 def _seeds(
-    args: argparse.Namespace, from_file: RunFile, fence: ScopeRecord
+    args: argparse.Namespace, from_file: RunFile, fence: ScopeRecord, ask: Prompter
 ) -> Sourced[tuple[IPv4Address, ...]] | ExitCode:
     given = _given(args.seed, from_file.seeds)
     if given is None:
-        return Sourced(_ask_seeds(fence), Source.PROMPT)
+        return Sourced(_ask_seeds(fence, ask), Source.PROMPT)
     result = scope.check_seeds(given.value, fence)
     if isinstance(result, ScopeRefused):
         _refuse("the Seeds", {given.source}, result, "Fix the Seeds and run again.")
@@ -157,22 +152,22 @@ def _seeds(
     return Sourced(result, given.source)
 
 
-def _ask_seeds(fence: ScopeRecord) -> tuple[IPv4Address, ...]:
-    print(
+def _ask_seeds(fence: ScopeRecord, ask: Prompter) -> tuple[IPv4Address, ...]:
+    ask.say(
         "No Seeds given. Enter one or more device IPs to start the crawl from,\n"
         "separated by spaces or commas. Each must be inside the Scope."
     )
     while True:
-        texts = [t for t in _SEED_SEPARATORS.split(_ask("Seeds> ").strip()) if t]
+        texts = [t for t in _SEED_SEPARATORS.split(ask.line("Seeds> ").strip()) if t]
         if not texts:
-            print("  At least one Seed is needed.")
+            ask.say("  At least one Seed is needed.")
             continue
         result = scope.check_seeds(texts, fence)
         if not isinstance(result, ScopeRefused):
             return result
         for refusal in result.refusals:
-            print(f"  Refused: {_describe(refusal)}.")
-        print("  Enter the Seeds again.")
+            ask.say(f"  Refused: {_describe(refusal)}.")
+        ask.say("  Enter the Seeds again.")
 
 
 # -- Options -------------------------------------------------------------------------------
@@ -204,13 +199,6 @@ def _given[T](flag: T | None, from_file: T | None) -> Sourced[T] | None:
 
 def _option[T](flag: T | None, from_file: T | None, default: T) -> Sourced[T]:
     return _given(flag, from_file) or Sourced(default, Source.DEFAULT)
-
-
-def _ask(prompt: str) -> str:
-    try:
-        return input(prompt)
-    except EOFError:
-        raise _InputEndedError from None
 
 
 def _describe(refusal: Refusal) -> str:

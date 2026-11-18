@@ -10,6 +10,7 @@ import sys
 from network_analyser.cli import run_file, run_start
 from network_analyser.cli.exit_codes import ExitCode
 from network_analyser.cli.parser import PROG
+from network_analyser.cli.prompts import Prompter
 from network_analyser.cli.text import escape_controls
 
 
@@ -18,7 +19,7 @@ def run(args: argparse.Namespace) -> ExitCode:
     loaded = _load_run_file(args.run_file)
     if isinstance(loaded, ExitCode):
         return loaded
-    request = run_start.scope_and_seeds(args, loaded)
+    request = run_start.scope_and_seeds(args, loaded, Prompter.for_this_process())
     if isinstance(request, ExitCode):
         return request
     print(

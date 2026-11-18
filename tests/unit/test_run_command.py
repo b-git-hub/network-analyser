@@ -90,7 +90,7 @@ def test_a_bad_scope_flag_refuses_the_run_in_full_with_exit_2(run: Runner) -> No
     assert "  192.0.2.1/24: host bits are set (did you mean 192.0.2.0/24?)\n" in got.err
     assert "  exclusion 2001:db8::1: IPv6 is not supported in v1\n" in got.err
     assert NOTHING_CONTACTED in got.err
-    assert "Scope>" not in got.out, "a Scope from flags is refused, never asked again"
+    assert "Scope>" not in got.err, "a Scope from flags is refused, never asked again"
 
 
 def test_a_seed_outside_the_scope_refuses_the_run(run: Runner) -> None:
@@ -136,19 +136,19 @@ def test_with_no_flags_the_scope_and_seeds_are_asked_and_bad_lines_asked_again(
 
     assert got.code == ExitCode.INTERNAL_ERROR
     assert "Refused: sw-a: hostnames are refused; give an IPv4 address. Enter that line again." in (
-        got.out
+        got.err
     )
-    assert "Dropped !198.51.100.0/24: it matches nothing in the Scope." in got.out
+    assert "Dropped !198.51.100.0/24: it matches nothing in the Scope." in got.err
     assert "Scope (asked): 128 addresses in 1 range\n  192.0.2.0/24\n" in got.out
     assert "Exclusions (asked):\n  192.0.2.128/25\n" in got.out
-    assert "Refused: Seed 198.51.100.1: this Seed is outside the Scope." in got.out
+    assert "Refused: Seed 198.51.100.1: this Seed is outside the Scope." in got.err
     assert "Seeds (asked): 192.0.2.1, 192.0.2.2\n" in got.out
 
 
 def test_an_empty_scope_is_not_accepted_at_the_prompt(run: Runner) -> None:
     got = run(typed="\n!192.0.2.5\n\n192.0.2.0/24\n\n192.0.2.1\n")
 
-    assert got.out.count("At least one Scope entry is needed.") == 2
+    assert got.err.count("At least one Scope entry is needed.") == 2
     assert "Seeds (asked): 192.0.2.1" in got.out
 
 
@@ -157,23 +157,24 @@ def test_exclusions_that_remove_everything_are_refused_and_the_prompt_goes_on(
 ) -> None:
     got = run(typed="192.0.2.0/25\n!192.0.2.0/25\n\n198.51.100.0/24\n\n198.51.100.1\n")
 
-    assert "Refused: the exclusions remove every address in the Scope." in got.out
+    assert "Refused: the exclusions remove every address in the Scope." in got.err
     assert "Scope (asked): 256 addresses in 2 ranges" in got.out
 
 
 def test_seeds_are_asked_when_only_the_scope_was_given(run: Runner) -> None:
     got = run("--scope", "192.0.2.0/24", typed="\n192.0.2.9\n")
 
-    assert "At least one Seed is needed." in got.out
+    assert "At least one Seed is needed." in got.err
     assert "Scope (command line): 256 addresses" in got.out
     assert "Seeds (asked): 192.0.2.9" in got.out
 
 
-def test_input_ending_before_the_scope_is_complete_refuses_the_run(run: Runner) -> None:
+def test_input_ending_at_a_prompt_cancels_the_run(run: Runner) -> None:
     got = run(typed="192.0.2.0/24\n")
 
-    assert got.code == ExitCode.REFUSED
-    assert "Input ended before the Scope and Seeds were complete." in got.err
+    assert got.code == ExitCode.STOPPED
+    assert "Cancelled." in got.err
+    assert "Scope (" not in got.out
 
 
 # -- the run file (stories 2-3, 12-13) ----------------------------------------------------
