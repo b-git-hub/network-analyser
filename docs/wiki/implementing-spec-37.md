@@ -24,3 +24,4 @@ How [spec #37](https://github.com/b-git-hub/network-analyser/issues/37) (Network
 - 2026-11-18: 12:40–15:30 UTC the 5-hour usage limit stopped implementers #41–#44 mid-ticket; resumed at 15:37 with SendMessage. See [usage-limits](usage-limits.md).
 - 2026-11-18: merged #43 at `9b7dcc5`; no conflicts, check.py all green, 160 tests passed.
 - 2026-11-18: merged #41 at `4bf7aa7`; no conflicts despite #43 landing in cli/ first, check.py all green, 258 tests passed.
+- 2026-11-18: merged #42 at `f5617ad`; no conflicts, check.py all green, 346 tests passed.
