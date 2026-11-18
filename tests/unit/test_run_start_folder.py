@@ -4,6 +4,7 @@ Driven through `main(argv)` as the operator would. conftest.py gives every test 
 `%LOCALAPPDATA%` and working folder.
 """
 
+import io
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,12 +49,13 @@ def test_the_lock_is_let_go_when_the_command_ends(command: str) -> None:
 
 
 def test_a_run_first_makes_the_default_runs_folder_and_leaves_it_empty(
-    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))  # input ends at the first prompt
+
     code = main(["run", "--scope", "192.0.2.0/24", "--seed", "192.0.2.1"])
 
-    assert NOT_BUILT in capsys.readouterr().err  # the later steps come in other tickets
-    assert code == ExitCode.INTERNAL_ERROR
+    assert code == ExitCode.STOPPED
     assert data_folder().runs.is_dir()
     assert list(data_folder().runs.iterdir()) == []
 

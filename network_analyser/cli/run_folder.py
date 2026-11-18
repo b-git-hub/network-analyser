@@ -107,8 +107,12 @@ def refuse(command: str, message: str) -> None:
     print(f"{PROG} {command}: refused: {message}", file=sys.stderr)
 
 
-def fixed_message(error: RefusedError) -> str:
-    """Return the fixed text a `RefusedError` was raised with."""
+def fixed_message(error: RefusedError | backup_store.CheckFileError) -> str:
+    """Return the fixed text one of the tool's own errors was raised with.
+
+    Only errors the tool raises itself, always with fixed text, are accepted: never a
+    library's, whose text could quote device output or a secret (CODING_STANDARDS 6).
+    """
     return str(error.args[0])
 
 

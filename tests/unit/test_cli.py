@@ -1,6 +1,7 @@
 """The command-line surface, driven through `main(argv)` as the operator would."""
 
 import argparse
+import io
 import logging
 import re
 from pathlib import Path
@@ -74,8 +75,9 @@ def test_every_flag_of_the_frozen_surface_parses(
 
 
 def test_every_run_flag_of_the_frozen_surface_parses(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))  # input ends at the first prompt
     run_file = tmp_path / "site-a.toml"
     run_file.write_text('scope = ["203.0.113.0/24"]\n', encoding="utf-8")
 
@@ -125,15 +127,18 @@ def test_every_run_flag_of_the_frozen_surface_parses(
         ]
     )
 
-    assert code == ExitCode.INTERNAL_ERROR
-    assert "not built yet" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert "Scope (command line)" in captured.out  # every flag parsed; the Run went on
+    assert code == ExitCode.STOPPED
+    assert "Cancelled." in captured.err
 
 
 @pytest.mark.parametrize("progress", ["live", "log", "quiet"])
-def test_every_progress_view_parses(progress: str) -> None:
+def test_every_progress_view_parses(progress: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))  # input ends at the first prompt
     argv = ["run", "--scope", "192.0.2.0/24", "--seed", "192.0.2.1", "--progress", progress]
 
-    assert main(argv) == ExitCode.INTERNAL_ERROR
+    assert main(argv) == ExitCode.STOPPED
 
 
 REFUSED = [
