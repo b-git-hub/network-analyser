@@ -30,3 +30,8 @@ Work that a finished ticket surfaced for a later ticket. The coordinator copies 
 - 2026-11-18, from #46: the `trust-key` command should take the single-instance lock, and the CLI must map `FileNotFoundError` and `PreloadIsTrustStoreError` from `trust_store.load` to exit 2. Target: whichever ticket wires `trust-key` (#49 if none other does).
 - 2026-11-18, from #46: no code checks that the Windows `trust\` folder is readable only by the operator (decided on #7). Opened as [#69](https://github.com/b-git-hub/network-analyser/issues/69), sub-issue of #46; built inside spec #37.
 - 2026-11-18, from #46: choices awaiting the operator: OpenSSH-style parsing (hashed names, wildcards, `@revoked` counts as changed), and a key trusted in either the Trust Store or `--known-hosts` counts.
+- 2026-11-18, from #45 (merged at `3586eab`): the secret scan learns the Backup Passphrase through a method on `BackupPassphrase` (in `backup_store`) that adds its `Secret` to the scan object in `credentials`, so the value never passes through records or the cli. #45 wired the passphrase into nothing yet. Target: #48.
+- 2026-11-18, from #45: how `device_gateway` gets a Credential Set's password is open (it is private to `credentials` for now); choose a narrow handover that keeps it inside `credentials` + `device_gateway`. Targets: #49, #54.
+- 2026-11-18, from #45: the passphrase must reach the locking worker. Target: #51.
+- 2026-11-18, from #45: fold `check.notices` and `sets.views()` into the Run report. Target: #66.
+- 2026-11-18, from #45: choices awaiting the operator: the first Run's passphrase entry also gets 3 tries; a non-y/n answer is asked again; "label matches a secret" means equal, not contains; usernames are stripped and escaped, not refused.
