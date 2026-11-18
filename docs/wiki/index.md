@@ -6,6 +6,7 @@ A dated, historical record kept by the coordinating (chief-of-staff) session and
 - [conventions](conventions.md): how this wiki is written and kept.
 - [implementing-spec-37](implementing-spec-37.md): how spec #37 is being built (branches, subagents, merge order), with a dated log.
 - [implementer-brief](implementer-brief.md): the standing brief every ticket implementer follows.
+- [spec-37-follow-ups](spec-37-follow-ups.md): work one ticket surfaced for a later one.
 - [merger-brief](merger-brief.md): how a finished ticket branch is merged into the integration branch.
 - [agent-worktree-friction](agent-worktree-friction.md): known quirks of agent worktrees and how briefs work around them.
 
