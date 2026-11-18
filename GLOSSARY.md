@@ -33,7 +33,7 @@ The operating system family of a device, which decides the commands it is sent: 
 _Avoid_: Vendor, model, device type
 
 **Run**:
-One execution of the tool against one Scope, from first sweep to final outputs.
+One execution of the tool against one Scope, from its first login to its final outputs.
 _Avoid_: Job, scan, session
 
 ## Access
