@@ -14,6 +14,7 @@ You implement ONE ticket of spec https://github.com/b-git-hub/network-analyser/i
 - Work on a local branch named `ticket/<number>-<slug>`. Do NOT push anything. Do NOT open PRs, close or comment on issues.
 - Build with the Skill tool `tdd` (red-green-refactor) for any code. Docs-only tickets skip tdd.
 - Tests must use synthetic, sanitised fixtures only: no real hostnames, IPs (use RFC 5737 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24 and RFC 3849 docs ranges), configs or secrets.
+- Run git commands one per Bash call; chained `git ... && ...` commands may be refused in worktrees.
 - Before reporting done: commit, then `git merge claude/lucid-shannon-8xewst` (the tip may have moved), resolve conflicts, re-run the full test suite and linters, commit.
 - Commit messages end with:
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
