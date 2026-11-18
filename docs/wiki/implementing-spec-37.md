@@ -16,3 +16,4 @@ How [spec #37](https://github.com/b-git-hub/network-analyser/issues/37) (Network
 
 ## Log
 - 2026-11-18: started #39 and #40 (no code dependencies); exploration agent writing module map, ticket collision map, environment limits and guardrail recommendations for #38.
+- 2026-11-18: merged #40 at `4bad923`; docs-only (GLOSSARY.md, ADR 0003), no conflicts, no tests or linters defined yet.
