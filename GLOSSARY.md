@@ -5,23 +5,27 @@ An operator-run tool that discovers the network devices inside a set of IP range
 ## Discovery
 
 **Scope**:
-The set of IP ranges the operator gives for a Run. It is both where Seeds are searched for and an allow-list: no device outside the Scope is ever logged into.
+The set of IP ranges the operator gives for a Run. It is an allow-list: no device outside the Scope is ever logged into. It is also where an optional Sweep looks for Seeds.
 _Avoid_: Range list, targets, subnet list
 
 **Seed**:
-A device inside the Scope that is logged into without first being learned from a Neighbour.
+A device inside the Scope that is logged into without first being learned from a Neighbour. Seeds are given by the operator, or found by a Sweep.
 _Avoid_: First target, starting device, root
+
+**Sweep**:
+An optional probe of every address in the Scope for devices that answer SSH, run to find Seeds the operator did not give.
+_Avoid_: Scan, discovery, ping sweep
 
 **Neighbour**:
 A device advertised to a visited device through CDP or LLDP.
 _Avoid_: Peer, adjacent device
 
 **Visited Device**:
-A device the tool has logged into during a Run.
+A device the tool logged into during a Run and identified as a supported Platform. Its examination may still be partial.
 _Avoid_: Managed device, polled device
 
 **Unvisited Device**:
-A device known to exist (from a Neighbour advertisement, MAC table or ARP table) that was not logged into, or not fully examined, because it is outside the Scope, unsupported, unreachable, or refused by the connection safety policy.
+A device known to exist (from a Neighbour advertisement, MAC table or ARP table) that is not a Visited Device. Either it was not logged into, because it is outside the Scope, advertised as an unsupported Platform, unreachable, or refused by the connection safety policy; or it was logged into but found to be an unsupported Platform, and left at once.
 _Avoid_: Unmanaged device, ghost
 
 **Platform**:
