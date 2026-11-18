@@ -10,12 +10,13 @@ You implement ONE ticket of spec https://github.com/b-git-hub/network-analyser/i
 4. CODING_STANDARDS.md in the repo, once it exists. It wins over your habits.
 
 ## Branch rules
-- Integration branch: `claude/lucid-shannon-8xewst`. Your worktree must start from its tip: `git fetch` is not needed (it is local); check `git merge-base --is-ancestor claude/lucid-shannon-8xewst HEAD`, and if false, `git reset --hard claude/lucid-shannon-8xewst`.
+- Integration branch: `claude/lucid-shannon-8xewst`. Your worktree is fresh and usually starts behind its tip, so make your first Bash call, alone: `git reset --hard claude/lucid-shannon-8xewst`. (Added 2026-11-18 after the #38 retro.)
 - Work on a local branch named `ticket/<number>-<slug>`. Do NOT push anything. Do NOT open PRs, close or comment on issues.
 - Build with the Skill tool `tdd` (red-green-refactor) for any code. Docs-only tickets skip tdd.
 - Tests must use synthetic, sanitised fixtures only: no real hostnames, IPs (use RFC 5737 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24 and RFC 3849 docs ranges), configs or secrets.
 - Run git commands one per Bash call; chained `git ... && ...` commands may be refused in worktrees.
-- Checks: from your worktree root run `uv sync --locked --no-build`, then `uv run --locked python scripts/check.py` (all must pass). `uv` on PATH is a shim, see [cloud-container-checks](cloud-container-checks.md). For multi-step shell work, write a helper script to the scratchpad rather than one long Bash command.
+- Checks: from your worktree root run `uv sync --locked --no-build`, then `uv run --locked python scripts/check.py` (all must pass). `uv` on PATH is a shim, see [cloud-container-checks](cloud-container-checks.md). Create or overwrite files with the Write tool, never with heredocs in Bash; use Bash only to run things.
+- In a Bash call whose text mentions git anywhere (a `git` command, `.gitignore`, `github.com`), use no `$` expansion (`$?`, `$VAR`, `$(...)`, loop variables): the worktree guard refuses it. Run git alone and read the exit code from the result. (Root cause found by the #38 retro, 2026-11-18.)
 - Read [spec-37-follow-ups](spec-37-follow-ups.md) for items targeted at your ticket.
 - Before reporting done: commit, then `git merge claude/lucid-shannon-8xewst` (the tip may have moved), resolve conflicts, re-run the full test suite and linters, commit.
 - Commit messages end with:
@@ -24,7 +25,7 @@ You implement ONE ticket of spec https://github.com/b-git-hub/network-analyser/i
   Reference the ticket ("Part of #NN"); do not write "Closes".
 
 ## If something is wrong
-- If the ticket, spec and notes disagree, the ticket wins; if the ticket itself conflicts with CLAUDE.md security rules, stop and report rather than guess.
+- If the ticket, spec, notes and your prompt disagree, the ticket wins (and closed decision tickets win over your prompt); if the ticket itself conflicts with CLAUDE.md security rules, stop and report rather than guess.
 - If you need something the environment can't give (Windows-only APIs, devices, pwsh), fake it behind a seam and say so in your report.
 - If you had to work around tooling or a convention, say so: I fix the environment, not you.
 

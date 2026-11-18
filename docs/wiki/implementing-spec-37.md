@@ -6,6 +6,7 @@ How [spec #37](https://github.com/b-git-hub/network-analyser/issues/37) (Network
 - Follows the mattpocock `implement-spec` procedure: the 29 tickets #38–#66 form a task graph (GitHub "blocked by" edges); the coordinator keeps a frontier of ready tickets and runs one fresh implementer subagent per ticket in its own git worktree, building with `tdd`.
 - A merger subagent merges each finished ticket branch into the integration branch, one at a time, and pushes.
 - Every implementer follows [implementer-brief](implementer-brief.md).
+- (Added 2026-11-18 after the #38 retro, which found about 45 of its 149 calls wasted.) Dispatch a ticket only after the wiki pages its brief names are committed on the integration tip. Implementer prompts add nothing that a closed decision ticket already settles; the #38 prompt asked for CI and a src layout that #28/#32 had ruled out.
 - About one in five implementer sessions gets a retro; findings go into this wiki and into repo guardrails.
 
 ## Task graph (from ticket bodies, 2026-11-18)
