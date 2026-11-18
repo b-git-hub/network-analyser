@@ -1,0 +1,1141 @@
+lab:
+  description: >-
+    Network Analyser v1 test lab: three IOS-XE and two NX-OS nodes with CDP/LLDP
+    Links, two port-channels, a trunk with a deliberate VLAN Mismatch, OSPF and a
+    shared subnet. Addresses are documentation ranges; every password is CHANGE_ME.
+  notes: |-
+    # Network Analyser v1 test lab
+
+    Follow `docs/lab-checklist.md` in the network-analyser repo for every booking.
+    This file is `lab/network-analyser-lab.yaml` there.
+
+    **Before the first start**
+
+    - Management addresses are placeholders in 192.0.2.0/24 (gateway 192.0.2.1).
+      Replace them with addresses from the sandbox's management subnet, as listed
+      on the reservation page. Data-plane addresses (198.51.100.0/24,
+      203.0.113.0/24) stay as they are: they never leave the lab.
+    - Every password, secret and key is `CHANGE_ME`. Management interfaces boot
+      shut down. Set the login passwords by hand at each node's console, then
+      bring the management interface up.
+
+    **What the lab holds**
+
+    - xe-rtr1 (Catalyst 8000V), xe-sw1 and xe-sw2 (IOL-L2, IOS-XE),
+      nx-sw1 and nx-sw2 (NX-OS 9000v).
+    - Port-channel1 (LACP) between xe-sw1 and xe-sw2, and between nx-sw1 and nx-sw2.
+    - Deliberate VLAN Mismatch on the xe-sw1 Ethernet0/3 <-> nx-sw1 Ethernet1/3
+      trunk: native VLAN 1 against 99, VLAN 30 only on xe-sw1, VLAN 99 only on
+      nx-sw1.
+    - OSPF area 0 (HMAC-SHA-256 key chain) on three routed /31 links and on VLAN 10.
+    - Shared subnet 198.51.100.0/25 on VLAN 10 across all four switches, with an
+      HSRP address on the two IOS-XE switches. Two-device subnet
+      198.51.100.128/25 on VLAN 20 (xe-sw2 and nx-sw2, no routing protocol).
+    - The tool's dedicated account `netanalyser`, with a provisional Device Role
+      (IOS-XE CLI view NA-READ, NX-OS role NA-READ). Replace it with the output
+      of `network-analyser role-snippet` once that command exists.
+  title: Network Analyser v1 lab
+  version: 0.2.2
+nodes:
+  - boot_disk_size: null
+    configuration:
+      - name: default
+        content: System Bridge
+    cpu_limit: null
+    cpus: null
+    data_volume: null
+    hide_links: false
+    id: n0
+    image_definition: null
+    label: mgmt-bridge
+    node_definition: external_connector
+    parameters: {}
+    ram: null
+    tags:
+      - management
+    x: -400
+    y: -400
+    interfaces:
+      - id: i0
+        label: port
+        slot: 0
+        type: physical
+  - boot_disk_size: null
+    configuration: []
+    cpu_limit: null
+    cpus: null
+    data_volume: null
+    hide_links: false
+    id: n1
+    image_definition: null
+    label: mgmt-sw
+    node_definition: unmanaged_switch
+    parameters: {}
+    ram: null
+    tags:
+      - management
+    x: -400
+    y: -280
+    interfaces:
+      - id: i0
+        label: port0
+        slot: 0
+        type: physical
+      - id: i1
+        label: port1
+        slot: 1
+        type: physical
+      - id: i2
+        label: port2
+        slot: 2
+        type: physical
+      - id: i3
+        label: port3
+        slot: 3
+        type: physical
+      - id: i4
+        label: port4
+        slot: 4
+        type: physical
+      - id: i5
+        label: port5
+        slot: 5
+        type: physical
+  - boot_disk_size: null
+    configuration:
+      - name: iosxe_config.txt
+        content: |-
+          platform console serial
+          !
+          hostname xe-rtr1
+          !
+          ! Network Analyser lab node. Synthetic lab: every address is from the
+          ! documentation ranges and every password, secret and key is CHANGE_ME.
+          ! Set the login passwords by hand at the console, then bring
+          ! GigabitEthernet1 up (docs/lab-checklist.md, "Set up the lab").
+          !
+          no ip domain lookup
+          ip domain name example.net
+          !
+          service password-encryption
+          enable algorithm-type scrypt secret CHANGE_ME
+          !
+          aaa new-model
+          aaa authentication login default local
+          aaa authorization exec default local
+          !
+          username admin privilege 15 algorithm-type scrypt secret CHANGE_ME
+          !
+          ! Device Role for the tool's dedicated account (ADR 0005): a CLI view
+          ! that permits only the commands the tool sends. PROVISIONAL: written by
+          ! hand from the spec's command catalogue (#37). Replace it with the
+          ! output of `network-analyser role-snippet ios-xe` once that exists (#53).
+          parser view NA-READ
+           secret CHANGE_ME
+           commands exec include terminal length
+           commands exec include terminal width
+           commands exec include show version
+           commands exec include show running-config view full
+           commands exec include show cdp neighbors detail
+           commands exec include show lldp neighbors detail
+           commands exec include show interfaces
+           commands exec include show interfaces switchport
+           commands exec include show interfaces trunk
+           commands exec include show vlan brief
+           commands exec include show etherchannel summary
+           commands exec include show ip interface
+           commands exec include show vrf
+           commands exec include show ip arp
+           commands exec include show mac address-table
+           commands exec include show ip ospf neighbor
+           commands exec include show ip eigrp neighbors
+           commands exec include show ip bgp summary
+           commands exec include show ip route static
+           commands exec include show standby brief
+           commands exec include show vrrp brief
+           commands exec include show glbp brief
+           commands exec include show privilege
+           commands exec include show parser view
+          !
+          username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
+          !
+          login on-failure log
+          login on-success log
+          !
+          crypto key generate rsa general-keys modulus 2048
+          ip ssh version 2
+          !
+          vrf definition Mgmt-intf
+           address-family ipv4
+           exit-address-family
+          !
+          cdp run
+          lldp run
+          !
+          key chain OSPF-KEYS
+           key 1
+            key-string CHANGE_ME
+            cryptographic-algorithm hmac-sha-256
+          !
+          router ospf 1
+           router-id 203.0.113.101
+           passive-interface Loopback0
+          !
+          interface Loopback0
+           ip address 203.0.113.101 255.255.255.255
+           ip ospf 1 area 0
+          !
+          interface GigabitEthernet1
+           description Management (sandbox bridge)
+           vrf forwarding Mgmt-intf
+           ip address 192.0.2.11 255.255.255.0
+           no cdp enable
+           no lldp transmit
+           no lldp receive
+           shutdown
+          !
+          interface GigabitEthernet2
+           description Routed link to xe-sw1 Ethernet1/0 (OSPF)
+           ip address 203.0.113.2 255.255.255.254
+           cdp enable
+           ip ospf network point-to-point
+           ip ospf authentication key-chain OSPF-KEYS
+           ip ospf 1 area 0
+           no shutdown
+          !
+          interface GigabitEthernet3
+           description Routed link to nx-sw1 Ethernet1/4 (OSPF)
+           ip address 203.0.113.4 255.255.255.254
+           cdp enable
+           ip ospf network point-to-point
+           ip ospf authentication key-chain OSPF-KEYS
+           ip ospf 1 area 0
+           no shutdown
+          !
+          interface GigabitEthernet4
+           shutdown
+          !
+          ip route vrf Mgmt-intf 0.0.0.0 0.0.0.0 192.0.2.1
+          !
+          no ip http server
+          no ip http secure-server
+          !
+          line vty 0 4
+           exec-timeout 10 0
+           transport input ssh
+           transport output none
+          !
+          end
+    cpu_limit: null
+    cpus: null
+    data_volume: null
+    hide_links: false
+    id: n2
+    image_definition: null
+    label: xe-rtr1
+    node_definition: cat8000v
+    parameters: {}
+    ram: null
+    tags:
+      - ios-xe
+    x: 0
+    y: -160
+    interfaces:
+      - id: i0
+        label: Loopback0
+        type: loopback
+      - id: i1
+        label: GigabitEthernet1
+        slot: 0
+        type: physical
+      - id: i2
+        label: GigabitEthernet2
+        slot: 1
+        type: physical
+      - id: i3
+        label: GigabitEthernet3
+        slot: 2
+        type: physical
+      - id: i4
+        label: GigabitEthernet4
+        slot: 3
+        type: physical
+  - boot_disk_size: null
+    configuration:
+      - name: ios_config.txt
+        content: |-
+          hostname xe-sw1
+          !
+          ! Network Analyser lab node. Synthetic lab: every address is from the
+          ! documentation ranges and every password, secret and key is CHANGE_ME.
+          ! Set the login passwords by hand at the console, then bring
+          ! Ethernet0/0 up (docs/lab-checklist.md, "Set up the lab").
+          !
+          no ip domain lookup
+          ip domain name example.net
+          ip routing
+          spanning-tree mode rapid-pvst
+          vtp mode transparent
+          !
+          service password-encryption
+          enable algorithm-type scrypt secret CHANGE_ME
+          !
+          aaa new-model
+          aaa authentication login default local
+          aaa authorization exec default local
+          !
+          username admin privilege 15 algorithm-type scrypt secret CHANGE_ME
+          !
+          ! Device Role for the tool's dedicated account (ADR 0005): a CLI view
+          ! that permits only the commands the tool sends. PROVISIONAL: written by
+          ! hand from the spec's command catalogue (#37). Replace it with the
+          ! output of `network-analyser role-snippet ios-xe` once that exists (#53).
+          parser view NA-READ
+           secret CHANGE_ME
+           commands exec include terminal length
+           commands exec include terminal width
+           commands exec include show version
+           commands exec include show running-config view full
+           commands exec include show cdp neighbors detail
+           commands exec include show lldp neighbors detail
+           commands exec include show interfaces
+           commands exec include show interfaces switchport
+           commands exec include show interfaces trunk
+           commands exec include show vlan brief
+           commands exec include show etherchannel summary
+           commands exec include show ip interface
+           commands exec include show vrf
+           commands exec include show ip arp
+           commands exec include show mac address-table
+           commands exec include show ip ospf neighbor
+           commands exec include show ip eigrp neighbors
+           commands exec include show ip bgp summary
+           commands exec include show ip route static
+           commands exec include show standby brief
+           commands exec include show vrrp brief
+           commands exec include show glbp brief
+           commands exec include show privilege
+           commands exec include show parser view
+          !
+          username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
+          !
+          login on-failure log
+          login on-success log
+          !
+          crypto key generate rsa general-keys modulus 2048
+          ip ssh version 2
+          !
+          vrf definition Mgmt-intf
+           address-family ipv4
+           exit-address-family
+          !
+          cdp run
+          lldp run
+          !
+          vlan 10
+           name LAB-SHARED
+          vlan 20
+           name LAB-PAIR
+          vlan 30
+           name LAB-ONE-END
+          !
+          key chain OSPF-KEYS
+           key 1
+            key-string CHANGE_ME
+            cryptographic-algorithm hmac-sha-256
+          !
+          router ospf 1
+           router-id 203.0.113.102
+           passive-interface Loopback0
+          !
+          interface Loopback0
+           ip address 203.0.113.102 255.255.255.255
+           ip ospf 1 area 0
+          !
+          interface Ethernet0/0
+           description Management (sandbox bridge)
+           no switchport
+           vrf forwarding Mgmt-intf
+           ip address 192.0.2.12 255.255.255.0
+           no cdp enable
+           no lldp transmit
+           no lldp receive
+           shutdown
+          !
+          interface Port-channel1
+           description Bundle to xe-sw2 Port-channel1
+           switchport trunk encapsulation dot1q
+           switchport mode trunk
+           switchport trunk allowed vlan 10,20
+           switchport nonegotiate
+          !
+          interface range Ethernet0/1 - 2
+           description Bundle member to xe-sw2
+           switchport trunk encapsulation dot1q
+           switchport mode trunk
+           switchport trunk allowed vlan 10,20
+           switchport nonegotiate
+           channel-group 1 mode active
+           no shutdown
+          !
+          ! Deliberate VLAN Mismatch: this end allows 10,20,30 with native VLAN 1;
+          ! nx-sw1 Ethernet1/3 allows 10,20,99 with native VLAN 99.
+          interface Ethernet0/3
+           description Trunk to nx-sw1 Ethernet1/3 (deliberate VLAN Mismatch)
+           switchport trunk encapsulation dot1q
+           switchport mode trunk
+           switchport trunk allowed vlan 10,20,30
+           switchport nonegotiate
+           no shutdown
+          !
+          interface Ethernet1/0
+           description Routed link to xe-rtr1 GigabitEthernet2 (OSPF)
+           no switchport
+           ip address 203.0.113.3 255.255.255.254
+           ip ospf network point-to-point
+           ip ospf authentication key-chain OSPF-KEYS
+           ip ospf 1 area 0
+           no shutdown
+          !
+          interface range Ethernet1/1 - 3
+           shutdown
+          !
+          interface Vlan10
+           description Shared subnet (all four switches)
+           ip address 198.51.100.2 255.255.255.128
+           ip ospf authentication key-chain OSPF-KEYS
+           ip ospf 1 area 0
+           standby version 2
+           standby 10 ip 198.51.100.1
+           standby 10 priority 110
+           standby 10 preempt
+           standby 10 authentication md5 key-string CHANGE_ME
+           no shutdown
+          !
+          ip route vrf Mgmt-intf 0.0.0.0 0.0.0.0 192.0.2.1
+          !
+          line vty 0 4
+           exec-timeout 10 0
+           transport input ssh
+           transport output none
+          !
+          end
+    cpu_limit: null
+    cpus: null
+    data_volume: null
+    hide_links: false
+    id: n3
+    image_definition: null
+    label: xe-sw1
+    node_definition: ioll2-xe
+    parameters: {}
+    ram: null
+    tags:
+      - ios-xe
+    x: -200
+    y: 40
+    interfaces:
+      - id: i0
+        label: Loopback0
+        type: loopback
+      - id: i1
+        label: Ethernet0/0
+        slot: 0
+        type: physical
+      - id: i2
+        label: Ethernet0/1
+        slot: 1
+        type: physical
+      - id: i3
+        label: Ethernet0/2
+        slot: 2
+        type: physical
+      - id: i4
+        label: Ethernet0/3
+        slot: 3
+        type: physical
+      - id: i5
+        label: Ethernet1/0
+        slot: 4
+        type: physical
+      - id: i6
+        label: Ethernet1/1
+        slot: 5
+        type: physical
+      - id: i7
+        label: Ethernet1/2
+        slot: 6
+        type: physical
+      - id: i8
+        label: Ethernet1/3
+        slot: 7
+        type: physical
+  - boot_disk_size: null
+    configuration:
+      - name: ios_config.txt
+        content: |-
+          hostname xe-sw2
+          !
+          ! Network Analyser lab node. Synthetic lab: every address is from the
+          ! documentation ranges and every password, secret and key is CHANGE_ME.
+          ! Set the login passwords by hand at the console, then bring
+          ! Ethernet0/0 up (docs/lab-checklist.md, "Set up the lab").
+          !
+          no ip domain lookup
+          ip domain name example.net
+          ip routing
+          spanning-tree mode rapid-pvst
+          vtp mode transparent
+          !
+          service password-encryption
+          enable algorithm-type scrypt secret CHANGE_ME
+          !
+          aaa new-model
+          aaa authentication login default local
+          aaa authorization exec default local
+          !
+          username admin privilege 15 algorithm-type scrypt secret CHANGE_ME
+          !
+          ! Device Role for the tool's dedicated account (ADR 0005): a CLI view
+          ! that permits only the commands the tool sends. PROVISIONAL: written by
+          ! hand from the spec's command catalogue (#37). Replace it with the
+          ! output of `network-analyser role-snippet ios-xe` once that exists (#53).
+          parser view NA-READ
+           secret CHANGE_ME
+           commands exec include terminal length
+           commands exec include terminal width
+           commands exec include show version
+           commands exec include show running-config view full
+           commands exec include show cdp neighbors detail
+           commands exec include show lldp neighbors detail
+           commands exec include show interfaces
+           commands exec include show interfaces switchport
+           commands exec include show interfaces trunk
+           commands exec include show vlan brief
+           commands exec include show etherchannel summary
+           commands exec include show ip interface
+           commands exec include show vrf
+           commands exec include show ip arp
+           commands exec include show mac address-table
+           commands exec include show ip ospf neighbor
+           commands exec include show ip eigrp neighbors
+           commands exec include show ip bgp summary
+           commands exec include show ip route static
+           commands exec include show standby brief
+           commands exec include show vrrp brief
+           commands exec include show glbp brief
+           commands exec include show privilege
+           commands exec include show parser view
+          !
+          username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
+          !
+          login on-failure log
+          login on-success log
+          !
+          crypto key generate rsa general-keys modulus 2048
+          ip ssh version 2
+          !
+          vrf definition Mgmt-intf
+           address-family ipv4
+           exit-address-family
+          !
+          cdp run
+          lldp run
+          !
+          vlan 10
+           name LAB-SHARED
+          vlan 20
+           name LAB-PAIR
+          !
+          key chain OSPF-KEYS
+           key 1
+            key-string CHANGE_ME
+            cryptographic-algorithm hmac-sha-256
+          !
+          router ospf 1
+           router-id 203.0.113.103
+           passive-interface Loopback0
+          !
+          interface Loopback0
+           ip address 203.0.113.103 255.255.255.255
+           ip ospf 1 area 0
+          !
+          interface Ethernet0/0
+           description Management (sandbox bridge)
+           no switchport
+           vrf forwarding Mgmt-intf
+           ip address 192.0.2.13 255.255.255.0
+           no cdp enable
+           no lldp transmit
+           no lldp receive
+           shutdown
+          !
+          interface Port-channel1
+           description Bundle to xe-sw1 Port-channel1
+           switchport trunk encapsulation dot1q
+           switchport mode trunk
+           switchport trunk allowed vlan 10,20
+           switchport nonegotiate
+          !
+          interface range Ethernet0/1 - 2
+           description Bundle member to xe-sw1
+           switchport trunk encapsulation dot1q
+           switchport mode trunk
+           switchport trunk allowed vlan 10,20
+           switchport nonegotiate
+           channel-group 1 mode active
+           no shutdown
+          !
+          interface Ethernet0/3
+           shutdown
+          !
+          interface Ethernet1/0
+           description Routed link to nx-sw2 Ethernet1/3 (OSPF)
+           no switchport
+           ip address 203.0.113.0 255.255.255.254
+           ip ospf network point-to-point
+           ip ospf authentication key-chain OSPF-KEYS
+           ip ospf 1 area 0
+           no shutdown
+          !
+          interface range Ethernet1/1 - 3
+           shutdown
+          !
+          interface Vlan10
+           description Shared subnet (all four switches)
+           ip address 198.51.100.3 255.255.255.128
+           ip ospf authentication key-chain OSPF-KEYS
+           ip ospf 1 area 0
+           standby version 2
+           standby 10 ip 198.51.100.1
+           standby 10 preempt
+           standby 10 authentication md5 key-string CHANGE_ME
+           no shutdown
+          !
+          interface Vlan20
+           description Two-device subnet with nx-sw2 (no routing protocol)
+           ip address 198.51.100.130 255.255.255.128
+           no shutdown
+          !
+          ip route vrf Mgmt-intf 0.0.0.0 0.0.0.0 192.0.2.1
+          !
+          line vty 0 4
+           exec-timeout 10 0
+           transport input ssh
+           transport output none
+          !
+          end
+    cpu_limit: null
+    cpus: null
+    data_volume: null
+    hide_links: false
+    id: n4
+    image_definition: null
+    label: xe-sw2
+    node_definition: ioll2-xe
+    parameters: {}
+    ram: null
+    tags:
+      - ios-xe
+    x: -200
+    y: 240
+    interfaces:
+      - id: i0
+        label: Loopback0
+        type: loopback
+      - id: i1
+        label: Ethernet0/0
+        slot: 0
+        type: physical
+      - id: i2
+        label: Ethernet0/1
+        slot: 1
+        type: physical
+      - id: i3
+        label: Ethernet0/2
+        slot: 2
+        type: physical
+      - id: i4
+        label: Ethernet0/3
+        slot: 3
+        type: physical
+      - id: i5
+        label: Ethernet1/0
+        slot: 4
+        type: physical
+      - id: i6
+        label: Ethernet1/1
+        slot: 5
+        type: physical
+      - id: i7
+        label: Ethernet1/2
+        slot: 6
+        type: physical
+      - id: i8
+        label: Ethernet1/3
+        slot: 7
+        type: physical
+  - boot_disk_size: null
+    configuration:
+      - name: nxos_config.txt
+        content: |-
+          hostname nx-sw1
+          # Network Analyser lab node. Synthetic lab: every address is from the
+          # documentation ranges and every password, secret and key is CHANGE_ME.
+          # Set the login passwords by hand at the console, then bring mgmt0 up
+          # (docs/lab-checklist.md, "Set up the lab").
+          #
+          # CML's default workaround for NX-OS 9000v booting to the loader> prompt
+          echo 'from cli import cli' > set_boot.py
+          echo 'import json' >> set_boot.py
+          echo 'import os' >> set_boot.py
+          echo 'import time' >> set_boot.py
+          echo 'bootimage = json.loads(cli("show version | json"))["nxos_file_name"]' >> set_boot.py
+          echo 'set_boot = cli("conf t ; boot nxos {} ; no event manager applet BOOTCONFIG".format(bootimage))' >> set_boot.py
+          echo 'i = 0' >> set_boot.py
+          echo 'while i < 10:' >> set_boot.py
+          echo '    try:' >> set_boot.py
+          echo '        save_config = cli("copy running-config startup-config")' >> set_boot.py
+          echo '        break' >> set_boot.py
+          echo '    except Exception:' >> set_boot.py
+          echo '        i += 1' >> set_boot.py
+          echo '        time.sleep(1)' >> set_boot.py
+          echo 'os.remove("/bootflash/set_boot.py")' >> set_boot.py
+          event manager applet BOOTCONFIG
+           event syslog pattern "Configured from vty"
+           action 1.0 cli python bootflash:set_boot.py
+          #
+          # The strength check is off only while the CHANGE_ME placeholders load,
+          # and back on below, so the passwords set by hand must be strong.
+          no password strength-check
+          username admin password CHANGE_ME role network-admin
+          #
+          feature lacp
+          feature lldp
+          feature interface-vlan
+          feature ospf
+          #
+          # Device Role for the tool's dedicated account (ADR 0005): one custom
+          # role that permits only the commands the tool sends; no network-operator
+          # and no "rule permit read". PROVISIONAL: written by hand from the spec's
+          # command catalogue (#37). Replace it with the output of
+          # `network-analyser role-snippet nx-os` once that exists (#53).
+          role name NA-READ
+            description Network Analyser provisional role
+            rule 26 permit command terminal length 0
+            rule 25 permit command terminal width 511
+            rule 24 permit command show version
+            rule 23 permit command show running-config
+            rule 22 permit command show cdp neighbors detail
+            rule 21 permit command show lldp neighbors detail
+            rule 20 permit command show interface
+            rule 19 permit command show interface switchport
+            rule 18 permit command show interface trunk
+            rule 17 permit command show vlan brief
+            rule 16 permit command show port-channel summary
+            rule 15 permit command show vpc
+            rule 14 permit command show ip interface vrf all
+            rule 13 permit command show vrf
+            rule 12 permit command show ip arp vrf all
+            rule 11 permit command show mac address-table
+            rule 10 permit command show ip ospf neighbors vrf all
+            rule 9 permit command show ip eigrp neighbors vrf all
+            rule 8 permit command show ip bgp summary vrf all
+            rule 7 permit command show ip route static vrf all
+            rule 6 permit command show hsrp brief
+            rule 5 permit command show vrrp
+            rule 4 permit command show user-account
+          username netanalyser password CHANGE_ME role NA-READ
+          password strength-check
+          #
+          ip domain-name example.net
+          #
+          vlan 10
+            name LAB-SHARED
+          vlan 20
+            name LAB-PAIR
+          vlan 99
+            name LAB-NATIVE
+          #
+          key chain OSPF-KEYS
+            key 1
+              key-string CHANGE_ME
+              cryptographic-algorithm HMAC-SHA-256
+          #
+          router ospf 1
+            router-id 203.0.113.104
+          #
+          interface mgmt0
+            description Management (sandbox bridge)
+            ip address 192.0.2.14/24
+            no cdp enable
+            no lldp transmit
+            no lldp receive
+            shutdown
+          vrf context management
+            ip route 0.0.0.0/0 192.0.2.1
+          #
+          interface loopback0
+            ip address 203.0.113.104/32
+            ip router ospf 1 area 0.0.0.0
+          #
+          interface port-channel1
+            description Bundle to nx-sw2 port-channel1
+            switchport
+            switchport mode trunk
+            switchport trunk allowed vlan 10,20
+          #
+          interface Ethernet1/1-2
+            description Bundle member to nx-sw2
+            switchport
+            switchport mode trunk
+            switchport trunk allowed vlan 10,20
+            channel-group 1 mode active
+            no shutdown
+          #
+          # Deliberate VLAN Mismatch: this end allows 10,20,99 with native VLAN 99;
+          # xe-sw1 Ethernet0/3 allows 10,20,30 with native VLAN 1.
+          interface Ethernet1/3
+            description Trunk to xe-sw1 Ethernet0/3 (deliberate VLAN Mismatch)
+            switchport
+            switchport mode trunk
+            switchport trunk native vlan 99
+            switchport trunk allowed vlan 10,20,99
+            no shutdown
+          #
+          interface Ethernet1/4
+            description Routed link to xe-rtr1 GigabitEthernet3 (OSPF)
+            no switchport
+            ip address 203.0.113.5/31
+            ip ospf network point-to-point
+            ip ospf authentication key-chain OSPF-KEYS
+            ip router ospf 1 area 0.0.0.0
+            no shutdown
+          #
+          interface Vlan10
+            description Shared subnet (all four switches)
+            ip address 198.51.100.4/25
+            ip ospf authentication key-chain OSPF-KEYS
+            ip router ospf 1 area 0.0.0.0
+            no shutdown
+          #
+          line vty
+            exec-timeout 10
+    cpu_limit: null
+    cpus: null
+    data_volume: null
+    hide_links: false
+    id: n5
+    image_definition: null
+    label: nx-sw1
+    node_definition: nxosv9000
+    parameters: {}
+    ram: null
+    tags:
+      - nx-os
+    x: 200
+    y: 40
+    interfaces:
+      - id: i0
+        label: Loopback0
+        type: loopback
+      - id: i1
+        label: mgmt0
+        slot: 0
+        type: physical
+      - id: i2
+        label: Ethernet1/1
+        slot: 1
+        type: physical
+      - id: i3
+        label: Ethernet1/2
+        slot: 2
+        type: physical
+      - id: i4
+        label: Ethernet1/3
+        slot: 3
+        type: physical
+      - id: i5
+        label: Ethernet1/4
+        slot: 4
+        type: physical
+  - boot_disk_size: null
+    configuration:
+      - name: nxos_config.txt
+        content: |-
+          hostname nx-sw2
+          # Network Analyser lab node. Synthetic lab: every address is from the
+          # documentation ranges and every password, secret and key is CHANGE_ME.
+          # Set the login passwords by hand at the console, then bring mgmt0 up
+          # (docs/lab-checklist.md, "Set up the lab").
+          #
+          # CML's default workaround for NX-OS 9000v booting to the loader> prompt
+          echo 'from cli import cli' > set_boot.py
+          echo 'import json' >> set_boot.py
+          echo 'import os' >> set_boot.py
+          echo 'import time' >> set_boot.py
+          echo 'bootimage = json.loads(cli("show version | json"))["nxos_file_name"]' >> set_boot.py
+          echo 'set_boot = cli("conf t ; boot nxos {} ; no event manager applet BOOTCONFIG".format(bootimage))' >> set_boot.py
+          echo 'i = 0' >> set_boot.py
+          echo 'while i < 10:' >> set_boot.py
+          echo '    try:' >> set_boot.py
+          echo '        save_config = cli("copy running-config startup-config")' >> set_boot.py
+          echo '        break' >> set_boot.py
+          echo '    except Exception:' >> set_boot.py
+          echo '        i += 1' >> set_boot.py
+          echo '        time.sleep(1)' >> set_boot.py
+          echo 'os.remove("/bootflash/set_boot.py")' >> set_boot.py
+          event manager applet BOOTCONFIG
+           event syslog pattern "Configured from vty"
+           action 1.0 cli python bootflash:set_boot.py
+          #
+          # The strength check is off only while the CHANGE_ME placeholders load,
+          # and back on below, so the passwords set by hand must be strong.
+          no password strength-check
+          username admin password CHANGE_ME role network-admin
+          #
+          feature lacp
+          feature lldp
+          feature interface-vlan
+          feature ospf
+          #
+          # Device Role for the tool's dedicated account (ADR 0005): one custom
+          # role that permits only the commands the tool sends; no network-operator
+          # and no "rule permit read". PROVISIONAL: written by hand from the spec's
+          # command catalogue (#37). Replace it with the output of
+          # `network-analyser role-snippet nx-os` once that exists (#53).
+          role name NA-READ
+            description Network Analyser provisional role
+            rule 26 permit command terminal length 0
+            rule 25 permit command terminal width 511
+            rule 24 permit command show version
+            rule 23 permit command show running-config
+            rule 22 permit command show cdp neighbors detail
+            rule 21 permit command show lldp neighbors detail
+            rule 20 permit command show interface
+            rule 19 permit command show interface switchport
+            rule 18 permit command show interface trunk
+            rule 17 permit command show vlan brief
+            rule 16 permit command show port-channel summary
+            rule 15 permit command show vpc
+            rule 14 permit command show ip interface vrf all
+            rule 13 permit command show vrf
+            rule 12 permit command show ip arp vrf all
+            rule 11 permit command show mac address-table
+            rule 10 permit command show ip ospf neighbors vrf all
+            rule 9 permit command show ip eigrp neighbors vrf all
+            rule 8 permit command show ip bgp summary vrf all
+            rule 7 permit command show ip route static vrf all
+            rule 6 permit command show hsrp brief
+            rule 5 permit command show vrrp
+            rule 4 permit command show user-account
+          username netanalyser password CHANGE_ME role NA-READ
+          password strength-check
+          #
+          ip domain-name example.net
+          #
+          vlan 10
+            name LAB-SHARED
+          vlan 20
+            name LAB-PAIR
+          #
+          key chain OSPF-KEYS
+            key 1
+              key-string CHANGE_ME
+              cryptographic-algorithm HMAC-SHA-256
+          #
+          router ospf 1
+            router-id 203.0.113.105
+          #
+          interface mgmt0
+            description Management (sandbox bridge)
+            ip address 192.0.2.15/24
+            no cdp enable
+            no lldp transmit
+            no lldp receive
+            shutdown
+          vrf context management
+            ip route 0.0.0.0/0 192.0.2.1
+          #
+          interface loopback0
+            ip address 203.0.113.105/32
+            ip router ospf 1 area 0.0.0.0
+          #
+          interface port-channel1
+            description Bundle to nx-sw1 port-channel1
+            switchport
+            switchport mode trunk
+            switchport trunk allowed vlan 10,20
+          #
+          interface Ethernet1/1-2
+            description Bundle member to nx-sw1
+            switchport
+            switchport mode trunk
+            switchport trunk allowed vlan 10,20
+            channel-group 1 mode active
+            no shutdown
+          #
+          interface Ethernet1/3
+            description Routed link to xe-sw2 Ethernet1/0 (OSPF)
+            no switchport
+            ip address 203.0.113.1/31
+            ip ospf network point-to-point
+            ip ospf authentication key-chain OSPF-KEYS
+            ip router ospf 1 area 0.0.0.0
+            no shutdown
+          #
+          interface Ethernet1/4
+            shutdown
+          #
+          interface Vlan10
+            description Shared subnet (all four switches)
+            ip address 198.51.100.5/25
+            ip ospf authentication key-chain OSPF-KEYS
+            ip router ospf 1 area 0.0.0.0
+            no shutdown
+          #
+          interface Vlan20
+            description Two-device subnet with xe-sw2 (no routing protocol)
+            ip address 198.51.100.131/25
+            no shutdown
+          #
+          line vty
+            exec-timeout 10
+    cpu_limit: null
+    cpus: null
+    data_volume: null
+    hide_links: false
+    id: n6
+    image_definition: null
+    label: nx-sw2
+    node_definition: nxosv9000
+    parameters: {}
+    ram: null
+    tags:
+      - nx-os
+    x: 200
+    y: 240
+    interfaces:
+      - id: i0
+        label: Loopback0
+        type: loopback
+      - id: i1
+        label: mgmt0
+        slot: 0
+        type: physical
+      - id: i2
+        label: Ethernet1/1
+        slot: 1
+        type: physical
+      - id: i3
+        label: Ethernet1/2
+        slot: 2
+        type: physical
+      - id: i4
+        label: Ethernet1/3
+        slot: 3
+        type: physical
+      - id: i5
+        label: Ethernet1/4
+        slot: 4
+        type: physical
+links:
+  - id: l0
+    n1: n1
+    n2: n0
+    i1: i0
+    i2: i0
+    conditioning: {}
+    label: mgmt-sw-port0<->mgmt-bridge-port
+  - id: l1
+    n1: n2
+    n2: n1
+    i1: i1
+    i2: i1
+    conditioning: {}
+    label: xe-rtr1-GigabitEthernet1<->mgmt-sw-port1
+  - id: l2
+    n1: n3
+    n2: n1
+    i1: i1
+    i2: i2
+    conditioning: {}
+    label: xe-sw1-Ethernet0/0<->mgmt-sw-port2
+  - id: l3
+    n1: n4
+    n2: n1
+    i1: i1
+    i2: i3
+    conditioning: {}
+    label: xe-sw2-Ethernet0/0<->mgmt-sw-port3
+  - id: l4
+    n1: n5
+    n2: n1
+    i1: i1
+    i2: i4
+    conditioning: {}
+    label: nx-sw1-mgmt0<->mgmt-sw-port4
+  - id: l5
+    n1: n6
+    n2: n1
+    i1: i1
+    i2: i5
+    conditioning: {}
+    label: nx-sw2-mgmt0<->mgmt-sw-port5
+  - id: l6
+    n1: n3
+    n2: n4
+    i1: i2
+    i2: i2
+    conditioning: {}
+    label: xe-sw1-Ethernet0/1<->xe-sw2-Ethernet0/1
+  - id: l7
+    n1: n3
+    n2: n4
+    i1: i3
+    i2: i3
+    conditioning: {}
+    label: xe-sw1-Ethernet0/2<->xe-sw2-Ethernet0/2
+  - id: l8
+    n1: n5
+    n2: n6
+    i1: i2
+    i2: i2
+    conditioning: {}
+    label: nx-sw1-Ethernet1/1<->nx-sw2-Ethernet1/1
+  - id: l9
+    n1: n5
+    n2: n6
+    i1: i3
+    i2: i3
+    conditioning: {}
+    label: nx-sw1-Ethernet1/2<->nx-sw2-Ethernet1/2
+  - id: l10
+    n1: n3
+    n2: n5
+    i1: i4
+    i2: i4
+    conditioning: {}
+    label: xe-sw1-Ethernet0/3<->nx-sw1-Ethernet1/3
+  - id: l11
+    n1: n4
+    n2: n6
+    i1: i5
+    i2: i4
+    conditioning: {}
+    label: xe-sw2-Ethernet1/0<->nx-sw2-Ethernet1/3
+  - id: l12
+    n1: n2
+    n2: n3
+    i1: i2
+    i2: i5
+    conditioning: {}
+    label: xe-rtr1-GigabitEthernet2<->xe-sw1-Ethernet1/0
+  - id: l13
+    n1: n2
+    n2: n5
+    i1: i3
+    i2: i5
+    conditioning: {}
+    label: xe-rtr1-GigabitEthernet3<->nx-sw1-Ethernet1/4
+annotations: []
