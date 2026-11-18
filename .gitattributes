@@ -1,0 +1,6 @@
+# LF in the repo and in checkouts, on Windows too, so tools and hashes agree.
+* text=auto eol=lf
+# Windows PowerShell 5.1 scripts and batch files keep CRLF.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
