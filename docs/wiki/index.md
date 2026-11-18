@@ -10,4 +10,5 @@ A dated, historical record kept by the coordinating (chief-of-staff) session and
 - [agent-worktree-friction](agent-worktree-friction.md): known quirks of agent worktrees and how briefs work around them.
 
 ## Decisions
+- [operator-wants-cml-build](operator-wants-cml-build.md): 2026-11-18 standing instruction to finish a CML-testable Windows build unattended.
 - [delivery-one-draft-pr](delivery-one-draft-pr.md): spec #37 ships as one draft PR from the integration branch.
