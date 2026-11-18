@@ -10,3 +10,5 @@ Written 2026-11-18 by the session building spec #37. A merger subagent merges on
 6. Report in ≤5 lines: merge sha, test/lint status, anything you fixed or refused.
 
 Run git commands one per Bash call; chained `git ... && ...` commands may be refused.
+
+Note (2026-11-18): the coordinator also commits wiki updates in the main checkout, but only while no merger is running; mergers run one at a time.
