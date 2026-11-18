@@ -62,6 +62,9 @@ Changing the import table or an owner is a design decision: say why in the commi
 
 - Only `cli` writes to the console [ruff T201]. Device text is escaped (control characters as `\xNN`) before it is printed.
 - Files are written only by named writer helpers, which pass text through the secret scan and write temp-then-rename. A new writer adds its file to `WRITE_OWNERS` in tests/arch/test_secret_rules.py, with the reason in the commit. Never write plaintext config or device output.
+- The tool never deletes a Run folder or a Backup (story 104). Removing a file or folder is allowed only in the files listed in `DELETE_OWNERS`, each for a named file of the tool's own [tests/arch/test_no_deletes.py].
+- Paths under the Run folder go to file calls in their `_winsys.os_path` form (`\\?\` on Windows), so paths over 260 characters work (#42). Show and register the plain path.
+- Names put on disk from operator or device text pass `records.safe_names` (letters, digits, `-`, `.`, `_`; no trailing `.`).
 - Keep console messages ASCII, so they show on any Windows console code page.
 
 ## 6. Errors and exit codes

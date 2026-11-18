@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from network_analyser import run_output
 from network_analyser.cli.parser import FAILURE_BUDGET_MAX, PARALLEL_MAX
 from network_analyser.cli.text import escape_controls
 
@@ -132,7 +133,10 @@ class _Problem:
 def _check_value(key: str, value: object) -> object:
     match key:
         case "label":
-            return value if isinstance(value, str) else _Problem("must be text")
+            if not isinstance(value, str):
+                return _Problem("must be text")
+            problem = run_output.label_problem(value)  # the Run folder name rules (#42)
+            return value if problem is None else _Problem(problem)
         case "scope" | "exclude" | "seeds":
             return _text_list(value, may_be_empty=key == "exclude")
         case "parallel":
