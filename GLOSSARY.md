@@ -46,6 +46,10 @@ _Avoid_: Login, account, profile
 A Credential Set that is no longer tried for the rest of a Run because it used up its allowance of failed logins.
 _Avoid_: Locked set, disabled set
 
+**Backup Passphrase**:
+The one passphrase the operator types at the start of each Run that locks every Backup, and that is needed again to open one. Like a Credential Set password, it exists only in memory for that Run and is never written anywhere.
+_Avoid_: Backup password, encryption key, master password
+
 **Trust Store**:
 The operator's record, kept between Runs, of trusted SSH host keys (and, once an HTTPS Platform is supported, pinned certificate fingerprints), against which every device is checked before a password is sent.
 _Avoid_: Known hosts, key cache, trust list
