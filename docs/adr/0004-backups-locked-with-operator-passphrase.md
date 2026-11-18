@@ -14,7 +14,7 @@ Decided on [Backup storage and encryption](https://github.com/b-git-hub/network-
 - **One secret writes and reads everything.** Anyone who learns the passphrase can open every Backup. There is no per-colleague sharing. A Backup is taken away as its locked file, and whoever opens it needs the passphrase.
 - **Still standard age.** `age -d <file>` opens a Backup without Network Analyser. The tool also offers `show-backup`, which prints to the console and never writes plaintext to disk.
 - **Cost per file.** age's scrypt costs about a second per encryption at its default work factor, paid once per Backup. The default is not lowered.
-- **Changing the passphrase** is open; it is decided on its own ticket.
+- **Changing the passphrase** re-locks every Backup and Run manifest in place with the `change-passphrase` command. Copies made before the change stay locked with the old passphrase. Decided on [Changing the Backup Passphrase](https://github.com/b-git-hub/network-analyser/issues/22).
 
 ## Considered Options
 
