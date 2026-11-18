@@ -84,6 +84,7 @@ header.top h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.01em}
 .edge.sel .ln{stroke:var(--accent);filter:drop-shadow(0 0 3px var(--accent))}
 .lbl{font:10px var(--mono);fill:var(--muted);paint-order:stroke;stroke:var(--canvas);stroke-width:3.5px;stroke-linejoin:round;pointer-events:none}
 .lbl.mid{fill:var(--fg)}
+.canvas.far .lbl:not(.mid):not(.proto){display:none}
 .lbl.proto{fill:var(--l3);font-weight:600}
 .badge circle{stroke:var(--canvas);stroke-width:2}
 .badge text{font:700 11px var(--font);fill:#fff;pointer-events:none}
@@ -460,7 +461,7 @@ function tierLayout(N){
   const depth=bfs(roots); let maxd=0; depth.forEach(v=>maxd=Math.max(maxd,v));
   ids.forEach(i=>{if(!depth.has(i))depth.set(i,maxd+1);});
   const tiers=[]; depth.forEach((t,i)=>(tiers[t]=tiers[t]||[]).push(i));
-  const pos={},DX=150,DY=100,ROW=24; let y=0,minX=0;
+  const pos={},DX=150,DY=150,ROW=24; let y=0,minX=0;
   tiers.forEach((tier,t)=>{
     if(!tier) return;
     const bary=new Map(tier.map(id=>{const ps=[...adj.get(id)].filter(n=>pos[n]);return [id,ps.length?ps.reduce((s,n)=>s+pos[n].x,0)/ps.length:1e9];}));
@@ -551,9 +552,14 @@ function renderScene(g,sc){
     h+=`<g class="edge ${e.cls||''}" data-id="${esc(e.id)}" data-k="edge"><title>${esc(e.title||'')}</title><path class="hit" d="${d}"/><path class="ln" d="${d}"/>${/\bbundle\b/.test(e.cls)?`<path class="ln2" d="${d}"/>`:''}`;
     const m=at(.5);
     if(e.mid) h+=`<text class="lbl mid ${e.midCls||''}" x="${m.x.toFixed(1)}" y="${(m.y-(e.badge?12:5)).toFixed(1)}" text-anchor="middle">${esc(e.mid)}</text>`;
-    if(e.la||e.lb){ const t=Math.min(.42,(e.gap||78)/len);
-      if(e.la){const q=at(t);h+=`<text class="lbl" x="${q.x.toFixed(1)}" y="${(q.y+3).toFixed(1)}" text-anchor="middle">${esc(e.la)}</text>`;}
-      if(e.lb){const q=at(1-t);h+=`<text class="lbl" x="${q.x.toFixed(1)}" y="${(q.y+3).toFixed(1)}" text-anchor="middle">${esc(e.lb)}</text>`;} }
+    if(e.la||e.lb){
+      // each interface name starts at its device's box edge and runs along the line, so fans of Links don't pile their labels up
+      const ux=Math.abs(dx)/len, uy=Math.abs(dy)/len, bd=Math.min(ux>0.01?66/ux:1e9, uy>0.01?22/uy:1e9)+6;
+      const tag=(txt,fromA)=>{ const t=Math.min(.45,(bd+txt.length*3.1)/len), q=at(fromA?t:1-t), tt=fromA?t:1-t;
+        const tx=2*(1-tt)*(cx-p1.x)+2*tt*(p2.x-cx), ty=2*(1-tt)*(cy-p1.y)+2*tt*(p2.y-cy); let ang=Math.atan2(ty,tx)*180/Math.PI;
+        if(ang>90) ang-=180; else if(ang<=-90) ang+=180;
+        return `<text class="lbl" x="${q.x.toFixed(1)}" y="${q.y.toFixed(1)}" dy="-2.5" text-anchor="middle" transform="rotate(${ang.toFixed(1)} ${q.x.toFixed(1)} ${q.y.toFixed(1)})">${esc(txt)}</text>`; };
+      if(e.la) h+=tag(e.la,true); if(e.lb) h+=tag(e.lb,false); }
     if(e.badge) h+=`<g class="badge ${e.badge.cls}" transform="translate(${m.x.toFixed(1)},${m.y.toFixed(1)})"><circle r="8"/><text y="4" text-anchor="middle">${esc(e.badge.t)}</text></g>`;
     h+='</g>';
   }
@@ -576,7 +582,7 @@ function boundsOf(sc){
 }
 function attachCanvas(svg,onPick){
   const g=svg.querySelector('.vp'), s={x:0,y:0,k:1};
-  const apply=()=>g.setAttribute('transform',`translate(${s.x.toFixed(1)} ${s.y.toFixed(1)}) scale(${s.k.toFixed(4)})`);
+  const apply=()=>{ g.setAttribute('transform',`translate(${s.x.toFixed(1)} ${s.y.toFixed(1)}) scale(${s.k.toFixed(4)})`); svg.classList.toggle('far',s.k<0.45); };
   let drag=null,moved=false;
   svg.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,sx:s.x,sy:s.y,id:e.pointerId};moved=false;});
   svg.addEventListener('pointermove',e=>{ if(!drag)return; const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
@@ -719,7 +725,7 @@ function sceneA(N){
    ===================================================================== */
 const BS={tab:'phys',vlan:20,pick:null};
 const VB={key:'b',name:'Tiered views, one per layer',
-  blurb:'<b>B · Tiered views.</b> Devices in rows by distance from the core (worked out from the Links, since the Topology has no "role"), Unvisited Devices parked in their own lane grouped by reason. One tab per question: <b>Physical</b>, <b>Routing (L3)</b> and <b>VLAN</b>. Positions stay the same across tabs. Details dock at the bottom.',
+  blurb:'<b>B · Tiered views.</b> Devices in rows by distance from the core (worked out from the Links, since the Topology has no "role"), Unvisited Devices parked in their own lane grouped by reason. Interface names sit at both ends of every Link (they hide only when zoomed far out). One tab per question: <b>Physical</b>, <b>Routing (L3)</b> and <b>VLAN</b>. Positions stay the same across tabs. Details dock at the bottom.',
   mount(main,N){
     const vl=[...new Set(N.devices.flatMap(d=>d.kind==='visited'?(d.vlans||[]):[]))].sort((a,b)=>a-b);
     if(!vl.includes(BS.vlan)) BS.vlan=vl[1]||vl[0];
@@ -749,7 +755,7 @@ function sceneB(N){
   if(BS.tab==='phys'){
     nodes=all.map(d=>devNode(N,d));
     edges=N.phys.filter(e=>{ const toU=N.byId[e.a].kind==='unvisited'||N.byId[e.b].kind==='unvisited'; return !toU||(pk&&(e.a===pk.id||e.b===pk.id||e.id===pk.id)); })
-      .map(e=>{ const touch=pk&&pk.k==='node'&&(e.a===pk.id||e.b===pk.id); const o=edgeOf(e,{ifl:touch});
+      .map(e=>{ const o=edgeOf(e,{ifl:true});
       if(N.byId[e.a].kind==='unvisited'||N.byId[e.b].kind==='unvisited') o.cls+=' to-unv'; return o; });
     const s=N.stats; key=`<span><b style="color:var(--bad)">!</b> ${s.bad} mismatch</span><span><b style="color:var(--warn)">~</b> ${s.noisy} one end only</span><span><b>?</b> ${s.unknown} unknown</span><span><b style="color:var(--conflict)">≠</b> ${s.conflict} conflict</span>`;
   } else if(BS.tab==='l3'){
@@ -760,7 +766,7 @@ function sceneB(N){
   } else {
     const v=BS.vlan;
     nodes=all.map(d=>devNode(N,d,(d.kind==='visited'&&(d.vlans||[]).includes(v))?'':'faded'));
-    edges=N.phys.map(e=>{ const o=edgeOf(e,{mism:false,vlan:v,mid:false}); return o; });
+    edges=N.phys.map(e=>{ const o=edgeOf(e,{mism:false,vlan:v,mid:false,ifl:true}); return o; });
     const on=edges.filter(e=>/vlan-on/.test(e.cls)).length, br=edges.filter(e=>/vlan-break/.test(e.cls)).length, un=edges.filter(e=>/vlan-unk/.test(e.cls)).length;
     key=`<span style="color:var(--accent)"><b>${on}</b> carry VLAN ${v}</span><span style="color:var(--bad)"><b>${br}</b> stop at one end</span><span><b>${un}</b> unknown far end</span>`;
   }
@@ -820,7 +826,7 @@ function sceneC(N){
     place(n0.filter(x=>!shared.includes(x)),-190,Math.PI*0.62,Math.PI*1.38); place(n1.filter(x=>!shared.includes(x)),190,-Math.PI*0.38,Math.PI*0.38);
     shared.sort().forEach((id,i)=>pos[id]={x:0,y:(i%2?1:-1)*(170+Math.floor(i/2)*70)}); }
   Object.keys(pos).forEach(id=>nodes.push(devNode(N,N.byId[id],cs.includes(id)?'center':'')));
-  rel.forEach(e=>{ if(!pos[e.a]||!pos[e.b])return; const o=edgeOf(e,{ifl:true}); o.gap=82; if(sel.focus&&e.id===sel.focus) o.cls+=' sel'; edges.push(o); });
+  rel.forEach(e=>{ if(!pos[e.a]||!pos[e.b])return; const o=edgeOf(e,{ifl:true}); if(sel.focus&&e.id===sel.focus) o.cls+=' sel'; edges.push(o); });
   if(CS.pick&&CS.pick.k==='node') nodes.forEach(n=>{ if(n.id===CS.pick.id) n.cls+=' sel'; });
   return {pos,nodes,edges};
 }
