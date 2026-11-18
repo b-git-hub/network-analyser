@@ -3,6 +3,7 @@
 import argparse
 import logging
 import re
+from pathlib import Path
 
 import pytest
 
@@ -31,7 +32,6 @@ def test_version_prints_semver_0_y_z(capsys: pytest.CaptureFixture[str]) -> None
 FINGERPRINT = "SHA256:" + "A" * 43
 
 EVERY_COMMAND = [
-    pytest.param(["run"], id="run"),
     pytest.param(["render", "runs/2026-01-01T000000Z"], id="render"),
     pytest.param(["show-backup", "backups/sw-a.cfg.age"], id="show-backup"),
     pytest.param(["show-backup"], id="show-backup listing"),
@@ -54,6 +54,32 @@ def test_a_command_not_built_yet_says_so_and_exits_4(
 
 EVERY_FLAG = [
     pytest.param(
+        ["role-snippet", "nx-os", "--username", "netanalyser", "--tacacs"], id="role-snippet"
+    ),
+    pytest.param(
+        ["change-passphrase", "--run-folder", "old/a", "--run-folder", "old/b"],
+        id="change-passphrase",
+    ),
+]
+
+
+@pytest.mark.parametrize("argv", EVERY_FLAG)
+def test_every_flag_of_the_frozen_surface_parses(
+    argv: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = main(argv)
+
+    assert code == ExitCode.INTERNAL_ERROR
+    assert "not built yet" in capsys.readouterr().err
+
+
+def test_every_run_flag_of_the_frozen_surface_parses(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run_file = tmp_path / "site-a.toml"
+    run_file.write_text('scope = ["203.0.113.0/24"]\n', encoding="utf-8")
+
+    code = main(
         [
             "run",
             "--scope",
@@ -69,7 +95,7 @@ EVERY_FLAG = [
             "--seed",
             "198.51.100.10",
             "--from",
-            "site-a.toml",
+            str(run_file),
             "--sweep",
             "--sweep-inflight",
             "50",
@@ -96,24 +122,8 @@ EVERY_FLAG = [
             "site-a",
             "--progress",
             "log",
-        ],
-        id="run",
-    ),
-    pytest.param(
-        ["role-snippet", "nx-os", "--username", "netanalyser", "--tacacs"], id="role-snippet"
-    ),
-    pytest.param(
-        ["change-passphrase", "--run-folder", "old/a", "--run-folder", "old/b"],
-        id="change-passphrase",
-    ),
-]
-
-
-@pytest.mark.parametrize("argv", EVERY_FLAG)
-def test_every_flag_of_the_frozen_surface_parses(
-    argv: list[str], capsys: pytest.CaptureFixture[str]
-) -> None:
-    code = main(argv)
+        ]
+    )
 
     assert code == ExitCode.INTERNAL_ERROR
     assert "not built yet" in capsys.readouterr().err
@@ -121,7 +131,9 @@ def test_every_flag_of_the_frozen_surface_parses(
 
 @pytest.mark.parametrize("progress", ["live", "log", "quiet"])
 def test_every_progress_view_parses(progress: str) -> None:
-    assert main(["run", "--progress", progress]) == ExitCode.INTERNAL_ERROR
+    argv = ["run", "--scope", "192.0.2.0/24", "--seed", "192.0.2.1", "--progress", progress]
+
+    assert main(argv) == ExitCode.INTERNAL_ERROR
 
 
 REFUSED = [

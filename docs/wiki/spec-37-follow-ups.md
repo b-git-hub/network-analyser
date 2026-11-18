@@ -12,3 +12,13 @@ Work that a finished ticket surfaced for a later ticket. The coordinator copies 
 - 2026-11-18, from #38: `--device-timeout` is in minutes, following #31's prototype help. Awaiting the operator's confirmation (a later change would break compatibility).
 - 2026-11-18, #38 retro: `EXCEPTION_SAFE_CALLS` in `tests/arch/test_secret_rules.py` matches bare function names, so a netmiko exception mapper fails until registered, and any function named `fixed_message` anywhere passes. Register mappers by qualified name (module path + function). Targets: #49, #50.
 - 2026-11-18, #38 retro (deferred): a `.githooks/pre-commit` running `scripts/check.py` as a local stand-in for deferred CI. Weigh Windows PowerShell friction first; not scheduled.
+- 2026-11-18, from #43 (merged at `9b7dcc5`): the masked reader swallows `à` and the next key (msvcrt prefix clash). Opened as [#68](https://github.com/b-git-hub/network-analyser/issues/68), sub-issue of #43, awaiting the operator's call. Also: EOF at a prompt now cancels like Ctrl+C (exit 3); on Linux the crash-dump guard always asks for `YES`.
+- 2026-11-18, from #41 (merged at `4bf7aa7`): a run label from the run file is only checked to be text; #42 should apply its label allow-list to it (sent to #42's implementer). Target: #42.
+- 2026-11-18, from #41: #45's Ready-to-start block should read `RunRequest`'s per-setting sources and replace #41's interim summary lines. Target: #45.
+- 2026-11-18, from #41: no `--no-sweep` flag, so a run file's `sweep = true` can't be overridden on the command line; link-local (169.254/16) is not refused by `contains()`. Both await the operator. Target: #55 if a flag is wanted.
+- 2026-11-18, from #42 (merged at `f5617ad`): #45 must call `cli.run_folder.create_and_register` after the confirm (nothing calls it yet), and refuse a run label that matches a typed secret. Target: #45.
+- 2026-11-18, from #42: `RunsParentCheck.notices` (location notice, permissions warning) must be folded into the Run report. Targets: #45, #66.
+- 2026-11-18, from #42: pass the Run register's text through the secret scan once it exists. Target: #48.
+- 2026-11-18, from #42: Backup file names should reuse `records.safe_names`. Target: #51.
+- 2026-11-18, from #42: `show-backup` should read the Run register and handle `--run-folder`. Target: #57 (the report said #58; the register lookup belongs to whichever of #57/#58 lists Backups).
+- 2026-11-18, from #42: the only delete in the code is the writability probe folder; `tests/arch/test_no_deletes.py` enforces that. Data-folder file names chosen by #42: `run-register.txt`, `instance.lock`, `passphrase-check.age`, `change-pending.json`, `trust/known_hosts`. Targets: #46 (Trust Store uses `trust/known_hosts`), #58.

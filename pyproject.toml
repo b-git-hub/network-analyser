@@ -75,6 +75,8 @@ ignore = [
 "network_analyser/cli/**" = ["T201"]
 # The one place that switches the netmiko and paramiko loggers off.
 "network_analyser/cli/library_loggers.py" = ["TID251"]
+# The one file that reads the environment: LOCALAPPDATA, by literal name (#42).
+"network_analyser/_winsys/paths.py" = ["TID251"]
 "tests/**" = [
     "S101",    # assert is how pytest checks
     "D",       # test names are the documentation

@@ -5,3 +5,16 @@ None, tuples, frozensets, mappings, `ipaddress` objects, UTC-aware datetimes, en
 records. Never a `Secret`, a callable, a socket, a file or a live session, and never a
 running config. Imports nothing from the package (CODING_STANDARDS.md, "Data").
 """
+
+from network_analyser.records.run_request import RunRequest, Source, Sourced
+from network_analyser.records.scope import NEVER_TARGETS, AddressRange, Placement, ScopeRecord
+
+__all__ = [
+    "NEVER_TARGETS",
+    "AddressRange",
+    "Placement",
+    "RunRequest",
+    "ScopeRecord",
+    "Source",
+    "Sourced",
+]

@@ -63,6 +63,9 @@ Changing the import table or an owner is a design decision: say why in the commi
 
 - Only `cli` writes to the console [ruff T201]. Device text is escaped (control characters as `\xNN`) before it is printed.
 - Files are written only by named writer helpers, which pass text through the secret scan and write temp-then-rename. A new writer adds its file to `WRITE_OWNERS` in tests/arch/test_secret_rules.py, with the reason in the commit. Never write plaintext config or device output.
+- The tool never deletes a Run folder or a Backup (story 104). Removing a file or folder is allowed only in the files listed in `DELETE_OWNERS`, each for a named file of the tool's own [tests/arch/test_no_deletes.py].
+- Paths under the Run folder go to file calls in their `_winsys.os_path` form (`\\?\` on Windows), so paths over 260 characters work (#42). Show and register the plain path.
+- Names put on disk from operator or device text pass `records.safe_names` (letters, digits, `-`, `.`, `_`; no trailing `.`).
 - Keep console messages ASCII, so they show on any Windows console code page.
 
 ## 6. Errors and exit codes
@@ -76,7 +79,7 @@ Changing the import table or an owner is a design decision: say why in the commi
 - Build with red-green TDD. Test behaviour through a module's public interface with plain data; no tests of private helpers.
 - Layout: `tests/security/` holds only the six v1 security tests (spec #37), named `test_<n>_*.py` and marked `security`. `tests/arch/` holds static architecture rules. `tests/unit/` holds everything else.
 - A static rule is also tested against a planted violation, so a rule that stops matching fails.
-- Fixtures are synthetic: IPv4 only from RFC 5737 (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24), hostnames like `sw-a`, secrets like `CANARY-pw-…`. The lab file's secrets are `CHANGE_ME` [tests/arch/test_fixture_hygiene.py]. Never commit captured device output, configs, `*.age`, `known_hosts` or Run folders.
+- Fixtures are synthetic: IPv4 only from RFC 5737 (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24), plus, only to prove a refusal, the blocks the Scope never touches (`records.NEVER_TARGETS`: 0.0.0.0/8, 127.0.0.0/8, 224.0.0.0/4, 240.0.0.0/4), hostnames like `sw-a`, secrets like `CANARY-pw-…`. The lab file's secrets are `CHANGE_ME` [tests/arch/test_fixture_hygiene.py]. Never commit captured device output, configs, `*.age`, `known_hosts` or Run folders.
 - Tests never touch the network; a fixture in `tests/conftest.py` refuses every connection. Fake devices at the `device_gateway` seam.
 - Anything that needs Windows is behind a `_winsys` function with an injected fake in tests, and is checked by hand on Windows (lab checklist).
 

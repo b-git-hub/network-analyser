@@ -1,11 +1,48 @@
 """The `_winsys` leaf module: every Windows-only call, behind one seam.
 
-The elevation check, and later the masked reader's console calls, the crash-dump guard's
-registry reads, the lock file, folder permissions and the per-user folder. Each function
-works on any OS (or says it cannot) so callers can run, and inject fakes, in tests on Linux.
-Imports nothing from the package. `ctypes`, `msvcrt` and `winreg` are imported only here.
+The elevation check, the masked reader's console calls, the crash-dump guard's
+`SetErrorMode` and registry reads, the per-user folder and long paths, the single-instance
+lock file, folder permissions and the kind of drive a folder is on. Each function works on
+any OS (or says it cannot) so callers can run, and inject fakes, in tests on Linux. Imports
+nothing from the package. `ctypes`, `msvcrt` and `winreg` are imported only here.
 """
 
+from network_analyser._winsys.console import Console, open_console
 from network_analyser._winsys.elevation import is_elevated
+from network_analyser._winsys.folders import (
+    DriveKind,
+    Grant,
+    current_user_sid,
+    drive_kind,
+    modify_grants,
+    sync_roots,
+)
+from network_analyser._winsys.lock import lock_exclusively, unlock
+from network_analyser._winsys.paths import extended_length, local_app_data, os_path
+from network_analyser._winsys.wer import (
+    RegistryUnreadableError,
+    RegistryView,
+    read_machine_key,
+    suppress_error_reporting,
+)
 
-__all__ = ["is_elevated"]
+__all__ = [
+    "Console",
+    "DriveKind",
+    "Grant",
+    "RegistryUnreadableError",
+    "RegistryView",
+    "current_user_sid",
+    "drive_kind",
+    "extended_length",
+    "is_elevated",
+    "local_app_data",
+    "lock_exclusively",
+    "modify_grants",
+    "open_console",
+    "os_path",
+    "read_machine_key",
+    "suppress_error_reporting",
+    "sync_roots",
+    "unlock",
+]

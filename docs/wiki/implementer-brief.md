@@ -19,9 +19,7 @@ You implement ONE ticket of spec https://github.com/b-git-hub/network-analyser/i
 - In a Bash call whose text mentions git anywhere (a `git` command, `.gitignore`, `github.com`), use no `$` expansion (`$?`, `$VAR`, `$(...)`, loop variables): the worktree guard refuses it. Run git alone and read the exit code from the result. (Root cause found by the #38 retro, 2026-11-18.)
 - Read [spec-37-follow-ups](spec-37-follow-ups.md) for items targeted at your ticket.
 - Before reporting done: commit, then `git merge claude/lucid-shannon-8xewst` (the tip may have moved), resolve conflicts, re-run the full test suite and linters, commit.
-- Commit messages end with:
-  Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-  Claude-Session: https://claude.ai/code/session_01MMsPzUaM28kjg5PjA69jtp
+- Commit messages end with the attribution lines from your own session's system reminder (they name the model that actually ran you; don't copy another agent's). Changed 2026-11-18 after a Sonnet merger noticed the hard-coded Opus line.
   Reference the ticket ("Part of #NN"); do not write "Closes".
 
 ## If something is wrong
