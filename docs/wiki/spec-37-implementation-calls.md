@@ -1,0 +1,9 @@
+# Calls made while implementing spec #37
+
+Decisions the coordinating session made on 2026-11-18 while the operator was AFK (see [operator-wants-cml-build](operator-wants-cml-build.md)), resolving gaps the [exploration notes](spec-37-notes/guardrails.md) found. Each is reversible and was raised on [spec #37](https://github.com/b-git-hub/network-analyser/issues/37) as the spec asks.
+
+1. **No CI workflow.** Closed decisions #28 and #32 defer CI, and #47 allows no workflow on pushes or PRs. This supersedes the 2026-11-18 plan in [operator-wants-cml-build](operator-wants-cml-build.md) to build on every push. The operator gets the build by running `build.ps1` (#44) on their own PC, which is how #44 designs it.
+2. **uv packaging.** The commands #32/#44/#47 specify are kept. `[tool.uv] package = false`, run as `python -m network_analyser`, `__version__` in code, and an arch test that it equals pyproject's version.
+3. **Who may hold a secret.** Credential Set passwords live only in `credentials` and `device_gateway` (ADR 0003). The Backup Passphrase lives only in `backup_store` (#45, ADR 0004). The cli masked reader returns only a `Secret` object. An arch test enforces this.
+4. **Running configs never ride in device records.** `visit()` takes a sink from `backup_store`; the config goes nowhere else (#51 wins over the spec's module table).
+5. **Smaller defaults** for implementers to apply unless their ticket says otherwise: unknown run-file keys are rejected (fail closed). For prefixes /30 and shorter, `contains()` refuses the network and broadcast addresses; /31 and /32 allow every address. `show-backup` exits non-zero on a wrong passphrase. The `http://` ban allows only the exact SVG namespace string. The licence check carries explicit overrides for `scp` (LGPL) and `pyrage` (reported UNKNOWN).

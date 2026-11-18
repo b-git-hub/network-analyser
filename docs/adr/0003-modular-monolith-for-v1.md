@@ -1,5 +1,7 @@
 # Modular monolith for v1; containers and microservices deferred
 
+_v1 ships unsigned. Signing was deferred on [Release pipeline, signing and versioning](https://github.com/b-git-hub/network-analyser/issues/32) until the unsigned build is blocked on the operator's PC or the tool is handed to anyone else, and the proper-deployment phase signs by default. Where this ADR says "signed", that is the later goal, not v1._
+
 v1 is one Windows program: a single process, built from internal modules and shipped as a signed PyInstaller one-folder build in a zip. It is not a Docker container or a set of microservices. One operator runs it on demand on Windows with no Python install. Docker on Windows needs Docker Desktop, WSL2 and admin rights to install. Microservices would send Credential Set passwords between processes, so both add cost and attack surface v1 does not need. They are **deferred, not rejected**: the operator is open to a containerised or microservice deployment in a phase 2, provided passwords passed between parts can be secured.
 
 Decided on [Architecture and packaging: modular monolith exe vs Docker or microservices](https://github.com/b-git-hub/network-analyser/issues/9).
