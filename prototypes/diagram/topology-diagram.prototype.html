@@ -1,0 +1,853 @@
+<title>Topology Diagram Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!--
+  PROTOTYPE: throwaway. Answers "What the network diagram looks like" (issue #13).
+  Three structurally different diagram designs for the same synthetic Topology, switchable from the
+  floating bar at the bottom (or ?variant=a|b|c, or #variant-a|b|c). Everything is synthetic: no real
+  hostnames, IPs, serials or configs. Single self-contained file with no network calls, the same way the
+  real diagram would have to work offline on the operator's Windows machine.
+  The real tool would hide the prototype bar; nothing here is production code.
+-->
+<style>
+/* Layout: full-height app. Thin header, one strip describing the variant, then the variant's own layout. Prototype switcher floats bottom-centre. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --canvas:#fbfcfd; --fg:#18212c; --muted:#5a6676; --line:#d6dce4;
+  --accent:#0b6e99; --accent-bg:#e3f1f8;
+  --link:#3b4757; --l3:#6b45c8; --l3-bg:#efe9fb;
+  --bad:#c42b2b; --bad-bg:#fbe8e8; --warn:#b5650b; --warn-bg:#fdf0de; --unk:#8792a2; --conflict:#b0236f; --ok:#2c7a4b;
+  --node:#ffffff; --node-stroke:#2d3a4a; --ghost:#eceff3;
+  --bar:#121a24; --bar-fg:#f4f7fa;
+  --font:"Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono:"Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0f141a; --surface:#161d26; --canvas:#121920; --fg:#e4e9ef; --muted:#97a3b3; --line:#2a3542;
+  --accent:#4fb3de; --accent-bg:#14303f;
+  --link:#a9b6c6; --l3:#a98bf0; --l3-bg:#2a2140;
+  --bad:#ff6b6b; --bad-bg:#3a1c1e; --warn:#f0a646; --warn-bg:#3a2a14; --unk:#7d8898; --conflict:#f06ab0; --ok:#5cc58a;
+  --node:#1b2430; --node-stroke:#9fb0c3; --ghost:#1a2029;
+  --bar:#e8edf3; --bar-fg:#101720; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#0f141a; --surface:#161d26; --canvas:#121920; --fg:#e4e9ef; --muted:#97a3b3; --line:#2a3542;
+  --accent:#4fb3de; --accent-bg:#14303f;
+  --link:#a9b6c6; --l3:#a98bf0; --l3-bg:#2a2140;
+  --bad:#ff6b6b; --bad-bg:#3a1c1e; --warn:#f0a646; --warn-bg:#3a2a14; --unk:#7d8898; --conflict:#f06ab0; --ok:#5cc58a;
+  --node:#1b2430; --node-stroke:#9fb0c3; --ghost:#1a2029;
+  --bar:#e8edf3; --bar-fg:#101720; color-scheme:dark }
+
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font:13px/1.45 var(--font);overflow:hidden}
+button,input,select{font:inherit;color:inherit}
+.app{height:100%;display:flex;flex-direction:column}
+.gut{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header.top{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding-block:8px;background:var(--surface);border-bottom:1px solid var(--line)}
+header.top h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.01em}
+.tag{font:600 10px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:4px 6px;border-radius:3px;background:var(--warn-bg);color:var(--warn)}
+.stats{display:flex;flex-wrap:wrap;gap:4px 12px;color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px}
+.stats b{color:var(--fg);font-weight:600}
+.stats .bad b{color:var(--bad)} .stats .warn b{color:var(--warn)} .stats .cf b{color:var(--conflict)}
+.blurb{padding-block:6px;font-size:12.5px;color:var(--muted);border-bottom:1px solid var(--line);background:var(--surface)}
+.blurb b{color:var(--fg)}
+.main{flex:1;min-height:0;position:relative;display:flex}
+
+/* canvas + drawing */
+.canvas{width:100%;height:100%;display:block;background:var(--canvas);touch-action:none;cursor:grab;user-select:none}
+.canvas:active{cursor:grabbing}
+.zoom{position:absolute;right:max(12px,env(safe-area-inset-right,0px));top:12px;display:flex;flex-direction:column;gap:4px;z-index:5}
+.zoom button{width:30px;height:30px;border-radius:6px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-weight:600}
+.zoom button:focus-visible,.chip:focus-visible,.sw button:focus-visible,.tab:focus-visible,.fi:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.edge .hit{fill:none;stroke:transparent;stroke-width:12;cursor:pointer}
+.edge .ln{fill:none;stroke:var(--link);stroke-width:1.6}
+.edge .ln2{fill:none;stroke:var(--canvas);stroke-width:2.2;pointer-events:none}
+.edge.bundle .ln{stroke-width:6.5}
+.edge.member .ln{stroke-width:2.2}
+.edge.one-sided .ln{stroke-dasharray:7 5}
+.edge.inferred .ln{stroke-dasharray:1.5 4.5;stroke-linecap:round;stroke-width:2.2}
+.edge.segment .ln{stroke-dasharray:3 3}
+.edge.vpc-keepalive .ln{stroke-dasharray:1 3;stroke-width:1.2;stroke:var(--muted)}
+.edge.noisy .ln{stroke:var(--warn)}
+.edge.unknown .ln{stroke:var(--unk);stroke-dasharray:5 3}
+.edge.bad .ln{stroke:var(--bad)}
+.edge.conflict .ln{stroke:var(--conflict)}
+.edge.to-unv .ln{opacity:.45}
+.edge.l3 .ln{stroke:var(--l3);stroke-width:1.8}
+.edge.l3m .ln{stroke:var(--l3);stroke-width:1;opacity:.55}
+.edge.OSPF .ln{stroke:var(--l3);stroke-dasharray:8 3 2 3}
+.edge.EIGRP .ln{stroke:var(--l3);stroke-dasharray:4 3}
+.edge.BGP .ln{stroke:var(--l3);stroke-dasharray:10 4;stroke-width:2.2}
+.edge.vlan-on .ln{stroke:var(--accent);stroke-width:4}
+.edge.vlan-break .ln{stroke:var(--bad);stroke-width:4}
+.edge.vlan-unk .ln{stroke:var(--accent);stroke-width:2;stroke-dasharray:4 4}
+.edge.vlan-off{opacity:.18}
+.edge.faded{opacity:.12}
+.edge.sel .ln{stroke:var(--accent);filter:drop-shadow(0 0 3px var(--accent))}
+.lbl{font:10px var(--mono);fill:var(--muted);paint-order:stroke;stroke:var(--canvas);stroke-width:3.5px;stroke-linejoin:round;pointer-events:none}
+.lbl.mid{fill:var(--fg)}
+.lbl.proto{fill:var(--l3);font-weight:600}
+.badge circle{stroke:var(--canvas);stroke-width:2}
+.badge text{font:700 11px var(--font);fill:#fff;pointer-events:none}
+.badge.bad circle{fill:var(--bad)} .badge.noisy circle{fill:var(--warn)} .badge.unknown circle{fill:var(--unk)} .badge.conflict circle{fill:var(--conflict)}
+
+.node{cursor:pointer}
+.node rect{fill:var(--node);stroke:var(--node-stroke);stroke-width:1.2}
+.node .t{font:600 11.5px var(--font);fill:var(--fg)}
+.node .s{font:9.5px var(--mono);fill:var(--muted)}
+.node.nx rect{stroke-width:1.2}
+.node .plat{font:700 8.5px var(--mono);letter-spacing:.04em}
+.node.nx .plat{fill:var(--accent)} .node.xe .plat{fill:var(--ok)}
+.node.unv rect{fill:var(--ghost);stroke:var(--unk);stroke-dasharray:4 3}
+.node.unv .t{fill:var(--muted);font-weight:600}
+.node.seg circle{fill:var(--ghost);stroke:var(--unk);stroke-dasharray:3 3}
+.node.subnet rect{fill:var(--l3-bg);stroke:var(--l3)}
+.node.subnet .t{fill:var(--l3);font:600 10.5px var(--mono)}
+.node.has-bad rect{stroke:var(--bad);stroke-width:2}
+.node.sel rect,.node.sel circle{stroke:var(--accent);stroke-width:3}
+.node.center rect{stroke:var(--accent);stroke-width:2.4}
+.node.faded{opacity:.2}
+.lane{font:600 11px var(--font);fill:var(--muted);letter-spacing:.02em}
+.lane.h{font-size:12.5px;fill:var(--fg)}
+
+/* details (shared content) */
+.det h3{margin:0 0 4px;font-size:15px}
+.det h4{margin:14px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.det dl{display:grid;grid-template-columns:max-content 1fr;gap:3px 12px;margin:8px 0 0}
+.det dt{color:var(--muted)} .det dd{margin:0;font-variant-numeric:tabular-nums;min-width:0;overflow-wrap:anywhere}
+.det .mono,.det td.mono{font-family:var(--mono);font-size:12px}
+.det table{border-collapse:collapse;width:100%;font-size:12px}
+.det th{text-align:left;font-weight:600;color:var(--muted);border-bottom:1px solid var(--line);padding:3px 6px 3px 0}
+.det td{border-bottom:1px solid var(--line);padding:3px 6px 3px 0;vertical-align:top}
+.tblwrap{overflow-x:auto}
+.det .note{color:var(--muted);font-size:12px;margin-top:10px}
+.hint{color:var(--muted)}
+.pill{display:inline-block;font:600 10.5px/1 var(--font);padding:3px 6px;border-radius:999px;border:1px solid currentColor;margin:2px 4px 2px 0;white-space:nowrap}
+.pill.bad{color:var(--bad)} .pill.noisy{color:var(--warn)} .pill.unknown{color:var(--unk)} .pill.conflict{color:var(--conflict)} .pill.ok{color:var(--ok)} .pill.unv{color:var(--unk)} .pill.acc{color:var(--accent)} .pill.l3{color:var(--l3)}
+.find{border-radius:6px;padding:6px 8px;margin:4px 0;font-size:12.5px}
+.find.bad{background:var(--bad-bg)} .find.noisy{background:var(--warn-bg)} .find.unknown{background:var(--ghost)} .find.conflict{background:var(--bad-bg)}
+
+/* toolbar chips */
+.chip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 10px;cursor:pointer;font-size:12px;white-space:nowrap}
+.chip[aria-pressed="true"]{background:var(--accent-bg);border-color:var(--accent);color:var(--accent);font-weight:600}
+.tb-field{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.tb-field input,.tb-field select{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:3px 6px;width:7.5em}
+
+/* ---------- Variant A: one canvas, layers ---------- */
+.a-wrap{flex:1;display:flex;min-width:0}
+.a-stage{flex:1;position:relative;min-width:0}
+.a-tools{position:absolute;left:max(12px,env(safe-area-inset-left,0px));top:12px;right:56px;display:flex;flex-wrap:wrap;gap:6px;z-index:5;pointer-events:none}
+.a-tools>*{pointer-events:auto}
+.legend{position:absolute;left:max(12px,env(safe-area-inset-left,0px));bottom:calc(64px + env(safe-area-inset-bottom,0px));background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:11.5px;z-index:5;max-width:min(330px,calc(100% - 24px))}
+.legend summary{cursor:pointer;font-weight:600}
+.legend ul{list-style:none;margin:6px 0 0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:3px 12px}
+.legend li{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.legend svg{flex:none}
+.drawer{width:360px;flex:none;border-left:1px solid var(--line);background:var(--surface);overflow:auto;padding:14px 16px 90px}
+@media (max-width:760px){
+  .a-wrap{flex-direction:column}
+  .drawer{width:auto;border-left:0;border-top:1px solid var(--line);max-height:42%;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+  .legend{bottom:12px}
+}
+
+/* ---------- Variant B: tiered views ---------- */
+.b-wrap{flex:1;display:flex;flex-direction:column;min-width:0}
+.b-tabs{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding-block:6px;border-bottom:1px solid var(--line);background:var(--surface)}
+.tab{border:0;background:none;padding:6px 10px;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;color:var(--muted)}
+.tab[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent)}
+.b-stage{flex:1;position:relative;min-height:0}
+.b-detail{flex:none;max-height:36%;overflow:auto;border-top:1px solid var(--line);background:var(--surface);padding-block:10px 80px}
+.b-detail .det{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:4px 28px}
+.b-detail .det>*{min-width:0}
+.b-key{margin-left:auto;display:flex;flex-wrap:wrap;gap:4px 10px;font-size:11.5px;color:var(--muted)}
+
+/* ---------- Variant C: findings first ---------- */
+.c-wrap{flex:1;display:grid;grid-template-columns:320px 1fr;min-width:0;min-height:0}
+.c-side{border-right:1px solid var(--line);background:var(--surface);overflow:auto;padding:10px 12px 90px max(12px,env(safe-area-inset-left,0px));min-height:0}
+.c-side details{border-bottom:1px solid var(--line);padding:6px 0}
+.c-side summary{cursor:pointer;font-weight:600;display:flex;align-items:center;gap:8px;list-style:none}
+.c-side summary::-webkit-details-marker{display:none}
+.c-side summary::before{content:"▸";color:var(--muted);font-size:10px;width:10px}
+.c-side details[open]>summary::before{content:"▾"}
+.c-side summary .n{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--muted);font-weight:500}
+.c-side .sub{font-size:11.5px;color:var(--muted);margin:2px 0 4px 18px}
+.fi{display:block;width:100%;text-align:left;border:0;background:none;padding:5px 6px 5px 18px;border-radius:5px;cursor:pointer;font-size:12.5px;line-height:1.35}
+.fi:hover{background:var(--ghost)}
+.fi[aria-current="true"]{background:var(--accent-bg);color:var(--fg)}
+.fi .k{display:block;font-size:11px;color:var(--muted)}
+.fi .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}
+.dot.bad{background:var(--bad)} .dot.noisy{background:var(--warn)} .dot.unknown{background:var(--unk)} .dot.conflict{background:var(--conflict)} .dot.acc{background:var(--accent)} .dot.unv{background:transparent;border:1.5px dashed var(--unk)}
+.rgh{font-size:11px;color:var(--muted);margin:8px 0 2px 18px;text-transform:none}
+.c-filter{width:calc(100% - 18px);margin:4px 0 4px 18px;border:1px solid var(--line);background:var(--canvas);border-radius:6px;padding:4px 8px}
+.c-main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.c-stage{flex:1 1 55%;position:relative;min-height:200px}
+.c-crumb{position:absolute;left:12px;top:10px;z-index:5;font-size:12px;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:4px 8px;max-width:calc(100% - 70px)}
+.c-detail{flex:1 1 45%;overflow:auto;border-top:1px solid var(--line);background:var(--surface);padding-block:12px 90px}
+@media (max-width:760px){
+  .c-wrap{grid-template-columns:1fr;grid-template-rows:34% 1fr}
+  .c-side{border-right:0;border-bottom:1px solid var(--line);padding-bottom:12px}
+}
+
+/* ---------- prototype switcher ---------- */
+.sw{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:50;display:flex;align-items:center;gap:6px;background:var(--bar);color:var(--bar-fg);border-radius:999px;padding:5px 6px;box-shadow:0 6px 24px rgba(0,0,0,.28);font-size:12.5px;max-width:calc(100vw - 24px)}
+.sw button{border:0;background:transparent;color:inherit;border-radius:999px;padding:5px 10px;cursor:pointer;font-weight:600}
+.sw button:hover{background:color-mix(in srgb, var(--bar-fg) 14%, transparent)}
+.sw .lab{min-width:13em;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sw .sep{width:1px;align-self:stretch;background:color-mix(in srgb, var(--bar-fg) 25%, transparent);margin:2px 2px}
+.sw button[aria-pressed="true"]{background:var(--bar-fg);color:var(--bar)}
+@media (max-width:520px){ .sw .lab{min-width:0} .sw .size-l{display:none} }
+@media (prefers-reduced-motion:reduce){ *{transition:none!important;animation:none!important} }
+</style>
+
+<div class="app">
+  <header class="top gut">
+    <span class="tag">Prototype · synthetic data</span>
+    <h1>Network diagram: three ways to draw one Topology</h1>
+    <div class="stats" id="stats"></div>
+  </header>
+  <div class="blurb gut" id="blurb"></div>
+  <div class="main" id="main"></div>
+</div>
+<div class="sw" role="toolbar" aria-label="Prototype variant switcher">
+  <button id="sw-prev" aria-label="Previous variant">◀</button>
+  <span class="lab" id="sw-lab"></span>
+  <button id="sw-next" aria-label="Next variant">▶</button>
+  <span class="sep"></span>
+  <span class="size-l">Network:</span>
+  <button id="sw-small" aria-pressed="true">~30 devices</button>
+  <button id="sw-large" aria-pressed="false">~230 devices</button>
+</div>
+
+<script>
+'use strict';
+/* =====================================================================
+   Helpers
+   ===================================================================== */
+const $=(s,el=document)=>el.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const KIND={1:'VLAN on one end only',2:'Native VLAN differs',3:'Trunk faces access port',4:'Access VLAN differs'};
+const NARROW=()=>window.innerWidth<760;
+function fmtV(list){
+  if(list==='all') return 'all';
+  if(!list) return '—';
+  if(!list.length) return 'none';
+  const s=[...new Set(list)].sort((a,b)=>a-b), out=[]; let i=0;
+  while(i<s.length){ let j=i; while(j+1<s.length&&s[j+1]===s[j]+1) j++; out.push(j>i+1?`${s[i]}-${s[j]}`:(j===i+1?`${s[i]},${s[j]}`:`${s[i]}`)); i=j+1; }
+  return out.join(',');
+}
+function makeRng(seed){ return ()=>{ seed=(seed*1664525+1013904223)>>>0; return seed/4294967296; }; }
+const pad=n=>String(n).padStart(2,'0');
+
+/* =====================================================================
+   Synthetic Topology (shape follows the Topology model decision, #11)
+   ===================================================================== */
+function build(size){
+  const N={size,devices:[],links:[],bundles:[],subnets:[],adj:[],segments:[]};
+  let sn=4100; const ser=()=>'SYN'+(sn++)+'Q';
+  const DB_ACC=[1,10,20,30,40,99], DB_DIST=[1,10,20,30,40,99,100], DB_CORE=[1,10,20,30,40,99,100,500,501,502], DB_LEAF=[1,500,501,502];
+  const STD=[10,20,30,40,99], STD100=[10,20,30,40,99,100];
+  const NX='NX-OS', XE='IOS-XE';
+  const V=(id,platform,model,version,mgmt,o={})=>{const d=Object.assign({id,kind:'visited',hostname:id,platform,model,version,mgmt,serials:[ser()],aliases:[],stack:null,vlans:DB_ACC},o);N.devices.push(d);return d;};
+  const U=(id,reason,o={})=>{const d=Object.assign({id,kind:'unvisited',label:id,reason,advPlatform:'',advIps:[],chassis:'',reportedBy:[]},o);N.devices.push(d);return d;};
+  const T=(allowed,native=1)=>({mode:'trunk',allowed,native});
+  const AC=v=>({mode:'access',vlan:v}); const R={mode:'routed'};
+  let li=0; const L=(a,ai,b,bi,o={})=>{const l=Object.assign({id:'L'+(li++),a,ai,b,bi,status:'confirmed',src:['CDP','LLDP']},o);N.links.push(l);return l;};
+  const B=(id,names,sideA,sideB,va,vb,o={})=>{const b=Object.assign({id,names,sideA,sideB,va,vb},o);N.bundles.push(b);return b;};
+  const S=(prefix,vrf,note,members)=>{const s={id:'S:'+prefix+'@'+vrf,prefix,vrf,note,members};N.subnets.push(s);return s;};
+  let ai=0; const AJ=(a,b,proto,detail)=>N.adj.push({id:'A'+(ai++),a,b,proto,detail});
+
+  V('CORE-1',NX,'N9K-C93180YC-FX3','10.3(4a)','10.0.0.1',{aliases:['10.0.100.1','10.0.255.1'],vlans:DB_CORE});
+  V('CORE-2',NX,'N9K-C93180YC-FX3','10.3(4a)','10.0.0.2',{aliases:['10.0.100.2','10.0.255.5'],vlans:DB_CORE});
+  V('DIST-A1',XE,'C9500-48Y4C','17.9.4a','10.0.1.1',{vlans:DB_DIST});
+  V('DIST-A2',XE,'C9500-48Y4C','17.9.4a','10.0.1.2',{vlans:DB_DIST});
+  V('DIST-B',XE,'C9500-48Y4C (StackWise Virtual)','17.9.4a','10.0.1.3',{serials:[ser(),ser()],stack:['1: C9500-48Y4C','2: C9500-48Y4C'],vlans:DB_DIST});
+  V('WAN-1',XE,'ISR4451-X','17.6.5','10.0.2.1',{vlans:null});
+  V('WAN-2',XE,'ISR4451-X','17.6.5','10.0.2.2',{vlans:null});
+  V('DC-LEAF-1',NX,'N9K-C93180YC-FX3','10.3(4a)','10.0.3.1',{vlans:DB_LEAF});
+  V('DC-LEAF-2',NX,'N9K-C93180YC-FX3','10.3(4a)','10.0.3.2',{vlans:DB_LEAF});
+  const acc=i=>'ACC-'+pad(i);
+  for(let i=1;i<=12;i++){
+    const stack=i%4===0;
+    V(acc(i),XE,stack?'C9300-48P ×3 (stack)':'C9300-48P','17.9.4a','10.0.99.'+(20+i),
+      Object.assign(stack?{serials:[ser(),ser(),ser()],stack:['1: C9300-48P','2: C9300-48P','3: C9300-48P']}:{}, i===3?{vlans:[1,10,20,30,40,99,150]}:{}));
+  }
+  // vPC peer-link, keepalive
+  B('B-PL',{'CORE-1':'Po1','CORE-2':'Po1'},['CORE-1'],['CORE-2'],T('all'),T('all'),{role:'vpc-peer-link'});
+  L('CORE-1','Eth1/53','CORE-2','Eth1/53',{bundle:'B-PL'}); L('CORE-1','Eth1/54','CORE-2','Eth1/54',{bundle:'B-PL'});
+  L('CORE-1','Eth1/48','CORE-2','Eth1/48',{role:'vpc-keepalive',va:R,vb:R});
+  // distribution into the vPC pair
+  [['DIST-A1','Po10',1,'Te1/1/2'],['DIST-A2','Po20',2,'Te1/1/2'],['DIST-B','Po30',3,'Te2/1/1']].forEach(([d,po,i,p2])=>{
+    B('B-'+d,{[d]:po,'CORE-1':po,'CORE-2':po},[d],['CORE-1','CORE-2'],T(STD100),T(STD100),{vpc:true});
+    L(d,'Te1/1/1','CORE-1','Eth1/'+i,{bundle:'B-'+d}); L(d,p2,'CORE-2','Eth1/'+i,{bundle:'B-'+d});
+  });
+  // WAN and DC
+  L('WAN-1','Gi0/0/0','CORE-1','Eth1/10',{va:R,vb:R});
+  L('WAN-2','Gi0/0/0','CORE-2','Eth1/10',{va:R,vb:R});
+  L('WAN-1','Gi0/0/3','WAN-2','Gi0/0/3',{va:R,vb:R});
+  L('CORE-1','Eth1/30','DC-LEAF-1','Eth1/49',{va:T([500,501,502]),vb:T([500,501,502])});
+  L('CORE-2','Eth1/30','DC-LEAF-2','Eth1/49',{va:T([500,501,502]),vb:T([500,501,502])});
+  L('DC-LEAF-1','Eth1/50','DC-LEAF-2','Eth1/50',{va:T('all'),vb:T('all')});
+  // access block A (dual-homed)
+  for(let i=1;i<=6;i++){
+    const id=acc(i);
+    const o1={va:T(STD),vb:T(STD)}, o2={va:T(STD),vb:T(STD)};
+    if(i===1) o1.vb=T('all');
+    if(i===3){o1.va=T([10,20,30]); o1.vb=T('all');}
+    if(i===5) o2.vb=T(STD,999);
+    if(i===6){o1.unk='ACC-06 refused "show interfaces trunk" (privilege too low), so its VLANs on this Link are unknown.'; o1.vb=null;}
+    if(i===2){o2.status='one-sided'; o2.src=['CDP (DIST-A2 end only)'];}
+    if(i===4){o1.conflict='ACC-04 (LLDP) says its Gi1/1/2, not Gi1/1/1, faces DIST-A1 Gi1/0/4.'; o1.src=['CDP (DIST-A1)','LLDP (ACC-04)'];}
+    L('DIST-A1','Gi1/0/'+i,id,'Gi1/1/1',o1);
+    L('DIST-A2','Gi1/0/'+i,id,'Gi1/1/2',o2);
+  }
+  // access block B (bundled into the StackWise Virtual pair)
+  for(let i=7;i<=12;i++){
+    const id=acc(i);
+    if(i===9){ L('DIST-B','Gi1/0/9',id,'Gi1/1/1',{va:T(STD),vb:AC(20)}); continue; }
+    const bid='B-'+id;
+    B(bid,{'DIST-B':'Po1'+pad(i),[id]:'Po1'},['DIST-B'],[id],T(STD),T(STD));
+    L('DIST-B','Gi1/0/'+i,id,'Gi1/1/1',{bundle:bid}); L('DIST-B','Gi2/0/'+i,id,'Gi1/1/2',{bundle:bid});
+  }
+  L('ACC-11','Gi1/0/47','ACC-12','Gi1/0/47',{va:AC(20),vb:AC(30)});
+  // Shared Segment
+  N.segments.push({id:'SEG-1',kind:'segment',on:['ACC-07','Gi1/0/48'],hears:['AP-2F-01','AP-2F-02']});
+  L('ACC-07','Gi1/0/48','SEG-1','',{status:'segment',src:['CDP + LLDP: two Neighbours on one port']});
+  ['AP-2F-01','AP-2F-02'].forEach((ap,j)=>{
+    U(ap,'unsupported Platform (advertised)',{advPlatform:'cisco C9120AXI-E (CDP)',advIps:['10.0.40.'+(31+j)],reportedBy:[['ACC-07','Gi1/0/48','CDP']]});
+    L('SEG-1','',ap,'Gi0',{status:'one-sided',src:['CDP (ACC-07)']});
+  });
+  // Unvisited Devices
+  U('FW-EDGE-1','unsupported Platform (advertised)',{advPlatform:'Palo Alto Networks PA-3220 (LLDP)',advIps:['10.0.250.1'],chassis:'02:00:5e:10:00:01',reportedBy:[['CORE-1','Eth1/20','LLDP'],['CORE-2','Eth1/20','LLDP']]});
+  L('CORE-1','Eth1/20','FW-EDGE-1','ethernet1/1',{status:'one-sided',src:['LLDP (CORE-1)'],va:T([250])});
+  L('CORE-2','Eth1/20','FW-EDGE-1','ethernet1/2',{status:'one-sided',src:['LLDP (CORE-2)'],va:T([250])});
+  U('ISP-PE-A','outside Scope',{advPlatform:'(LLDP) provider edge router',advIps:['203.0.113.1'],chassis:'02:00:5e:20:00:07',reportedBy:[['WAN-1','Gi0/0/1','LLDP']]});
+  L('WAN-1','Gi0/0/1','ISP-PE-A','xe-0/0/3',{status:'one-sided',src:['LLDP (WAN-1)'],va:R});
+  U('10.255.0.9','seen only in routing or ARP data (not crawled)',{label:'10.255.0.9',advIps:['10.255.0.9'],reportedBy:[['WAN-2','EIGRP neighbour, ARP on Gi0/0/2','routing']]});
+  L('WAN-2','Gi0/0/2','10.255.0.9','?',{status:'inferred',src:['ARP (WAN-2, VRF default)','MAC table (WAN-2)'],va:R});
+  U('SW-LEGACY-3F','SSH algorithms too old',{advPlatform:'cisco WS-C3560-24PS (CDP)',advIps:['10.0.99.60'],reportedBy:[['ACC-10','Gi1/0/24','CDP']]});
+  L('ACC-10','Gi1/0/24','SW-LEGACY-3F','Fa0/24',{status:'one-sided',src:['CDP (ACC-10)'],va:T(STD)});
+  U('ACC-13','authentication failed (every eligible set tried)',{advPlatform:'cisco C9200L-48P-4G (CDP)',advIps:['10.0.99.33'],reportedBy:[['DIST-B','Gi1/0/13','CDP']]});
+  L('DIST-B','Gi1/0/13','ACC-13','Gi1/1/1',{status:'one-sided',src:['CDP (DIST-B)'],va:T(STD)});
+  U('LAB-SW-9','host key changed',{advPlatform:'cisco C9300-24T (CDP)',advIps:['10.0.99.90'],reportedBy:[['ACC-12','Gi1/0/48','CDP']]});
+  L('ACC-12','Gi1/0/48','LAB-SW-9','Gi1/0/1',{status:'one-sided',src:['CDP (ACC-12)'],va:T(STD)});
+  U('STORE-RTR-7','unreachable',{advPlatform:'cisco ISR4331 (CDP)',advIps:['10.40.7.1','10.40.7.254'],reportedBy:[['WAN-1','Gi0/0/2','CDP']]});
+  L('WAN-1','Gi0/0/2','STORE-RTR-7','Gi0/0/0',{status:'one-sided',src:['CDP (WAN-1)'],va:R});
+  U('OOB-TS-1','excluded by operator',{advPlatform:'cisco ISR1100 (CDP)',advIps:['10.0.9.1'],reportedBy:[['CORE-2','mgmt0','CDP']]});
+  L('CORE-2','mgmt0','OOB-TS-1','Gi0/1',{status:'one-sided',src:['CDP (CORE-2)']});
+
+  // L3
+  const transit=S('10.0.100.0/24','default','transit VLAN 100',[['CORE-1','Vlan100','10.0.100.1'],['CORE-2','Vlan100','10.0.100.2'],['DIST-A1','Vlan100','10.0.100.11'],['DIST-A2','Vlan100','10.0.100.12'],['DIST-B','Vlan100','10.0.100.13']]);
+  const mg=[['DIST-A1','Vlan99','10.0.99.2'],['DIST-A2','Vlan99','10.0.99.3'],['DIST-B','Vlan99','10.0.99.4']];
+  for(let i=1;i<=12;i++) mg.push([acc(i),'Vlan99','10.0.99.'+(20+i)]);
+  S('10.0.99.0/24','default','device management VLAN 99',mg);
+  S('10.50.0.0/24','DC','DC VRF, VLAN 500',[['CORE-1','Vlan500','10.50.0.1'],['CORE-2','Vlan500','10.50.0.2'],['DC-LEAF-1','Vlan500','10.50.0.11'],['DC-LEAF-2','Vlan500','10.50.0.12']]);
+  AJ('CORE-1','WAN-1','shared subnet','10.0.255.0/30, VRF default (CORE-1 Eth1/10 ↔ WAN-1 Gi0/0/0)');
+  AJ('CORE-2','WAN-2','shared subnet','10.0.255.4/30, VRF default (CORE-2 Eth1/10 ↔ WAN-2 Gi0/0/0)');
+  AJ('WAN-1','WAN-2','shared subnet','10.0.255.8/30, VRF default (Gi0/0/3 ↔ Gi0/0/3)');
+  AJ('CORE-1','CORE-2','shared subnet','10.0.254.0/30, VRF KEEPALIVE (Eth1/48 ↔ Eth1/48)');
+  AJ('CORE-1','WAN-1','OSPF','area 0, VRF default');
+  AJ('CORE-2','WAN-2','OSPF','area 0, VRF default');
+  AJ('WAN-1','WAN-2','OSPF','area 0, VRF default');
+  AJ('CORE-1','CORE-2','OSPF','area 0 over Vlan100');
+  ['DIST-A1','DIST-A2','DIST-B'].forEach(d=>{AJ('CORE-1',d,'OSPF','area 0 over Vlan100');AJ('CORE-2',d,'OSPF','area 0 over Vlan100');});
+  AJ('WAN-2','10.255.0.9','EIGRP','AS 100, VRF default, via Gi0/0/2');
+  AJ('WAN-1','ISP-PE-A','BGP','eBGP AS 64512 ↔ AS 64496, VRF default');
+
+  if(size==='large'){
+    const rnd=makeRng(7);
+    'CDEFGH'.split('').forEach((p,pi)=>{
+      const d1='DIST-'+p+'1', d2='DIST-'+p+'2';
+      [d1,d2].forEach((d,j)=>{
+        V(d,XE,'C9500-48Y4C','17.9.4a',`10.0.1.${20+pi*2+j}`,{vlans:DB_DIST});
+        const po='Po'+(40+pi*2+j), bid='B-'+d, port=36+pi*2+j;
+        B(bid,{[d]:po,'CORE-1':po,'CORE-2':po},[d],['CORE-1','CORE-2'],T(STD100),T(STD100),{vpc:true});
+        L(d,'Te1/1/1','CORE-1','Eth1/'+port,{bundle:bid}); L(d,'Te1/1/2','CORE-2','Eth1/'+port,{bundle:bid});
+        transit.members.push([d,'Vlan100',`10.0.100.${20+pi*2+j}`]);
+        AJ('CORE-1',d,'OSPF','area 0 over Vlan100'); AJ('CORE-2',d,'OSPF','area 0 over Vlan100');
+      });
+      const mem=[[d1,'Vlan99',`10.${10+pi}.99.2`],[d2,'Vlan99',`10.${10+pi}.99.3`]];
+      for(let a=1;a<=24;a++){
+        const id=`ACC-${p}${pad(a)}`;
+        V(id,XE,'C9300-48P','17.9.4a',`10.${10+pi}.99.${10+a}`);
+        mem.push([id,'Vlan99',`10.${10+pi}.99.${10+a}`]);
+        const o1={va:T(STD),vb:T(STD)}, o2={va:T(STD),vb:T(STD)}, r=rnd();
+        if(r<0.14) o1.vb=T('all');
+        else if(r<0.17) o2.vb=T(STD,999);
+        else if(r<0.19){o1.unk=`${id} refused "show interfaces trunk", so its VLANs on this Link are unknown.`; o1.vb=null;}
+        else if(r<0.23){o2.status='one-sided'; o2.src=[`CDP (${d2} end only)`];}
+        L(d1,'Gi1/0/'+a,id,'Gi1/1/1',o1); L(d2,'Gi1/0/'+a,id,'Gi1/1/2',o2);
+        if(rnd()<0.3){
+          const ap=`AP-${p}${pad(a)}`;
+          U(ap,'unsupported Platform (advertised)',{advPlatform:'cisco C9120AXI-E (CDP)',advIps:[`10.${10+pi}.40.${10+a}`],reportedBy:[[id,'Gi1/0/1','CDP']]});
+          L(id,'Gi1/0/1',ap,'Gi0',{status:'one-sided',src:[`CDP (${id})`]});
+        }
+      }
+      S(`10.${10+pi}.99.0/24`,'default',`device management VLAN 99, block ${p}`,mem);
+    });
+  }
+  return analyse(N);
+}
+
+/* ---------- checks (VLAN Mismatch rules from #11) ---------- */
+function eff(cfg,db){ if(!cfg) return null; if(cfg.mode==='access') return [cfg.vlan]; if(cfg.mode!=='trunk') return []; const al=cfg.allowed==='all'?(db||[]):cfg.allowed; return db?al.filter(v=>db.includes(v)):al.slice(); }
+function vlanCheck(c,A,Bd){
+  const r={ca:c.va,cb:c.vb,ea:eff(c.va,A&&A.vlans),eb:eff(c.vb,Bd&&Bd.vlans),kinds:[]};
+  if(c.unk){ r.unknown=c.unk; return r; }
+  if(!A||!Bd||A.kind!=='visited'||Bd.kind!=='visited'||!c.va||!c.vb){ r.na='VLAN checks need both ends to be Visited Devices with data collected.'; return r; }
+  if(c.va.mode==='routed'||c.vb.mode==='routed'){ r.na='Routed Link: no VLAN checks.'; return r; }
+  const a=c.va,b=c.vb;
+  if(a.mode==='trunk'&&b.mode==='trunk'){
+    const oa=r.ea.filter(v=>!r.eb.includes(v)), ob=r.eb.filter(v=>!r.ea.includes(v));
+    if(oa.length||ob.length){ const p=[]; if(oa.length)p.push(`${fmtV(oa)} effective on ${A.id} only`); if(ob.length)p.push(`${fmtV(ob)} effective on ${Bd.id} only`); r.kinds.push({kind:1,text:'VLAN '+p.join('; ')}); }
+    if(a.native!==b.native) r.kinds.push({kind:2,text:`Native VLAN ${a.native} on ${A.id}, ${b.native} on ${Bd.id}`});
+  } else if(a.mode!==b.mode){
+    const [t,x,xc]=a.mode==='trunk'?[A,Bd,b]:[Bd,A,a];
+    r.kinds.push({kind:3,text:`${t.id} is a trunk; ${x.id} is an access port in VLAN ${xc.vlan}`});
+  } else if(a.vlan!==b.vlan){
+    r.kinds.push({kind:4,text:`Access VLAN ${a.vlan} on ${A.id}, ${b.vlan} on ${Bd.id}`});
+  }
+  return r;
+}
+const cfgFor=(b,dev)=>b.sideA.includes(dev)?b.va:b.vb;
+function physEdges(N,members){
+  const out=[],groups=new Map();
+  for(const l of N.links){
+    if(l.bundle&&!members){ const k=l.bundle+'|'+[l.a,l.b].sort().join('|'); if(!groups.has(k))groups.set(k,{a:l.a,b:l.b,links:[]}); groups.get(k).links.push(l); continue; }
+    const b=l.bundle?N.bundleById[l.bundle]:null;
+    const check=b?vlanCheck({va:cfgFor(b,l.a),vb:cfgFor(b,l.b),unk:b.unk},N.byId[l.a],N.byId[l.b]):vlanCheck({va:l.va,vb:l.vb,unk:l.unk},N.byId[l.a],N.byId[l.b]);
+    out.push({id:l.id,a:l.a,b:l.b,ai:l.ai,bi:l.bi,type:'link',link:l,links:[l],bundle:b,status:l.status,role:l.role||(b&&b.role)||'',count:1,check});
+  }
+  for(const [k,g] of groups){
+    const b=N.bundleById[g.links[0].bundle];
+    out.push({id:'E:'+k,a:g.a,b:g.b,ai:b.names[g.a],bi:b.names[g.b],type:'bundle',bundle:b,links:g.links,status:'confirmed',role:b.role||'',count:g.links.length,
+      check:vlanCheck({va:cfgFor(b,g.a),vb:cfgFor(b,g.b),unk:b.unk},N.byId[g.a],N.byId[g.b])});
+  }
+  return out;
+}
+function sev(e){ const c=e.check; if(c.kinds.some(k=>k.kind>1)) return 'bad'; if(c.unknown) return 'unknown'; if(c.kinds.length) return 'noisy'; return null; }
+function analyse(N){
+  N.byId={}; [...N.devices,...N.segments].forEach(d=>N.byId[d.id]=d);
+  N.bundleById={}; N.bundles.forEach(b=>N.bundleById[b.id]=b);
+  N.phys=physEdges(N,false); N.physM=physEdges(N,true);
+  const F=[],seen=new Set();
+  for(const e of N.phys){
+    const key=e.bundle?e.bundle.id:e.id;
+    e.check.kinds.forEach(k=>{ const kk=key+'#'+k.kind; if(seen.has(kk))return; seen.add(kk); F.push({cat:k.kind===1?'noisy':'bad',kind:k.kind,text:k.text,edge:e}); });
+    if(e.check.unknown&&!seen.has(key+'#u')){ seen.add(key+'#u'); F.push({cat:'unknown',text:e.check.unknown,edge:e}); }
+    if(e.link&&e.link.conflict) F.push({cat:'conflict',text:e.link.conflict,edge:e});
+    const A=N.byId[e.a],Bd=N.byId[e.b];
+    if(e.status==='one-sided'&&A.kind==='visited'&&Bd.kind==='visited') F.push({cat:'onesided',text:'Advertised by one end only: '+e.link.src.join(', '),edge:e});
+    if(e.status==='inferred') F.push({cat:'inferred',text:'Inferred from '+e.link.src.join(' and '),edge:e});
+  }
+  N.findings=F;
+  N.byReason={}; N.devices.filter(d=>d.kind==='unvisited').forEach(d=>(N.byReason[d.reason]=N.byReason[d.reason]||[]).push(d));
+  N.badDev=new Set(); F.filter(f=>f.cat==='bad'||f.cat==='conflict').forEach(f=>{N.badDev.add(f.edge.a);N.badDev.add(f.edge.b);});
+  N.stats={vis:N.devices.filter(d=>d.kind==='visited').length,unv:N.devices.filter(d=>d.kind==='unvisited').length,links:N.links.filter(l=>l.status!=='segment').length,bundles:N.bundles.length,
+    bad:F.filter(f=>f.cat==='bad').length,noisy:F.filter(f=>f.cat==='noisy').length,unknown:F.filter(f=>f.cat==='unknown').length,conflict:F.filter(f=>f.cat==='conflict').length,subnets:N.subnets.length};
+  return N;
+}
+
+/* =====================================================================
+   Layouts
+   ===================================================================== */
+function tierLayout(N){
+  if(N._tier) return N._tier;
+  const ids=[...N.devices.filter(d=>d.kind==='visited').map(d=>d.id),...N.segments.map(s=>s.id)];
+  const inSet=new Set(ids), adj=new Map(ids.map(i=>[i,new Set()]));
+  N.phys.forEach(e=>{ if(inSet.has(e.a)&&inSet.has(e.b)&&e.role!=='vpc-keepalive'){adj.get(e.a).add(e.b);adj.get(e.b).add(e.a);} });
+  const bfs=src=>{const d=new Map(src.map(s=>[s,0]));const q=[...src];while(q.length){const x=q.shift();for(const y of adj.get(x))if(!d.has(y)){d.set(y,d.get(x)+1);q.push(y);}}return d;};
+  // root = most central device (closeness) plus its vPC peer; no "role" field exists in the Topology, so tiers are derived
+  let best=null,bs=Infinity; ids.forEach(i=>{ if(N.byId[i].kind!=='visited')return; const d=bfs([i]); let s=0; d.forEach(v=>s+=v); s+=(ids.length-d.size)*99; if(s<bs){bs=s;best=i;} });
+  const roots=[best]; N.bundles.filter(b=>b.role==='vpc-peer-link'&&(b.sideA.includes(best)||b.sideB.includes(best))).forEach(b=>[...b.sideA,...b.sideB].forEach(x=>{if(!roots.includes(x))roots.push(x);}));
+  const depth=bfs(roots); let maxd=0; depth.forEach(v=>maxd=Math.max(maxd,v));
+  ids.forEach(i=>{if(!depth.has(i))depth.set(i,maxd+1);});
+  const tiers=[]; depth.forEach((t,i)=>(tiers[t]=tiers[t]||[]).push(i));
+  const pos={},DX=150,DY=100,ROW=24; let y=0,minX=0;
+  tiers.forEach((tier,t)=>{
+    if(!tier) return;
+    const bary=new Map(tier.map(id=>{const ps=[...adj.get(id)].filter(n=>pos[n]);return [id,ps.length?ps.reduce((s,n)=>s+pos[n].x,0)/ps.length:1e9];}));
+    tier.sort((a,b)=>t===0?a.localeCompare(b):(bary.get(a)-bary.get(b))||a.localeCompare(b));
+    for(let r=0;r<tier.length;r+=ROW){ const row=tier.slice(r,r+ROW); row.forEach((id,i)=>{pos[id]={x:(i-(row.length-1)/2)*DX,y};minX=Math.min(minX,pos[id].x);}); y+=DY; }
+    y+=24;
+  });
+  // Unvisited Devices sit in their own lane, grouped by reason
+  const labels=[]; y+=30; const left=minX-60, right=Math.max(-minX,700)+60, ROWS=6, RH=54;
+  labels.push({x:left,y,text:'Unvisited Devices (not logged into), grouped by reason. Select a device to see its lines to them.',cls:'h'}); y+=40;
+  let x=left, top=y, bandH=0;
+  Object.keys(N.byReason).sort().forEach(reason=>{
+    const g=N.byReason[reason], text=`${reason} (${g.length})`, cols=Math.ceil(g.length/ROWS), w=Math.max(cols*DX,text.length*6.4+16);
+    if(x>left&&x+w>right){ x=left; top+=bandH+34; bandH=0; }
+    labels.push({x,y:top,text});
+    g.forEach((d,i)=>pos[d.id]={x:x+64+Math.floor(i/ROWS)*DX,y:top+36+(i%ROWS)*RH});
+    bandH=Math.max(bandH,22+Math.min(g.length,ROWS)*RH); x+=w+36;
+  });
+  return N._tier={pos,labels};
+}
+function forceLayout(N){
+  if(N._force) return N._force;
+  const ids=[...N.devices.map(d=>d.id),...N.segments.map(s=>s.id)], n=ids.length, ix=new Map(ids.map((id,i)=>[id,i]));
+  const T=tierLayout(N).pos, rnd=makeRng(3), X=new Float64Array(n), Y=new Float64Array(n);
+  // seed from tiers so the core stays near the top; Unvisited Devices start beside whoever reported them
+  ids.forEach((id,i)=>{ const d=N.byId[id]; let p=T[id];
+    if(d.kind==='unvisited'&&d.reportedBy.length&&T[d.reportedBy[0][0]]) p={x:T[d.reportedBy[0][0]].x+(rnd()-.5)*120,y:T[d.reportedBy[0][0]].y+90};
+    X[i]=(p?p.x:0)*0.6+(rnd()-.5)*20; Y[i]=(p?p.y:0)*0.9+(rnd()-.5)*20; });
+  const E=[],seen=new Set(); N.phys.forEach(e=>{const k=[e.a,e.b].sort().join('|'); if(seen.has(k))return; seen.add(k); E.push([ix.get(e.a),ix.get(e.b)]);});
+  const k=n>120?120:150, dx=new Float64Array(n), dy=new Float64Array(n); let temp=60;
+  for(let it=0;it<320;it++){
+    dx.fill(0); dy.fill(0);
+    for(let i=0;i<n;i++) for(let j=i+1;j<n;j++){ const ddx=X[i]-X[j], ddy=Y[i]-Y[j], d2=Math.max(ddx*ddx+ddy*ddy,1); if(d2>360000) continue; const f=k*k/d2; dx[i]+=ddx*f; dy[i]+=ddy*f; dx[j]-=ddx*f; dy[j]-=ddy*f; }
+    for(const [a,b] of E){ const ddx=X[a]-X[b], ddy=Y[a]-Y[b], d=Math.sqrt(ddx*ddx+ddy*ddy)||1, f=d/k; dx[a]-=ddx*f; dy[a]-=ddy*f; dx[b]+=ddx*f; dy[b]+=ddy*f; }
+    for(let i=0;i<n;i++){ dx[i]-=X[i]*0.01; dy[i]-=Y[i]*0.01; const m=Math.hypot(dx[i],dy[i])||1, s=Math.min(m,temp); X[i]+=dx[i]/m*s; Y[i]+=dy[i]/m*s*0.8; }
+    temp*=0.988;
+  }
+  const pos={}; ids.forEach((id,i)=>pos[id]={x:X[i],y:Y[i]});
+  return N._force=pos;
+}
+function subnetPos(N,pos,dy){
+  const out={}; N.subnets.forEach(s=>{ const ps=s.members.map(m=>pos[m[0]]).filter(Boolean); if(!ps.length)return;
+    out[s.id]={x:ps.reduce((a,p)=>a+p.x,0)/ps.length,y:ps.reduce((a,p)=>a+p.y,0)/ps.length+dy}; });
+  return out;
+}
+
+/* =====================================================================
+   Drawing (shared SVG primitives; each variant decides layout and what to show)
+   ===================================================================== */
+const REG=new Map();
+function shortModel(m){ return m.replace(/ \(.*\)/,'').replace('N9K-C','N9K-').replace('-FX3',''); }
+function devNode(N,d,extra=''){
+  if(d.kind==='segment') return {id:d.id,shape:'seg',cls:extra,ref:{type:'dev',d}};
+  if(d.kind==='unvisited') return {id:d.id,shape:'dev',cls:'unv '+extra,t:d.label,s:d.reason.length>26?d.reason.slice(0,25)+'…':d.reason,ref:{type:'dev',d}};
+  return {id:d.id,shape:'dev',cls:(d.platform==='NX-OS'?'nx':'xe')+(N.badDev.has(d.id)?' has-bad':'')+' '+extra,t:d.hostname,s:shortModel(d.model),plat:d.platform,ref:{type:'dev',d}};
+}
+function edgeOf(e,o={}){
+  const cls=[e.status,e.role];
+  if(e.type==='bundle') cls.push('bundle'); else if(e.bundle) cls.push('member');
+  const s=sev(e); let badge=null;
+  if(o.mism!==false&&s&&!(s==='noisy'&&o.noisy===false)){ cls.push(s); badge={bad:{t:'!',cls:'bad'},noisy:{t:'~',cls:'noisy'},unknown:{t:'?',cls:'unknown'}}[s]; }
+  if(e.link&&e.link.conflict){ cls.push('conflict'); badge={t:'≠',cls:'conflict'}; }
+  let mid='';
+  if(e.bundle){ const na=e.bundle.names[e.a], nb=e.bundle.names[e.b]; mid=(na===nb?na:`${na} / ${nb}`)+(e.type==='bundle'&&e.count>1?` ×${e.count}`:'')+(e.bundle.vpc?' vPC':'')+(e.role==='vpc-peer-link'?' peer-link':''); }
+  if(e.role==='vpc-keepalive') mid='vPC keepalive';
+  if(o.vlan) cls.push(vlanClass(e,o.vlan));
+  return {id:e.id,a:e.a,b:e.b,cls:cls.join(' '),badge,mid:o.mid===false?'':mid,la:o.ifl?e.ai:'',lb:o.ifl?e.bi:'',ref:{type:'edge',e},
+    title:`${e.a} ${e.ai} ⇄ ${e.b} ${e.bi}`};
+}
+function vlanClass(e,v){
+  const c=e.check, inA=!!(c.ea&&c.ea.includes(v)), inB=!!(c.eb&&c.eb.includes(v));
+  if(c.unknown||!c.ca||!c.cb) return (inA||inB)?'vlan-unk':'vlan-off';
+  if(inA&&inB) return 'vlan-on'; if(inA||inB) return 'vlan-break'; return 'vlan-off';
+}
+function renderScene(g,sc){
+  const P=sc.pos; let h='';
+  const cnt=new Map(),idx=new Map();
+  sc.edges.forEach(e=>{e._k=e.a<e.b?e.a+'|'+e.b:e.b+'|'+e.a; cnt.set(e._k,(cnt.get(e._k)||0)+1);});
+  for(const e of sc.edges){
+    const p1=P[e.a],p2=P[e.b]; if(!p1||!p2) continue;
+    REG.set(e.id,e.ref);
+    const n=cnt.get(e._k),i=idx.get(e._k)||0; idx.set(e._k,i+1);
+    let off=(i-(n-1)/2)*16; if(e.a>e.b) off=-off;
+    const dx=p2.x-p1.x,dy=p2.y-p1.y,len=Math.hypot(dx,dy)||1,nx=-dy/len,ny=dx/len;
+    const cx=(p1.x+p2.x)/2+nx*off*2, cy=(p1.y+p2.y)/2+ny*off*2;
+    const d=`M${p1.x.toFixed(1)},${p1.y.toFixed(1)} Q${cx.toFixed(1)},${cy.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+    const at=t=>({x:(1-t)*(1-t)*p1.x+2*(1-t)*t*cx+t*t*p2.x,y:(1-t)*(1-t)*p1.y+2*(1-t)*t*cy+t*t*p2.y});
+    h+=`<g class="edge ${e.cls||''}" data-id="${esc(e.id)}" data-k="edge"><title>${esc(e.title||'')}</title><path class="hit" d="${d}"/><path class="ln" d="${d}"/>${/\bbundle\b/.test(e.cls)?`<path class="ln2" d="${d}"/>`:''}`;
+    const m=at(.5);
+    if(e.mid) h+=`<text class="lbl mid ${e.midCls||''}" x="${m.x.toFixed(1)}" y="${(m.y-(e.badge?12:5)).toFixed(1)}" text-anchor="middle">${esc(e.mid)}</text>`;
+    if(e.la||e.lb){ const t=Math.min(.42,(e.gap||78)/len);
+      if(e.la){const q=at(t);h+=`<text class="lbl" x="${q.x.toFixed(1)}" y="${(q.y+3).toFixed(1)}" text-anchor="middle">${esc(e.la)}</text>`;}
+      if(e.lb){const q=at(1-t);h+=`<text class="lbl" x="${q.x.toFixed(1)}" y="${(q.y+3).toFixed(1)}" text-anchor="middle">${esc(e.lb)}</text>`;} }
+    if(e.badge) h+=`<g class="badge ${e.badge.cls}" transform="translate(${m.x.toFixed(1)},${m.y.toFixed(1)})"><circle r="8"/><text y="4" text-anchor="middle">${esc(e.badge.t)}</text></g>`;
+    h+='</g>';
+  }
+  for(const l of (sc.labels||[])) h+=`<text class="lane ${l.cls||''}" x="${l.x}" y="${l.y}">${esc(l.text)}</text>`;
+  for(const n of sc.nodes){
+    const p=P[n.id]; if(!p) continue; REG.set(n.id,n.ref);
+    const tr=`transform="translate(${p.x.toFixed(1)},${p.y.toFixed(1)})"`;
+    if(n.shape==='seg'){ h+=`<g class="node seg ${n.cls||''}" data-id="${esc(n.id)}" data-k="node" ${tr}><title>Shared Segment: an unmanaged switch or hub the tool cannot see</title><circle r="15"/><text class="t" y="4" text-anchor="middle">?</text><text class="s" y="29" text-anchor="middle">Shared Segment</text></g>`; continue; }
+    if(n.shape==='subnet'){ const w=Math.max(96,n.t.length*6.4+18); h+=`<g class="node subnet ${n.cls||''}" data-id="${esc(n.id)}" data-k="node" ${tr}><title>${esc(n.title||'')}</title><rect x="${-w/2}" y="-11" width="${w}" height="22" rx="11"/><text class="t" y="4" text-anchor="middle">${esc(n.t)}</text></g>`; continue; }
+    h+=`<g class="node ${n.cls||''}" data-id="${esc(n.id)}" data-k="node" ${tr}><rect x="-64" y="-20" width="128" height="40" rx="6"/>`+
+      `<text class="t" y="-3" text-anchor="middle">${esc(n.t)}</text><text class="s" y="12" text-anchor="middle">${n.plat?`<tspan class="plat">${esc(n.plat)}</tspan> `:''}${esc(n.s)}</text></g>`;
+  }
+  g.innerHTML=h;
+}
+function boundsOf(sc){
+  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+  sc.nodes.forEach(n=>{const p=sc.pos[n.id]; if(!p)return; x0=Math.min(x0,p.x-70);x1=Math.max(x1,p.x+70);y0=Math.min(y0,p.y-30);y1=Math.max(y1,p.y+40);});
+  (sc.labels||[]).forEach(l=>{x0=Math.min(x0,l.x);y0=Math.min(y0,l.y-16);x1=Math.max(x1,l.x+340);});
+  return isFinite(x0)?{x0,y0,x1,y1}:{x0:-100,y0:-100,x1:100,y1:100};
+}
+function attachCanvas(svg,onPick){
+  const g=svg.querySelector('.vp'), s={x:0,y:0,k:1};
+  const apply=()=>g.setAttribute('transform',`translate(${s.x.toFixed(1)} ${s.y.toFixed(1)}) scale(${s.k.toFixed(4)})`);
+  let drag=null,moved=false;
+  svg.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,sx:s.x,sy:s.y,id:e.pointerId};moved=false;});
+  svg.addEventListener('pointermove',e=>{ if(!drag)return; const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+    if(!moved&&Math.abs(dx)+Math.abs(dy)>4){moved=true; try{svg.setPointerCapture(drag.id);}catch(_){}} if(moved){s.x=drag.sx+dx;s.y=drag.sy+dy;apply();} });
+  const end=()=>{drag=null;}; svg.addEventListener('pointerup',end); svg.addEventListener('pointercancel',end);
+  svg.addEventListener('click',e=>{ if(moved){moved=false;return;} const t=e.target.closest('[data-id]'); onPick(t?{id:t.dataset.id,k:t.dataset.k}:null); });
+  const zoomAt=(f,mx,my)=>{ const nk=Math.min(4,Math.max(0.05,s.k*f)); s.x=mx-(mx-s.x)*(nk/s.k); s.y=my-(my-s.y)*(nk/s.k); s.k=nk; apply(); };
+  svg.addEventListener('wheel',e=>{ e.preventDefault(); const r=svg.getBoundingClientRect(); zoomAt(Math.exp(-e.deltaY*0.0015),e.clientX-r.left,e.clientY-r.top); },{passive:false});
+  const api={
+    fit(b){ const r=svg.getBoundingClientRect(); if(!r.width||!r.height)return; const bw=b.x1-b.x0,bh=b.y1-b.y0; const k=Math.min((r.width-40)/bw,(r.height-90)/bh,1.25);
+      s.k=k; s.x=r.width/2-k*(b.x0+bw/2); s.y=(r.height-50)/2-k*(b.y0+bh/2); apply(); },
+    zoom(f){ const r=svg.getBoundingClientRect(); zoomAt(f,r.width/2,r.height/2); },
+    centerOn(p){ const r=svg.getBoundingClientRect(); s.k=Math.max(s.k,0.9); s.x=r.width/2-s.k*p.x; s.y=r.height/2-s.k*p.y; apply(); }
+  };
+  return api;
+}
+function zoomCtl(id){ return `<div class="zoom"><button data-z="in" aria-label="Zoom in">+</button><button data-z="out" aria-label="Zoom out">−</button><button data-z="fit" aria-label="Fit to view">⤢</button></div>`; }
+function wireZoom(root,cv,getBounds){ root.querySelectorAll('.zoom button').forEach(b=>b.onclick=()=>{ if(b.dataset.z==='in')cv.zoom(1.3); else if(b.dataset.z==='out')cv.zoom(1/1.3); else cv.fit(getBounds()); }); }
+function neighbourSet(edges,id){ const s=new Set([id]); edges.forEach(e=>{if(e.a===id)s.add(e.b); if(e.b===id)s.add(e.a);}); return s; }
+
+/* =====================================================================
+   Details (shared content, every variant shows it somewhere)
+   ===================================================================== */
+const CMD={CDP:'show cdp neighbors detail',LLDP:'show lldp neighbors detail',ARP:'show ip arp vrf all',MAC:'show mac address-table'};
+function detail(N,pick){
+  if(!pick) return `<div class="det"><p class="hint">Select a device, Link, Bundle or Subnet to see what the Topology recorded about it.</p></div>`;
+  const r=REG.get(pick.id); if(!r) return `<div class="det"><p class="hint">Not shown in this view.</p></div>`;
+  if(r.type==='dev') return devDetail(N,r.d);
+  if(r.type==='edge') return edgeDetail(N,r.e);
+  if(r.type==='subnet') return subnetDetail(N,r.s);
+  if(r.type==='adj') return `<div class="det"><h3>${esc(r.a.a)} ⇄ ${esc(r.a.b)}</h3><span class="pill l3">L3 Adjacency · ${esc(r.a.proto)}</span><dl><dt>Detail</dt><dd>${esc(r.a.detail)}</dd><dt>Evidence</dt><dd class="mono">${r.a.proto==='shared subnet'?'show ip interface / show ip interface vrf all':'show ip '+r.a.proto.toLowerCase()+' neighbor(s)'}</dd></dl></div>`;
+  return '';
+}
+function devDetail(N,d){
+  if(d.kind==='segment') return `<div class="det"><h3>Shared Segment</h3><span class="pill unv">not a device the tool can see</span><dl><dt>Heard on</dt><dd class="mono">${esc(d.on.join(' '))}</dd><dt>Neighbours heard</dt><dd>${d.hears.map(esc).join(', ')}</dd></dl><p class="note">One interface hears two or more Neighbours, so something unmanaged (switch, hub, vSwitch) sits between them.</p></div>`;
+  if(d.kind==='unvisited') return `<div class="det"><div><h3>${esc(d.label)}</h3><span class="pill unv">Unvisited Device</span><dl>
+    <dt>Reason</dt><dd><b>${esc(d.reason)}</b></dd><dt>Advertised Platform</dt><dd>${esc(d.advPlatform||'—')}</dd><dt>Advertised IPs</dt><dd class="mono">${esc(d.advIps.join(', ')||'—')}</dd><dt>LLDP chassis ID</dt><dd class="mono">${esc(d.chassis||'—')}</dd>
+    <dt>Reported by</dt><dd>${d.reportedBy.map(x=>`${esc(x[0])} <span class="mono">${esc(x[1])}</span> (${esc(x[2])})`).join('<br>')||'—'}</dd></dl></div></div>`;
+  const links=N.physM.filter(e=>e.a===d.id||e.b===d.id).map(e=>{ const me=e.a===d.id; const s=sev(e);
+    return `<tr><td class="mono">${esc(me?e.ai:e.bi)}</td><td>${esc(me?e.b:e.a)} <span class="mono">${esc(me?e.bi:e.ai)}</span></td><td>${esc(e.status)}${e.bundle?` · ${esc(e.bundle.names[d.id])}`:''}</td><td>${s?`<span class="pill ${s}">${s==='bad'?'mismatch':s==='noisy'?'one end only':'unknown'}</span>`:''}${e.link&&e.link.conflict?'<span class="pill conflict">conflict</span>':''}</td></tr>`; }).join('');
+  const l3=N.subnets.flatMap(s=>s.members.filter(m=>m[0]===d.id).map(m=>`<tr><td class="mono">${esc(m[1])}</td><td class="mono">${esc(m[2])}</td><td class="mono">${esc(s.prefix)}</td><td>${esc(s.vrf)}</td></tr>`)).join('');
+  const rt=N.adj.filter(a=>a.a===d.id||a.b===d.id).map(a=>`<tr><td>${esc(a.proto)}</td><td>${esc(a.a===d.id?a.b:a.a)}</td><td>${esc(a.detail)}</td></tr>`).join('');
+  return `<div class="det"><div><h3>${esc(d.hostname)}</h3><span class="pill acc">Visited Device</span>${N.badDev.has(d.id)?'<span class="pill bad">has VLAN Mismatch or conflict</span>':''}<dl>
+    <dt>Platform</dt><dd>${esc(d.platform)}</dd><dt>Model</dt><dd>${esc(d.model)}</dd><dt>Software</dt><dd class="mono">${esc(d.version)}</dd>
+    <dt>Serial${d.serials.length>1?'s':''}</dt><dd class="mono">${esc(d.serials.join(', '))}</dd>${d.stack?`<dt>Stack members</dt><dd>${esc(d.stack.join(', '))}</dd>`:''}
+    <dt>Logged into at</dt><dd class="mono">${esc(d.mgmt)}</dd><dt>Alias IPs</dt><dd class="mono">${esc(d.aliases.join(', ')||'—')}</dd></dl></div>
+    <div><h4>Interfaces with a Link</h4><div class="tblwrap"><table><tr><th>Local</th><th>Far end</th><th>Status</th><th>Checks</th></tr>${links||'<tr><td colspan=4>none</td></tr>'}</table></div></div>
+    ${l3?`<div><h4>L3 interfaces</h4><div class="tblwrap"><table><tr><th>Intf</th><th>IP</th><th>Prefix</th><th>VRF</th></tr>${l3}</table></div></div>`:''}
+    ${rt?`<div><h4>L3 Adjacencies</h4><div class="tblwrap"><table><tr><th>Kind</th><th>With</th><th>Detail</th></tr>${rt}</table></div></div>`:''}
+    <p class="note">The Topology file also records every other interface on this device, down ones included (status, speed, mode, VLANs, description). This view only lists interfaces that have a Link or an IP.</p></div>`;
+}
+function vlanTable(e){
+  const c=e.check; if(c.unknown) return `<div class="find unknown"><b>Unknown, not checked.</b> ${esc(c.unknown)}</div>`;
+  if(c.na) return `<p class="note">${esc(c.na)}</p>`;
+  const row=(k,f)=>`<tr><td>${k}</td><td class="mono">${f(c.ca)}</td><td class="mono">${f(c.cb)}</td></tr>`;
+  return `<div class="tblwrap"><table><tr><th></th><th>${esc(e.a)}</th><th>${esc(e.b)}</th></tr>
+    ${row('Mode',x=>esc(x.mode))}${row('Allowed',x=>x.mode==='trunk'?fmtV(x.allowed):'—')}${row('Native',x=>x.mode==='trunk'?x.native:'—')}${row('Access VLAN',x=>x.mode==='access'?x.vlan:'—')}
+    <tr><td>Effective</td><td class="mono">${fmtV(c.ea)}</td><td class="mono">${fmtV(c.eb)}</td></tr></table></div><p class="note">Effective = allowed and present in that switch's VLAN database.</p>`;
+}
+function edgeDetail(N,e){
+  const s=sev(e);
+  const ev=e.links.map(l=>`<li><span class="mono">${esc(l.a)} ${esc(l.ai)} ⇄ ${esc(l.b)} ${esc(l.bi||'')}</span><br><span class="hint">${esc(l.src.join('; '))}</span></li>`).join('');
+  const cmds=[...new Set(e.links.flatMap(l=>l.src.join(' ').match(/CDP|LLDP|ARP|MAC/g)||[]))].map(k=>`<span class="mono">${CMD[k]}</span>`).join(', ');
+  return `<div class="det"><div><h3>${esc(e.a)} ${esc(e.ai)} ⇄ ${esc(e.b)} ${esc(e.bi||'')}</h3>
+    <span class="pill ${e.status==='confirmed'?'ok':'unv'}">${esc(e.type==='bundle'?'Bundle':'Link')} · ${esc(e.status)}</span>${e.role?`<span class="pill acc">${esc(e.role.replace('vpc-','vPC '))}</span>`:''}${e.bundle&&e.bundle.vpc?'<span class="pill acc">faces a vPC pair</span>':''}
+    ${e.check.kinds.map(k=>`<div class="find ${k.kind===1?'noisy':'bad'}"><b>VLAN Mismatch: ${esc(KIND[k.kind])}.</b> ${esc(k.text)}</div>`).join('')}
+    ${e.link&&e.link.conflict?`<div class="find conflict"><b>Conflict, both claims kept.</b> ${esc(e.link.conflict)}</div>`:''}
+    <h4>Evidence</h4><ul style="margin:0;padding-left:18px">${ev}</ul>${cmds?`<p class="note">From ${cmds}.</p>`:''}</div>
+    <div><h4>VLANs</h4>${vlanTable(e)}</div></div>`;
+}
+function subnetDetail(N,s){
+  return `<div class="det"><div><h3 class="mono">${esc(s.prefix)}</h3><span class="pill l3">Subnet · VRF ${esc(s.vrf)}</span><dl><dt>Note</dt><dd>${esc(s.note)}</dd><dt>Devices</dt><dd>${s.members.length}</dd></dl></div>
+    <div><h4>Attached interfaces</h4><div class="tblwrap"><table><tr><th>Device</th><th>Intf</th><th>IP</th></tr>${s.members.map(m=>`<tr><td>${esc(m[0])}</td><td class="mono">${esc(m[1])}</td><td class="mono">${esc(m[2])}</td></tr>`).join('')}</table></div></div></div>`;
+}
+function l3Scene(N,pos,visible,sdy){
+  const sp=subnetPos(N,pos,sdy), nodes=[], edges=[];
+  N.subnets.forEach(s=>{ if(!sp[s.id])return; pos[s.id]=sp[s.id];
+    nodes.push({id:s.id,shape:'subnet',t:`${s.prefix} · ${s.vrf}`,title:s.note,ref:{type:'subnet',s}});
+    s.members.forEach(m=>{ if(visible(m[0])) edges.push({id:s.id+'>'+m[0],a:s.id,b:m[0],cls:'l3m',title:`${m[0]} ${m[1]} ${m[2]}`,ref:{type:'subnet',s}}); }); });
+  N.adj.forEach(a=>{ if(!visible(a.a)||!visible(a.b))return;
+    edges.push({id:a.id,a:a.a,b:a.b,cls:'l3 '+(a.proto==='shared subnet'?'':a.proto),mid:a.proto==='shared subnet'?(a.detail.split(',')[0]):a.proto,midCls:'proto',title:a.detail,ref:{type:'adj',a}}); });
+  return {nodes,edges};
+}
+function legendItem(svgInner,text){ return `<li><svg width="34" height="12" aria-hidden="true">${svgInner}</svg>${text}</li>`; }
+function lineSample(cls){ return `<g class="edge ${cls}"><path class="ln" d="M2,6 L32,6"/>${/bundle/.test(cls)?'<path class="ln2" d="M2,6 L32,6"/>':''}</g>`; }
+
+/* =====================================================================
+   Variant A: one zoomable canvas with layers
+   ===================================================================== */
+const AS={L:{mism:true,noisy:true,unv:true,members:false,ifl:false,l3:false},vlan:'',pick:null};
+const VA={key:'a',name:'One canvas, layers',
+  blurb:'<b>A · One canvas, layers.</b> Every device on one organic, zoomable canvas. Switch layers on and off (Unvisited Devices, Bundle members, interface names, L3 overlay), trace a VLAN, click anything for its details. Selecting a device dims everything not connected to it.',
+  mount(main,N){
+    const L=AS.L, chip=(k,t)=>`<button class="chip" data-l="${k}" aria-pressed="${L[k]}">${t}</button>`;
+    main.innerHTML=`<div class="a-wrap"><div class="a-stage">
+      <div class="a-tools">${chip('mism','VLAN Mismatches')}${chip('noisy','…incl. "one end only"')}${chip('unv','Unvisited Devices')}${chip('members','Bundle members')}${chip('ifl','Interface names')}${chip('l3','L3 overlay')}
+        <label class="tb-field">Trace VLAN <input id="a-vlan" inputmode="numeric" placeholder="e.g. 20" value="${esc(AS.vlan)}"></label>
+        <label class="tb-field">Find <input id="a-find" list="a-devs" placeholder="hostname"></label><datalist id="a-devs">${N.devices.map(d=>`<option value="${esc(d.id)}">`).join('')}</datalist></div>
+      <svg class="canvas" id="a-svg" aria-label="Topology diagram"><g class="vp"></g></svg>${zoomCtl()}
+      <details class="legend" ${NARROW()?'':'open'}><summary>Legend</summary><ul>
+        ${legendItem(lineSample('confirmed'),'Link, both ends see it')}${legendItem(lineSample('one-sided'),'Link, one end only')}
+        ${legendItem(lineSample('inferred'),'inferred from MAC/ARP')}${legendItem(lineSample('bundle'),'Bundle (port-channel)')}
+        ${legendItem(lineSample('bad'),'VLAN Mismatch <b>!</b>')}${legendItem(lineSample('noisy'),'VLAN on one end only <b>~</b>')}
+        ${legendItem(lineSample('unknown'),'data unknown <b>?</b>')}${legendItem(lineSample('conflict'),'sources conflict <b>≠</b>')}
+        ${legendItem(lineSample('l3 OSPF'),'L3: OSPF/EIGRP/BGP')}${legendItem('<rect x="3" y="1" width="28" height="10" rx="2" fill="var(--ghost)" stroke="var(--unk)" stroke-dasharray="3 2"/>','Unvisited Device')}
+      </ul></details></div><aside class="drawer" id="a-drawer"></aside></div>`;
+    const svg=$('#a-svg'), g=svg.querySelector('.vp');
+    let sc=null;
+    const cv=attachCanvas(svg,p=>{AS.pick=p;draw();});
+    const draw=()=>{ sc=sceneA(N); renderScene(g,sc); $('#a-drawer').innerHTML=detail(N,AS.pick); };
+    main.querySelectorAll('.chip').forEach(b=>b.onclick=()=>{L[b.dataset.l]=!L[b.dataset.l];b.setAttribute('aria-pressed',L[b.dataset.l]);draw();});
+    $('#a-vlan').oninput=e=>{AS.vlan=e.target.value.trim();draw();};
+    $('#a-find').onchange=e=>{ const id=e.target.value.trim(); if(N.byId[id]){AS.pick={id,k:'node'};draw();cv.centerOn(sc.pos[id]);} };
+    wireZoom(main,cv,()=>boundsOf(sc));
+    draw(); cv.fit(boundsOf(sc));
+  }
+};
+function sceneA(N){
+  const L=AS.L, base=forceLayout(N), pos=Object.assign({},base);
+  const show=id=>{const d=N.byId[id]; return d&&(L.unv||d.kind==='visited');};
+  const vlan=parseInt(AS.vlan,10)||0;
+  let nodes=[...N.devices,...N.segments].filter(d=>show(d.id)).map(d=>devNode(N,d));
+  let edges=(L.members?N.physM:N.phys).filter(e=>show(e.a)&&show(e.b)).map(e=>edgeOf(e,{mism:L.mism,noisy:L.noisy,ifl:L.ifl,vlan}));
+  if(L.l3){ const x=l3Scene(N,pos,show,-46); nodes=nodes.concat(x.nodes); edges=edges.concat(x.edges); }
+  if(vlan) nodes.forEach(n=>{ const d=N.byId[n.id]; if(d&&d.kind==='visited'&&!(d.vlans||[]).includes(vlan)) n.cls+=' faded'; });
+  const pk=AS.pick;
+  if(pk){
+    let keep;
+    if(pk.k==='node'){ keep=neighbourSet(edges,pk.id); }
+    else { const e=edges.find(x=>x.id===pk.id); keep=e?new Set([e.a,e.b]):null; }
+    if(keep){ nodes.forEach(n=>{ if(n.id===pk.id) n.cls+=' sel'; else if(!keep.has(n.id)) n.cls+=' faded'; });
+      edges.forEach(e=>{ if(e.id===pk.id) e.cls+=' sel'; else if(!(keep.has(e.a)&&keep.has(e.b)&&(pk.k!=='node'||e.a===pk.id||e.b===pk.id))) e.cls+=' faded';
+        if(pk.k==='node'&&(e.a===pk.id||e.b===pk.id)){ e.la=e.la||(N.phys.concat(N.physM).find(x=>x.id===e.id)||{}).ai||''; e.lb=e.lb||(N.phys.concat(N.physM).find(x=>x.id===e.id)||{}).bi||''; } }); }
+  }
+  return {pos,nodes,edges};
+}
+
+/* =====================================================================
+   Variant B: tiered layout, one tab per layer
+   ===================================================================== */
+const BS={tab:'phys',vlan:20,pick:null};
+const VB={key:'b',name:'Tiered views, one per layer',
+  blurb:'<b>B · Tiered views.</b> Devices in rows by distance from the core (worked out from the Links, since the Topology has no "role"), Unvisited Devices parked in their own lane grouped by reason. One tab per question: <b>Physical</b>, <b>Routing (L3)</b> and <b>VLAN</b>. Positions stay the same across tabs. Details dock at the bottom.',
+  mount(main,N){
+    const vl=[...new Set(N.devices.flatMap(d=>d.kind==='visited'?(d.vlans||[]):[]))].sort((a,b)=>a-b);
+    if(!vl.includes(BS.vlan)) BS.vlan=vl[1]||vl[0];
+    main.innerHTML=`<div class="b-wrap"><div class="b-tabs gut" role="tablist">
+      <button class="tab" role="tab" data-t="phys">Physical</button><button class="tab" role="tab" data-t="l3">Routing (L3)</button><button class="tab" role="tab" data-t="vlan">VLAN</button>
+      <label class="tb-field" id="b-vl">VLAN <select id="b-vsel">${vl.map(v=>`<option ${v===BS.vlan?'selected':''}>${v}</option>`).join('')}</select></label>
+      <div class="b-key" id="b-key"></div></div>
+      <div class="b-stage"><svg class="canvas" id="b-svg" aria-label="Topology diagram"><g class="vp"></g></svg>${zoomCtl()}</div>
+      <div class="b-detail gut" id="b-detail"></div></div>`;
+    const svg=$('#b-svg'), g=svg.querySelector('.vp'); let sc=null;
+    const cv=attachCanvas(svg,p=>{BS.pick=p;draw();});
+    const draw=()=>{
+      main.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected',t.dataset.t===BS.tab));
+      $('#b-vl').hidden=BS.tab!=='vlan';
+      sc=sceneB(N); renderScene(g,sc); $('#b-detail').innerHTML=detail(N,BS.pick); $('#b-key').innerHTML=sc.key||'';
+    };
+    main.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{BS.tab=t.dataset.t;draw();});
+    $('#b-vsel').onchange=e=>{BS.vlan=parseInt(e.target.value,10);draw();};
+    wireZoom(main,cv,()=>boundsOf(sc));
+    draw(); cv.fit(boundsOf(sc));
+  }
+};
+function sceneB(N){
+  const T=tierLayout(N), pos=Object.assign({},T.pos), pk=BS.pick;
+  const all=[...N.devices,...N.segments];
+  let nodes=[],edges=[],key='';
+  if(BS.tab==='phys'){
+    nodes=all.map(d=>devNode(N,d));
+    edges=N.phys.filter(e=>{ const toU=N.byId[e.a].kind==='unvisited'||N.byId[e.b].kind==='unvisited'; return !toU||(pk&&(e.a===pk.id||e.b===pk.id||e.id===pk.id)); })
+      .map(e=>{ const touch=pk&&pk.k==='node'&&(e.a===pk.id||e.b===pk.id); const o=edgeOf(e,{ifl:touch});
+      if(N.byId[e.a].kind==='unvisited'||N.byId[e.b].kind==='unvisited') o.cls+=' to-unv'; return o; });
+    const s=N.stats; key=`<span><b style="color:var(--bad)">!</b> ${s.bad} mismatch</span><span><b style="color:var(--warn)">~</b> ${s.noisy} one end only</span><span><b>?</b> ${s.unknown} unknown</span><span><b style="color:var(--conflict)">≠</b> ${s.conflict} conflict</span>`;
+  } else if(BS.tab==='l3'){
+    const inL3=new Set(); N.subnets.forEach(s=>s.members.forEach(m=>inL3.add(m[0]))); N.adj.forEach(a=>{inL3.add(a.a);inL3.add(a.b);});
+    nodes=all.filter(d=>d.kind==='visited'||inL3.has(d.id)).map(d=>devNode(N,d,inL3.has(d.id)?'':'faded'));
+    const x=l3Scene(N,pos,id=>!!N.byId[id],62); nodes=nodes.concat(x.nodes); edges=x.edges;
+    key='<span>Subnet = prefix shared by 3+ devices</span><span>dashed = routing protocol</span><span>faded = no L3 interfaces</span>';
+  } else {
+    const v=BS.vlan;
+    nodes=all.map(d=>devNode(N,d,(d.kind==='visited'&&(d.vlans||[]).includes(v))?'':'faded'));
+    edges=N.phys.map(e=>{ const o=edgeOf(e,{mism:false,vlan:v,mid:false}); return o; });
+    const on=edges.filter(e=>/vlan-on/.test(e.cls)).length, br=edges.filter(e=>/vlan-break/.test(e.cls)).length, un=edges.filter(e=>/vlan-unk/.test(e.cls)).length;
+    key=`<span style="color:var(--accent)"><b>${on}</b> carry VLAN ${v}</span><span style="color:var(--bad)"><b>${br}</b> stop at one end</span><span><b>${un}</b> unknown far end</span>`;
+  }
+  if(pk&&pk.k==='node') nodes.forEach(n=>{ if(n.id===pk.id) n.cls+=' sel'; });
+  if(pk&&pk.k==='edge') edges.forEach(e=>{ if(e.id===pk.id) e.cls+=' sel'; });
+  return {pos,nodes,edges,labels:T.labels,key};
+}
+
+/* =====================================================================
+   Variant C: findings first, neighbourhood diagram on demand
+   ===================================================================== */
+const CS={sel:null,filter:'',pick:null};
+const VC={key:'c',name:'Findings first, local diagram',
+  blurb:'<b>C · Findings first.</b> No full map. The left column lists what needs attention, then everything else; picking an item draws only its neighbourhood, with interface names always on. Click a device in the drawing to walk to it. Scales to any size because it never draws the whole network.',
+  mount(main,N){
+    const F=N.findings, by=c=>F.filter(f=>f.cat===c);
+    const fbtn=(f,i)=>`<button class="fi" data-f="${i}"><span class="dot ${f.cat==='onesided'||f.cat==='inferred'?'acc':f.cat}"></span>${esc(f.edge.a)} ⇄ ${esc(f.edge.b)}<span class="k">${esc(f.kind?KIND[f.kind]+': ':'')}${esc(f.text)}</span></button>`;
+    const idx=f=>F.indexOf(f);
+    const sec=(title,items,open,sub='')=>`<details ${open?'open':''}><summary>${title}<span class="n">${items.length}</span></summary>${sub?`<div class="sub">${sub}</div>`:''}${items.map(f=>fbtn(f,idx(f))).join('')||'<div class="sub">none</div>'}</details>`;
+    const attn=[...by('bad'),...by('conflict')];
+    const unvSec=`<details><summary>Unvisited Devices<span class="n">${N.stats.unv}</span></summary>${Object.keys(N.byReason).sort().map(r=>`<div class="rgh">${esc(r)} (${N.byReason[r].length})</div>${N.byReason[r].map(d=>`<button class="fi" data-d="${esc(d.id)}"><span class="dot unv"></span>${esc(d.label)}<span class="k">reported by ${esc(d.reportedBy.map(x=>x[0]).join(', '))}</span></button>`).join('')}`).join('')}</details>`;
+    const devSec=`<details><summary>All Visited Devices<span class="n">${N.stats.vis}</span></summary><input class="c-filter" id="c-filter" placeholder="Filter by name or model" value="${esc(CS.filter)}"><div id="c-devs"></div></details>`;
+    main.innerHTML=`<div class="c-wrap"><aside class="c-side">
+      ${sec('Needs attention',attn,true,'VLAN Mismatches that break traffic, and conflicting evidence.')}
+      ${sec('Not checked: data unknown',by('unknown'),true,'A command was refused or failed, so these are never called a Mismatch.')}
+      ${sec('VLAN on one end only',by('noisy'),false,'Often harmless: "allowed all" facing a pruned list. Kept apart so it does not drown the rest.')}
+      ${sec('One-sided Links between Visited Devices',by('onesided'),false)}
+      ${sec('Inferred from MAC/ARP',by('inferred'),false)}
+      ${unvSec}${devSec}</aside>
+      <section class="c-main"><div class="c-stage"><div class="c-crumb" id="c-crumb"></div><svg class="canvas" id="c-svg" aria-label="Neighbourhood diagram"><g class="vp"></g></svg>${zoomCtl()}</div>
+      <div class="c-detail gut" id="c-detail"></div></section></div>`;
+    const svg=$('#c-svg'), g=svg.querySelector('.vp'); let sc=null;
+    const cv=attachCanvas(svg,p=>{ if(p&&p.k==='node'&&N.byId[p.id]&&N.byId[p.id].kind!=='segment'){ select({centers:[p.id],pick:p,label:p.id}); } else if(p){ CS.pick=p; draw(false); } });
+    const listDevs=()=>{ const q=CS.filter.toLowerCase(); $('#c-devs').innerHTML=N.devices.filter(d=>d.kind==='visited'&&(d.id+' '+d.model).toLowerCase().includes(q)).slice(0,80)
+      .map(d=>`<button class="fi" data-d="${esc(d.id)}"><span class="dot acc"></span>${esc(d.id)}<span class="k">${esc(d.platform)} · ${esc(d.model)}</span></button>`).join(''); };
+    const draw=(refit)=>{ sc=sceneC(N); renderScene(g,sc); $('#c-detail').innerHTML=detail(N,CS.pick); $('#c-crumb').textContent=CS.sel?CS.sel.label:'';
+      main.querySelectorAll('.fi').forEach(b=>b.setAttribute('aria-current',(b.dataset.f!==undefined&&CS.sel&&String(CS.sel.f)===b.dataset.f)||(b.dataset.d&&CS.sel&&CS.sel.f===undefined&&CS.sel.centers[0]===b.dataset.d)?'true':'false'));
+      if(refit) cv.fit(boundsOf(sc)); };
+    const select=s=>{ CS.sel=s; CS.pick=s.pick; draw(true); };
+    const selFinding=i=>{ const f=F[i]; select({f:i,centers:[f.edge.a,f.edge.b],focus:f.edge.id,pick:{id:f.edge.id,k:'edge'},label:`${f.edge.a} ⇄ ${f.edge.b}`}); };
+    main.querySelector('.c-side').addEventListener('click',e=>{ const b=e.target.closest('.fi'); if(!b)return;
+      if(b.dataset.f!==undefined) selFinding(+b.dataset.f); else select({centers:[b.dataset.d],pick:{id:b.dataset.d,k:'node'},label:b.dataset.d}); });
+    $('#c-filter').oninput=e=>{CS.filter=e.target.value;listDevs();};
+    listDevs(); wireZoom(main,cv,()=>boundsOf(sc));
+    if(CS.sel&&CS.sel.centers.every(id=>N.byId[id])) select(CS.sel); else if(attn.length) selFinding(idx(attn[0])); else select({centers:[N.devices[0].id],pick:{id:N.devices[0].id,k:'node'},label:N.devices[0].id});
+  }
+};
+function sceneC(N){
+  const sel=CS.sel, cs=sel.centers, pos={}, nodes=[], edges=[];
+  const rel=N.phys.filter(e=>cs.includes(e.a)||cs.includes(e.b));
+  const nb=c=>[...new Set(rel.filter(e=>e.a===c||e.b===c).map(e=>e.a===c?e.b:e.a))].filter(x=>!cs.includes(x));
+  const place=(list,cx,a0,a1)=>{ const n=list.length; if(!n)return; const span=a1-a0, R=Math.max(230,n*54/Math.max(span,0.5));
+    list.sort().forEach((id,i)=>{ const a=n===1?(a0+a1)/2:a0+span*i/(n-1); pos[id]={x:cx+R*Math.cos(a),y:R*Math.sin(a)}; }); };
+  if(cs.length===1){ pos[cs[0]]={x:0,y:0}; const l=nb(cs[0]); place(l,0,-Math.PI/2,-Math.PI/2+2*Math.PI*(1-1/Math.max(l.length,1))); }
+  else { pos[cs[0]]={x:-190,y:0}; pos[cs[1]]={x:190,y:0};
+    const n0=nb(cs[0]),n1=nb(cs[1]), shared=n0.filter(x=>n1.includes(x));
+    place(n0.filter(x=>!shared.includes(x)),-190,Math.PI*0.62,Math.PI*1.38); place(n1.filter(x=>!shared.includes(x)),190,-Math.PI*0.38,Math.PI*0.38);
+    shared.sort().forEach((id,i)=>pos[id]={x:0,y:(i%2?1:-1)*(170+Math.floor(i/2)*70)}); }
+  Object.keys(pos).forEach(id=>nodes.push(devNode(N,N.byId[id],cs.includes(id)?'center':'')));
+  rel.forEach(e=>{ if(!pos[e.a]||!pos[e.b])return; const o=edgeOf(e,{ifl:true}); o.gap=82; if(sel.focus&&e.id===sel.focus) o.cls+=' sel'; edges.push(o); });
+  if(CS.pick&&CS.pick.k==='node') nodes.forEach(n=>{ if(n.id===CS.pick.id) n.cls+=' sel'; });
+  return {pos,nodes,edges};
+}
+
+/* =====================================================================
+   Shell: header stats, variant switcher, dataset switcher
+   ===================================================================== */
+const VARIANTS=[VA,VB,VC];
+const DATA={};
+let size='small';
+const getN=()=>DATA[size]||(DATA[size]=build(size));
+function pickVariant(){ let q=null; try{q=new URLSearchParams(location.search).get('variant');}catch(_){} const h=(location.hash.match(/^#variant-([abc])$/i)||[])[1]; const k=(h||q||'a').toLowerCase(); return VARIANTS.find(v=>v.key===k)?k:'a'; }
+let cur=pickVariant();
+function mount(){
+  const N=getN(), V=VARIANTS.find(v=>v.key===cur), s=N.stats;
+  $('#stats').innerHTML=`<span><b>${s.vis}</b> Visited</span><span><b>${s.unv}</b> Unvisited</span><span><b>${s.links}</b> Links</span><span><b>${s.bundles}</b> Bundles</span><span><b>${s.subnets}</b> Subnets</span><span class="bad"><b>${s.bad}</b> VLAN Mismatches</span><span class="warn"><b>${s.noisy}</b> one end only</span><span><b>${s.unknown}</b> unknown</span><span class="cf"><b>${s.conflict}</b> conflict${s.conflict===1?'':'s'}</span>`;
+  $('#blurb').innerHTML=V.blurb;
+  $('#sw-lab').textContent=`${V.key.toUpperCase()} · ${V.name}`;
+  $('#sw-small').setAttribute('aria-pressed',size==='small'); $('#sw-large').setAttribute('aria-pressed',size==='large');
+  REG.clear(); V.mount($('#main'),N);
+}
+function step(d){ const i=VARIANTS.findIndex(v=>v.key===cur); cur=VARIANTS[(i+d+VARIANTS.length)%VARIANTS.length].key; try{ location.hash='variant-'+cur; }catch(_){ } mount(); }
+window.addEventListener('hashchange',()=>{ const k=pickVariant(); if(k!==cur){cur=k;mount();} });
+$('#sw-prev').onclick=()=>step(-1); $('#sw-next').onclick=()=>step(1);
+const setSize=s=>{ if(s===size)return; size=s; AS.pick=BS.pick=CS.pick=null; CS.sel=null; mount(); };
+$('#sw-small').onclick=()=>setSize('small'); $('#sw-large').onclick=()=>setSize('large');
+document.addEventListener('keydown',e=>{ const t=e.target; if(t.closest&&t.closest('input,textarea,select,[contenteditable]'))return; if(e.key==='ArrowLeft')step(-1); else if(e.key==='ArrowRight')step(1); });
+let rt=null; window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(mount,250);});
+mount();
+</script>
