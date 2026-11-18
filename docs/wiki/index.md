@@ -9,6 +9,7 @@ A dated, historical record kept by the coordinating (chief-of-staff) session and
 - [spec-37-follow-ups](spec-37-follow-ups.md): work one ticket surfaced for a later one.
 - [merger-brief](merger-brief.md): how a finished ticket branch is merged into the integration branch.
 - [cloud-container-checks](cloud-container-checks.md): how to run the project's checks in a Linux cloud container (uv 0.13.9 shim).
+- [usage-limits](usage-limits.md): 2026-11-18 rate limit stopped four implementers; how they were resumed and what to change.
 - [agent-worktree-friction](agent-worktree-friction.md): known quirks of agent worktrees and how briefs work around them.
 
 ## Decisions
