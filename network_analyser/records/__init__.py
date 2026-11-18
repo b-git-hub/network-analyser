@@ -12,17 +12,20 @@ from network_analyser.records.host_keys import (
     HostKeyVerdict,
     MalformedHostKeyError,
 )
+from network_analyser.records.platform import CredentialSetView, Platform
 from network_analyser.records.run_request import RunRequest, Source, Sourced
 from network_analyser.records.scope import NEVER_TARGETS, AddressRange, Placement, ScopeRecord
 
 __all__ = [
     "NEVER_TARGETS",
     "AddressRange",
+    "CredentialSetView",
     "HostKey",
     "HostKeyCheck",
     "HostKeyVerdict",
     "MalformedHostKeyError",
     "Placement",
+    "Platform",
     "RunRequest",
     "ScopeRecord",
     "Source",

@@ -142,6 +142,9 @@ WRITE_OWNERS: frozenset[str] = frozenset(
         # #42: the Run register, paths only, temp-then-rename. #48's secret scan is not
         # built yet; the register holds no typed secret (labels pass the allow-list).
         "backup_store/register.py",
+        # #45: the Backup check file, temp-then-rename. It holds only age ciphertext of a
+        # fixed, known phrase; the passphrase itself never reaches the file.
+        "backup_store/check_file.py",
         # #46: the Trust Store, OpenSSH known_hosts lines of public host keys only,
         # temp-then-rename. It never holds a secret, so #48's scan has nothing to find.
         "trust_store/store.py",
