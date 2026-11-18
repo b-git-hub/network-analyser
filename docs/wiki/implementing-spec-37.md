@@ -34,3 +34,4 @@ How [spec #37](https://github.com/b-git-hub/network-analyser/issues/37) (Network
 - 2026-11-18: the 5-hour usage limit hit again at about 16:30 UTC, stopping #48's implementer and #47's merger (which had already merged and pushed `b428a5e`). At 20:31 UTC the operator-requested reminder fired; #48 resumed with SendMessage; checks re-run on the tip (498 passed).
 - 2026-11-18: merged #48 at `a1d294e`; no conflicts, check.py all green, 561 tests passed; adds audit log, secret scan and redaction layer.
 - 2026-11-18: merged #49 at `994678340c2f`; no conflicts, check.py all green, 827 tests passed; adds SSH seed login, Platform identification, allow-list gate and trust-key command.
+- 2026-11-18: wave 4 started after #49 merged: #50, #51, #52, #53 in parallel.
