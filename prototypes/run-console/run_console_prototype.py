@@ -5,7 +5,8 @@ Question ("How the operator starts and follows a Run", issue 31):
 what does using Network Analyser look like at the console, from typing the
 command to the final summary?
 
-What you can switch from the launcher menu:
+The launcher offers numbered tours (each plays one case end to end), and
+a custom menu that mixes:
   - how the Run is started: 1 flags, 2 run file, 3 asked at the prompt
   - how progress is shown:  A log lines, B live panel, C quiet
   - the scenario:           normal, partial failures, stopped with Ctrl+C
@@ -902,7 +903,11 @@ def before_run(cfg):
           "Sweep off, host keys: trust on first use")
     if source not in ("command line", "asked"):
         print(f"              (Scope, Seeds and options from {source})")
-    ans = ask("Start the Run? [Y/n] ").strip().lower()
+    if cfg.get("auto"):
+        typed(cfg, "Start the Run? [Y/n] ", "y")
+        ans = "y"
+    else:
+        ans = ask("Start the Run? [Y/n] ").strip().lower()
     if ans not in ("", "y", "yes"):
         print("Run cancelled. Nothing was contacted and nothing was saved.")
         return 3
@@ -1082,9 +1087,67 @@ SCEN_NAMES = {"normal": "normal", "partial": "partial failures", "stopped": "sto
 SPEEDS = [4, 8, 16, 32]
 
 
-def launcher():
+def base_cfg(**kw):
     cfg = dict(start="1", view="a", scenario="normal", no_seeds=False, brisk=False, mistake=False,
-               speed=8, parallel=10, budget=3, folder="20261118T101530Z_dc1-core")
+               speed=8, parallel=10, budget=3, folder="20261118T101530Z_dc1-core", auto=False)
+    cfg.update(kw)
+    return cfg
+
+
+TOURS = [
+    ("Normal Run, shown as log lines (A)", dict(view="a")),
+    ("Normal Run, shown as the live panel (B)", dict(view="b")),
+    ("Normal Run, shown quietly (C)", dict(view="c")),
+    ("Run with problems, live panel (B)", dict(view="b", scenario="partial")),
+    ("Run with problems, log lines (A)", dict(view="a", scenario="partial")),
+    ("Run with problems, quiet (C)", dict(view="c", scenario="partial")),
+    ("Stopped with Ctrl+C at 1:15 (press Ctrl+C again to close sessions at once)",
+     dict(view="b", scenario="stopped")),
+    ("Started from a run file, with Seeds left out so they are asked for",
+     dict(view="a", start="2", no_seeds=True)),
+    ("Started with nothing, so Scope and Seeds are asked for (try typos)", dict(view="a", start="3")),
+    ("A typo in the Scope on the command line: refused", dict(start="1", mistake=True)),
+]
+
+
+def launcher():
+    while True:
+        print()
+        print("=" * 76)
+        print(" PROTOTYPE: How the operator starts and follows a Run   (nothing is real)")
+        print("=" * 76)
+        print(" Pick a tour. It plays from the typed command to the final summary.")
+        print(" Press Ctrl+C during any Run to stop it the way the real tool would.")
+        print()
+        for k, (name, _) in enumerate(TOURS, 1):
+            print(f"  {k:>2}  {name}")
+        print()
+        print("   h  proposed help text for every command")
+        print("   c  custom: mix the settings yourself")
+        print("   q  quit")
+        try:
+            choice = ask("Tour number> ").strip().lower()
+        except KeyboardInterrupt:
+            print()
+            return
+        if choice.isdigit() and 1 <= int(choice) <= len(TOURS):
+            name, kw = TOURS[int(choice) - 1]
+            print(f"\n--- Tour {choice}: {name} ---")
+            play(base_cfg(brisk=True, auto=kw.get("start") != "3", **kw))
+        elif choice == "h":
+            print(HELP)
+            try:
+                ask("[Enter to go back] ")
+            except KeyboardInterrupt:
+                pass
+        elif choice == "c":
+            custom()
+        elif choice == "q":
+            return
+
+
+def custom():
+    cfg = base_cfg()
     while True:
         print()
         print("=" * 72)
@@ -1098,7 +1161,7 @@ def launcher():
         print(f"           x  a mistake in the Scope (see the refusal): {'on' if cfg['mistake'] else 'off'}")
         print(f"           k  play the secret prompts briskly: {'on' if cfg['brisk'] else 'off'}")
         print(f"           f  speed x{cfg['speed']} (the clock shown is simulated time)")
-        print(" Other     h  proposed help text     r or Enter  start     q  quit")
+        print(" Other     r or Enter  start (answer Y or Enter at 'Start the Run?')     q  back to tours")
         try:
             choice = ask("> ").strip().lower()
         except KeyboardInterrupt:
@@ -1118,9 +1181,6 @@ def launcher():
             cfg["brisk"] = not cfg["brisk"]
         elif choice == "f":
             cfg["speed"] = SPEEDS[(SPEEDS.index(cfg["speed"]) + 1) % len(SPEEDS)]
-        elif choice == "h":
-            print(HELP)
-            ask("[Enter to go back] ")
         elif choice == "q":
             return
         elif choice in ("r", ""):
