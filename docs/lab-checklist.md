@@ -178,10 +178,13 @@ From [Python network automation libraries and packaging as a Windows exe](https:
 |---|---|---|---|
 | G1 | The zip size (target under 100 MB; a miss is a warning, not a blocker) and the unpacked folder size, as `build.ps1` prints them. | | |
 | G2 | Cold start to the first prompt, with Defender on, on a PC at the smallest supported spec (Windows 11 64-bit, 8 GiB, 4 cores). Target under 5 s; a miss is a warning. | | |
-| G3 | Long paths: a Run folder path over 260 characters (a deep `--runs-dir`) works through `\\?\` paths, without relying on the Windows `LongPathsEnabled` setting. | | |
+| G3 | Long paths: a Run folder path over 260 characters (a deep `--runs-dir`) works through `\\?\` paths, without relying on the Windows `LongPathsEnabled` setting. With [#42](https://github.com/b-git-hub/network-analyser/issues/42) alone, check that `run --runs-dir <a path over 260 characters>` gets past the folder check (it creates the folder and prints no "cannot be created" refusal). | | |
 | G4 | Does the unsigned build run at all? Record whether Smart App Control is on (Windows Security → App & browser control) and whether any IT policy blocks the exe, a `.pyd` or a DLL. A block is the trigger to bring signing forward. | | |
 | G5 | Masked prompt, paste: a password pasted from your password manager arrives whole, with one `*` per character. | | |
 | G6 | Masked prompt, keys: Ctrl+C at any secret prompt cancels cleanly, with no traceback, nothing saved and exit code 3. Backspace removes a character; arrow and function keys put nothing into the password. | | |
+| G7 | Run folder permissions ([#42](https://github.com/b-git-hub/network-analyser/issues/42)): `network-analyser run` with the default Runs folder prints no permissions warning. With `--runs-dir D:\na-test` (or any folder where Authenticated Users or Users have Modify), it prints one warning line naming those accounts and the tampering risk, then carries on. The tool changes no permissions (compare the folder's Security tab before and after). | | |
+| G8 | Location notice ([#42](https://github.com/b-git-hub/network-analyser/issues/42)): `--runs-dir` on a mapped network drive, on a `\\server\share` path, inside your OneDrive folder and on a USB stick each print one notice line naming the kind of place, and the Run goes on. The default Runs folder prints none. | | |
+| G9 | One Run at a time ([#42](https://github.com/b-git-hub/network-analyser/issues/42)): while one `run` waits at a prompt, a second `run` or `change-passphrase` in another window is refused with exit code 2. End the first one from Task Manager (a crash); a new `run` then starts normally. | | |
 
 ## Walkthrough of the tool
 

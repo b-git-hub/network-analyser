@@ -11,6 +11,7 @@ import sys
 from collections.abc import Callable
 from typing import NoReturn, override
 
+from network_analyser import run_output
 from network_analyser._version import __version__
 from network_analyser.cli.exit_codes import ExitCode
 
@@ -80,6 +81,13 @@ def _int_between(low: int, high: int | None = None) -> Callable[[str], int]:
         return value
 
     return parse
+
+
+def _label(text: str) -> str:
+    problem = run_output.label_problem(text)
+    if problem is not None:  # the reason never quotes the label
+        raise argparse.ArgumentTypeError(problem)
+    return text
 
 
 def _fingerprint(text: str) -> str:
@@ -220,8 +228,10 @@ def _add_run(commands: _Commands) -> None:
     )
     outputs.add_argument(
         "--label",
+        type=_label,
         metavar="TEXT",
-        help="added to the Run folder name (letters, digits, - . _; 32 at most)",
+        help=f"added to the Run folder name (letters, digits, - . _; {run_output.LABEL_MAX} "
+        "at most)",
     )
     outputs.add_argument(
         "--progress",

@@ -131,7 +131,18 @@ def _safe_exception_use(node: ast.Name, up: dict[ast.AST, ast.AST]) -> bool:
 # Files are written only by the writer helpers, which scan for secrets and write temp-then-
 # rename (decision #30; CLAUDE.md: no plaintext config on disk). A ticket that adds a writer
 # adds its file here, and says why in the commit.
-WRITE_OWNERS: frozenset[str] = frozenset()
+WRITE_OWNERS: frozenset[str] = frozenset(
+    {
+        # #42: opens the single-instance lock file; never writes into it.
+        "_winsys/lock.py",
+        # #42: the "can a Run folder be written here" probe file, written before any prompt,
+        # so it holds only a fixed word, never a secret.
+        "run_output/folder.py",
+        # #42: the Run register, paths only, temp-then-rename. #48's secret scan is not
+        # built yet; the register holds no typed secret (labels pass the allow-list).
+        "backup_store/register.py",
+    }
+)
 _WRITE_CALLS = frozenset({"write_text", "write_bytes", "symlink_to", "hardlink_to", "touch"})
 _WRITE_FUNCTIONS = {
     "os": frozenset({"open", "replace", "rename", "renames", "link", "symlink", "makedirs"}),
