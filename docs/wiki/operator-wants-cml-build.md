@@ -4,7 +4,7 @@ On 2026-11-18, while spec #37 was being built, the operator went AFK and said: "
 
 What the coordinating session took this to mean (2026-11-18):
 - Keep the ticket frontier moving without waiting for the operator; make reversible calls and record them here rather than asking.
-- The deliverable is a Windows build the operator can download and run against the CML lab from #39. A tag-triggered release (#47) needs a tag push, which the building session may not do, so CI should also build the one-folder zip on `windows-latest` and upload it as an Actions artifact on every push to the integration branch (planned with #44/#47).
+- (Superseded 2026-11-18 by [spec-37-implementation-calls](spec-37-implementation-calls.md) item 1: no CI; the operator runs build.ps1.) The deliverable is a Windows build the operator can download and run against the CML lab from #39. A tag-triggered release (#47) needs a tag push, which the building session may not do, so CI should also build the one-folder zip on `windows-latest` and upload it as an Actions artifact on every push to the integration branch (planned with #44/#47).
 - Security rules in CLAUDE.md still win over speed; anything that would trade them away waits for the operator.
 
 See [implementing-spec-37](implementing-spec-37.md).

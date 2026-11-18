@@ -6,7 +6,7 @@ Written 2026-11-18 by the session building spec #37. Later edits are dated below
 You implement ONE ticket of spec https://github.com/b-git-hub/network-analyser/issues/37. Read, in order:
 1. /home/user/network-analyser/CLAUDE.md (security rules are non-negotiable), GLOSSARY.md, docs/adr/.
 2. Your ticket on GitHub (GitHub MCP tools via ToolSearch: `mcp__github__issue_read`, owner b-git-hub, repo network-analyser), and any decision ticket/ADR it links that you need.
-3. docs/wiki/index.md and the pages it points to, plus the exploration notes the coordinator names in your prompt.
+3. docs/wiki/index.md and the pages it points to, especially [spec-37-implementation-calls](spec-37-implementation-calls.md) and the snapshots in [spec-37-notes/](spec-37-notes/).
 4. CODING_STANDARDS.md in the repo, once it exists. It wins over your habits.
 
 ## Branch rules
