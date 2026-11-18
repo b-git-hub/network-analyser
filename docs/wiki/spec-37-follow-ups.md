@@ -35,3 +35,6 @@ Work that a finished ticket surfaced for a later ticket. The coordinator copies 
 - 2026-11-18, from #45: the passphrase must reach the locking worker. Target: #51.
 - 2026-11-18, from #45: fold `check.notices` and `sets.views()` into the Run report. Target: #66.
 - 2026-11-18, from #45: choices awaiting the operator: the first Run's passphrase entry also gets 3 tries; a non-y/n answer is asked again; "label matches a secret" means equal, not contains; usernames are stripped and escaped, not refused.
+- 2026-11-18, from #69 (merged at `671ed95`): `trust-key` must call `cli.trust_folder.check_trust_folder` while holding the lock. Target: whichever ticket wires `trust-key` (#49 if none other does).
+- 2026-11-18, from #69: `cmd_run` ignores the warning `check_trust_folder` returns; put it in the Run report. Target: #66.
+- 2026-11-18, from #69: secure default taken without the operator: any account other than the operator, SYSTEM, Administrators, CREATOR OWNER or OWNER RIGHTS with read/modify on `trust\` (or unreadable permissions) refuses the Run with exit 2. Awaiting the operator's confirmation after the first Windows run (lab row G14).
