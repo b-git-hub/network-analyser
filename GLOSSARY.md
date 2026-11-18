@@ -25,7 +25,7 @@ A device the tool logged into during a Run and identified as a supported Platfor
 _Avoid_: Managed device, polled device
 
 **Unvisited Device**:
-A device known to exist (from a Neighbour advertisement, MAC table or ARP table) that is not a Visited Device. Either it was not logged into, because it is outside the Scope, advertised as an unsupported Platform, unreachable, or refused by the connection safety policy; or it was logged into but found to be an unsupported Platform, and left at once.
+A device known to exist (from a Neighbour advertisement, routing data, MAC table or ARP table) that is not a Visited Device. Either it was not logged into, because it is outside the Scope, advertised as an unsupported Platform, known only from routing or ARP data, unreachable, or refused by the connection safety policy; or it was logged into but found to be an unsupported Platform, and left at once.
 _Avoid_: Unmanaged device, ghost
 
 **Platform**:
@@ -65,13 +65,25 @@ The devices, Links and L3 Adjacencies found during a Run, from which the diagram
 _Avoid_: Network map, graph
 
 **Link**:
-A physical connection between two device interfaces, either advertised by CDP/LLDP or inferred from MAC and ARP tables.
+A physical connection between two device interfaces, either advertised by CDP/LLDP or inferred from MAC and ARP tables. Several Links may form a Bundle.
 _Avoid_: Connection, edge, cable
+
+**Bundle**:
+Several Links joined into one logical channel (a port-channel), including one whose far ends sit on the two peers of a vPC pair.
+_Avoid_: LAG, aggregate link, trunk
+
+**Shared Segment**:
+A part of the network the tool cannot see, such as an unmanaged switch or hub, known only because one interface hears two or more Neighbours.
+_Avoid_: Cloud, hub, unknown switch
 
 **L3 Adjacency**:
 A routed relationship between two devices, such as a shared subnet or a routing protocol neighbourship.
 _Avoid_: Route, peering
 
+**Subnet**:
+An IP prefix within one VRF that interfaces on three or more devices share, placing all of them in L3 Adjacency with one another.
+_Avoid_: Network, LAN, segment
+
 **VLAN Mismatch**:
-A VLAN that is allowed or present on one end of a Link but not on the other.
+A disagreement in VLAN settings between the two ends of a Link or Bundle: a VLAN carried on one end but not the other, differing native VLANs, a trunk facing an access port, or differing access VLANs.
 _Avoid_: VLAN error, trunk mismatch
