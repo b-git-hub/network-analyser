@@ -58,6 +58,10 @@ _Avoid_: Backup password, encryption key, master password
 The operator's record, kept between Runs, of trusted SSH host keys (and, once an HTTPS Platform is supported, pinned certificate fingerprints), against which every device is checked before a password is sent.
 _Avoid_: Known hosts, key cache, trust list
 
+**Run register**:
+The operator's list, kept between Runs, of the Run folders the tool has created, used to find every Backup when the Backup Passphrase changes.
+_Avoid_: Run index, history
+
 ## Outputs
 
 **Backup**:
