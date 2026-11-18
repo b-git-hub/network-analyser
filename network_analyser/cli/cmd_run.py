@@ -3,7 +3,8 @@
 Until the Run-start ticket (#45) lands, `run` stops after showing the checked Scope and Seeds
 (ticket #41). No packet is ever sent. Before anything else, and before any prompt, it takes
 the single-instance lock and checks a Run folder can be made where it will go (#42); the
-lock is held until `run` ends.
+lock is held until `run` ends. It also checks that only the operator can read or change the
+Trust Store folder (#69).
 """
 
 import argparse
@@ -22,6 +23,7 @@ from network_analyser.cli.run_folder import (
     refuse,
 )
 from network_analyser.cli.text import escape_controls
+from network_analyser.cli.trust_folder import check_trust_folder
 
 
 def run(args: argparse.Namespace) -> ExitCode:
@@ -30,6 +32,7 @@ def run(args: argparse.Namespace) -> ExitCode:
         data = find_data_folder()
         with hold_instance_lock(data):
             check_where_run_folder_goes(data, args.runs_dir)
+            check_trust_folder(data)  # #69: only the operator may reach the Trust Store
             return _after_folder_checks(args)
     except RefusedError as error:
         refuse(args.command, fixed_message(error))

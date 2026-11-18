@@ -10,9 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from network_analyser import backup_store, run_output
+from network_analyser import _winsys, backup_store, run_output
 from network_analyser.cli import ExitCode, main
-from network_analyser.cli.run_folder import create_and_register
+from network_analyser.cli.run_folder import RefusedError, create_and_register, fixed_message
+from network_analyser.cli.trust_folder import check_trust_folder
 
 NOT_BUILT = "not built yet"
 
@@ -119,3 +120,28 @@ def test_the_run_folder_enters_the_register_the_moment_it_is_created(tmp_path: P
     assert folder.path == tmp_path / "runs" / "20261118T101530Z_lab"
     assert folder.path.is_dir()
     assert backup_store.registered_run_folders(data.run_register) == (folder.path,)
+
+
+def test_a_trust_folder_others_can_reach_refuses_with_its_fixed_message(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    others = _winsys.Grant(sid="S-1-5-32-545", name="BUILTIN\\Users")
+    windows = run_output.FolderFacts(
+        modify_grants=lambda _path: (others,),
+        read_grants=lambda _path: (),
+        user_sid=lambda: "S-1-5-21-1000-1000-1000-1001",
+    )
+
+    with pytest.raises(RefusedError) as refused:
+        check_trust_folder(data_folder(), facts=windows)
+
+    assert "BUILTIN\\Users" in fixed_message(refused.value)
+    assert capsys.readouterr().err == ""
+
+
+def test_a_run_checks_the_trust_folder(capsys: pytest.CaptureFixture[str]) -> None:
+    main(["run"])  # the permissions read is written for Windows only, so it can only warn
+
+    assert "could not read who can read or change the Trust Store folder" in (
+        capsys.readouterr().err
+    )
