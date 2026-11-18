@@ -1,0 +1,109 @@
+"""The basic end-of-Run summary: each Seed's outcome, and what needs attention (ticket #49).
+
+The full summary and the Run report come later (#56, #66). This one lists every device the
+Run tried, then a "Needs your attention" list with a next step for each item (story 88):
+the exact `trust-key` line for a changed host key, and a note for a landing privilege too low
+for the tool's commands. Device text is escaped before it is printed (story 81); no device
+output is ever shown.
+"""
+
+from collections.abc import Sequence
+
+from network_analyser.cli.parser import PROG
+from network_analyser.cli.text import escape_controls
+from network_analyser.records import HostKeyVerdict
+from network_analyser.records.device import DeviceRecord, LandingPrivilege, UnvisitedReason
+from network_analyser.records.events import DeviceOutcome
+
+
+def summary(records: Sequence[DeviceRecord]) -> str:
+    """Return the summary block for the devices of one Run."""
+    counts = {o: sum(1 for r in records if r.outcome is o) for o in DeviceOutcome}
+    lines = [
+        (
+            f"Run summary: {len(records)} device{'' if len(records) == 1 else 's'} tried: "
+            f"{counts[DeviceOutcome.VISITED]} visited, {counts[DeviceOutcome.PARTIAL]} partial, "
+            f"{counts[DeviceOutcome.UNVISITED]} unvisited."
+        ),
+        *(f"  {_line(r)}" for r in records),
+    ]
+    new_keys = sum(
+        1 for r in records if r.host_key is not None and r.host_key.verdict is HostKeyVerdict.NEW
+    )
+    if new_keys:
+        lines.append(
+            f"New host keys trusted on first use: {new_keys}. Check each fingerprint on the "
+            "device console."
+        )
+    attention = [item for r in records for item in _attention(r)]
+    if attention:
+        lines.append("Needs your attention:")
+        lines.extend(f"  {item}" for item in attention)
+    return "\n".join(lines)
+
+
+def needs_attention(records: Sequence[DeviceRecord]) -> bool:
+    """Say whether anything in the Run needs the operator (exit code 1, story 90)."""
+    return any(_attention(r) for r in records)
+
+
+def _line(record: DeviceRecord) -> str:
+    head = f"{record.ip!s:<15}  {record.outcome.value:<9}"
+    if record.outcome is DeviceOutcome.UNVISITED and record.unvisited_reason is not None:
+        return f"{head}  {record.unvisited_reason.value}"
+    parts = [record.platform.value if record.platform else "Platform unknown"]
+    if record.version is not None and isinstance(record.version.hostname, str):
+        parts.append(escape_controls(record.version.hostname, limit=64))
+    if isinstance(record.landing_privilege, LandingPrivilege):
+        parts.append(f"privilege {escape_controls(record.landing_privilege.shown, limit=64)}")
+    if record.credential_set is not None:
+        parts.append(f"as {escape_controls(record.credential_set.username, limit=64)}")
+    if record.partial_reason is not None:
+        parts.append(f"({record.partial_reason})")
+    return f"{head}  {'  '.join(parts)}"
+
+
+def _attention(record: DeviceRecord) -> list[str]:
+    """Return what needs the operator about one device, each with its next step."""
+    ip = str(record.ip)
+    reason = record.unvisited_reason
+    if reason in {UnvisitedReason.HOST_KEY_CHANGED, UnvisitedReason.HOST_KEY_NOT_TRUSTED}:
+        return [_host_key_step(record)]
+    if reason is UnvisitedReason.AUTHENTICATION_FAILED:
+        return [
+            (
+                f"{ip}: authentication failed with every eligible Credential Set. Check the "
+                "passwords and the device's AAA lockout counter."
+            )
+        ]
+    if reason is not None:
+        return [f"{ip}: {reason.value}."]
+    if record.outcome is DeviceOutcome.PARTIAL:
+        return [f"{ip}: partial: {record.partial_reason}."]
+    privilege = record.landing_privilege
+    if isinstance(privilege, LandingPrivilege) and privilege.too_low:
+        return [
+            (
+                f"{ip}: the login landed at privilege "
+                f"{escape_controls(privilege.shown, limit=64)}, too low for the tool's "
+                f'commands. Give the account its Device Role ("{PROG} role-snippet").'
+            )
+        ]
+    return []
+
+
+def _host_key_step(record: DeviceRecord) -> str:
+    """The exact `trust-key` line for a changed or untrusted host key (story 88)."""
+    ip = str(record.ip)
+    check = record.host_key
+    new = check.fingerprint if check is not None else None
+    step = f"{PROG} trust-key {ip} --fingerprint {new or '<the fingerprint the console shows>'}"
+    if record.unvisited_reason is UnvisitedReason.HOST_KEY_NOT_TRUSTED:
+        what = "host key not yet trusted (strict mode)"
+    else:
+        old = ", ".join(check.trusted_fingerprints) if check is not None else ""
+        what = f"host key changed (trusted: {old or 'unknown'}; now: {new or 'not read'})"
+    return (
+        f"{ip}: {what}. No password was sent. Check the key on the device console; if it is "
+        f"right, run:\n    {step}"
+    )

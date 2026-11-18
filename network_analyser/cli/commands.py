@@ -4,7 +4,7 @@ import argparse
 import sys
 from collections.abc import Callable
 
-from network_analyser.cli import cmd_run
+from network_analyser.cli import cmd_run, cmd_trust_key
 from network_analyser.cli.exit_codes import ExitCode
 from network_analyser.cli.parser import PROG
 from network_analyser.cli.run_folder import (
@@ -38,7 +38,7 @@ COMMANDS: dict[str, Command] = {
     "run": cmd_run.run,
     "render": _not_built_yet,
     "show-backup": _not_built_yet,
-    "trust-key": _not_built_yet,
+    "trust-key": cmd_trust_key.trust_key,
     "role-snippet": _not_built_yet,
     "change-passphrase": _change_passphrase,
 }

@@ -73,3 +73,54 @@ def test_a_set_cannot_be_pickled_or_deep_copied() -> None:
         pickle.dumps(one)
     with pytest.raises(TypeError):
         copy.deepcopy(CredentialSets([one]))
+
+
+# -- Trying sets at a login (ticket #49; the full rules of story 31-37 are #54) ------------------
+
+
+def test_sets_are_tried_in_order_and_a_platform_limit_needs_a_matching_hint() -> None:
+    sets = CredentialSets(
+        [_set("any-a"), _set("xe-only", Platform.IOS_XE), _set("nx-only", Platform.NX_OS)]
+    )
+
+    assert [v.username for v in sets.login_order(Platform.IOS_XE)] == ["any-a", "xe-only"]
+    assert [v.username for v in sets.login_order(Platform.NX_OS)] == ["any-a", "nx-only"]
+    assert [v.username for v in sets.login_order(None)] == ["any-a"]
+
+
+def test_the_password_is_handed_over_as_a_secret_never_as_text() -> None:
+    sets = CredentialSets([_set("netops-ro")])
+
+    password = sets.password_for_login(1)
+
+    assert isinstance(password, Secret)
+    assert password.same_as(Secret(CANARY))
+
+
+def test_a_set_is_retired_once_it_spends_its_failure_budget() -> None:
+    sets = CredentialSets([_set("netops-ro"), _set("svc-b")])
+
+    spent = [sets.record_login(1, succeeded=False, failure_budget=2) for _ in range(2)]
+
+    assert spent == [False, True]
+    assert [v.username for v in sets.login_order(None)] == ["svc-b"]
+    assert not sets.all_retired()
+    assert sets.failures(1) == 2
+
+
+def test_a_successful_login_spends_nothing() -> None:
+    sets = CredentialSets([_set("netops-ro")])
+
+    retired = sets.record_login(1, succeeded=True, failure_budget=1)
+
+    assert not retired
+    assert [v.username for v in sets.login_order(None)] == ["netops-ro"]
+
+
+def test_every_set_retired_is_reported() -> None:
+    sets = CredentialSets([_set("netops-ro")])
+
+    sets.record_login(1, succeeded=False, failure_budget=1)
+
+    assert sets.all_retired()
+    assert sets.login_order(None) == ()

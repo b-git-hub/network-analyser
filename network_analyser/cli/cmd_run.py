@@ -14,15 +14,18 @@ each secret joins the scan the moment it is typed, and a match shows as `[blocke
 warning at the end. Once the Run folder is created and registered, `audit.log` records the
 Run's start and end (`cli.run_trail`).
 
-Until the device tickets land, the Run ends cleanly once its folder is created and
-registered: no packet is ever sent.
+The Trust Store (and any `--known-hosts` file) is read before the first secret prompt, so a
+bad `--known-hosts` refuses the Run with exit 2 before anything is typed. Once the Run folder
+is created, each Seed is logged into, identified and left (#49; the crawl is #50), and the
+Run ends with a summary of each Seed's outcome.
 """
 
 import argparse
 import sys
 from datetime import UTC, datetime
+from ipaddress import IPv4Address
 
-from network_analyser import backup_store, run_output
+from network_analyser import backup_store, device_gateway, discovery, run_output
 from network_analyser.cli import ready, run_file, run_secrets, run_start, run_trail
 from network_analyser.cli.console import scanned_console
 from network_analyser.cli.crash_dump_guard import guard_crash_dumps
@@ -41,8 +44,10 @@ from network_analyser.cli.run_folder import (
 )
 from network_analyser.cli.text import escape_controls
 from network_analyser.cli.trust_folder import check_trust_folder
+from network_analyser.cli.trust_keys import load_trust_store
 from network_analyser.credentials import CredentialSets, SecretScan
 from network_analyser.records import RunRequest, Source, Sourced
+from network_analyser.records.device import DeviceRecord
 
 _CHANGE_PENDING = (
     "a change of the Backup Passphrase is unfinished, so Backups may be under either "
@@ -97,6 +102,7 @@ def _after_folder_checks(
     request = run_start.scope_and_seeds(args, loaded, ask)
     if isinstance(request, ExitCode):
         return request
+    trust = load_trust_store(data, strict=bool(args.strict_host_keys), known_hosts=args.known_hosts)
     sets = _secrets(request, data, ask, scan)
     if isinstance(sets, ExitCode):
         return sets
@@ -112,17 +118,25 @@ def _after_folder_checks(
         return ExitCode.STOPPED
     folder = create_and_register(data, check, started, request.label.value, scan)
     print(f"Run folder created: {console_text(str(folder.path))}")
-    return run_trail.run_with_audit_trail(request, sets, folder, scan, _crawl)
 
+    def crawl(audit: run_output.AuditLog) -> tuple[DeviceRecord, ...]:
+        # #49: the Seeds only. The crawl (#50) and Backups (#51, the Backup Passphrase to
+        # backup_store's locking worker) come next; `check.notices` and the Credential
+        # Sets' views go to the Run report (#66).
+        def visit(ip: IPv4Address) -> DeviceRecord:
+            return device_gateway.visit(
+                ip,
+                scope=request.scope.value,
+                trust=trust,
+                sets=sets,
+                emit=audit.record,
+                failure_budget=request.failure_budget.value,
+                timeouts=request.timeouts,
+            )
 
-def _crawl(_audit: run_output.AuditLog) -> None:
-    # Next, from the device tickets (#49 on): the crawl, emitting its events to `_audit`,
-    # with the Backup Passphrase going to backup_store's locking worker, and `check.notices`
-    # and the Credential Sets' views to the Run report (#66).
-    print(
-        f"{PROG} run: the crawl is not built yet, so the Run ends here. No device was contacted.",
-        file=sys.stderr,
-    )
+        return discovery.visit_seeds(request.seeds.value, visit)
+
+    return run_trail.run_with_audit_trail(request, sets, folder, scan, crawl)
 
 
 def _secrets(

@@ -75,7 +75,7 @@ def test_a_first_run_sets_the_passphrase_takes_a_set_confirms_and_creates_the_ru
     assert folder.name.endswith("_site-a")
     assert f"Run folder created: {folder}\n" in got.out
     assert backup_store.registered_run_folders(data_folder().run_register) == (folder,)
-    assert "the crawl is not built yet" in got.err
+    assert "192.0.2.1        visited" in got.out
     _assert_no_secret_shown(got)
     for secret in (BACKUP_CANARY, DEVICE_CANARY):
         assert _files_hold(data_folder().root, secret) == []
@@ -264,6 +264,7 @@ def test_declining_the_crash_dump_check_stops_before_any_secret(run: Runner) -> 
 def test_up_to_five_sets_are_taken_and_a_sixth_is_never_offered(run: Runner) -> None:
     sets = [line for n in range(1, 6) for line in (f"user{n}", f"CANARY-pw-{n}", "", "y")]
     answers = typed("YES", BACKUP_CANARY, BACKUP_CANARY, *sets[:-1], "y")
+    run.seed.password = sets[1]
 
     got = run(*FLAGS, typed=answers)
 

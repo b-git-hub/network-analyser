@@ -6,6 +6,7 @@ module (and, at the login itself, `device_gateway`); what the rest of the tool s
 `CredentialSetView` record, which holds no password and not even its length.
 """
 
+import threading
 from collections.abc import Sequence
 from typing import Final, NoReturn, final, override
 
@@ -46,6 +47,13 @@ class CredentialSet:
         """Have the secret scan look for this set's password in everything written."""
         scan.watch(self.__password)
 
+    def password_for_login(self) -> Secret:
+        """Hand the password to `device_gateway` for one login, still a `Secret`.
+
+        Only `credentials` and `device_gateway` may call this (tests/arch/test_secret_rules).
+        """
+        return self.__password
+
     @override
     def __init_subclass__(cls) -> NoReturn:
         """Refuse subclasses: one could add a way to the password."""
@@ -67,7 +75,7 @@ class CredentialSet:
 class CredentialSets:
     """The Run's Credential Sets, one to five, in the order the operator gave them."""
 
-    __slots__ = ("__sets",)
+    __slots__ = ("__failures", "__lock", "__retired", "__sets")
 
     def __init__(self, sets: Sequence[CredentialSet]) -> None:
         """Hold the sets typed at Run start.
@@ -79,6 +87,9 @@ class CredentialSets:
             msg = f"a Run takes 1 to {MAX_SETS} Credential Sets"
             raise ValueError(msg)
         self.__sets: Final = tuple(sets)
+        self.__lock: Final = threading.Lock()
+        self.__failures: Final = [0] * len(self.__sets)
+        self.__retired: Final = [False] * len(self.__sets)
 
     def views(self) -> tuple[CredentialSetView, ...]:
         """Return what may be shown of each set, in order (story 28): never a password."""
@@ -86,6 +97,51 @@ class CredentialSets:
             CredentialSetView(number=n, username=s.username, platform_limit=s.platform_limit)
             for n, s in enumerate(self.__sets, start=1)
         )
+
+    def login_order(self, hint: Platform | None) -> tuple[CredentialSetView, ...]:
+        """Return the sets to try on a device, in order, leaving out Retired Credential Sets.
+
+        A set limited to one Platform is tried only where the SSH identification string
+        points to that Platform (story 32). `hint` is that Platform, or None for no hint.
+        """
+        with self.__lock:
+            retired = tuple(self.__retired)
+        return tuple(
+            view
+            for view, is_retired in zip(self.views(), retired, strict=True)
+            if not is_retired and view.platform_limit in {None, hint}
+        )
+
+    def password_for_login(self, number: int) -> Secret:
+        """Hand set `number`'s password to `device_gateway` for one login, as a `Secret`.
+
+        Only `credentials` and `device_gateway` may call this (tests/arch/test_secret_rules).
+        """
+        return self.__sets[number - 1].password_for_login()
+
+    def record_login(self, number: int, *, succeeded: bool, failure_budget: int) -> bool:
+        """Count one login by set `number`; return True when this failure retired it.
+
+        A set that has failed `failure_budget` times this Run is retired (story 34).
+        """
+        if succeeded:
+            return False
+        with self.__lock:
+            self.__failures[number - 1] += 1
+            spent = self.__failures[number - 1] >= failure_budget
+            newly = spent and not self.__retired[number - 1]
+            self.__retired[number - 1] = self.__retired[number - 1] or spent
+        return newly
+
+    def failures(self, number: int) -> int:
+        """Return how many failed logins set `number` has spent this Run."""
+        with self.__lock:
+            return self.__failures[number - 1]
+
+    def all_retired(self) -> bool:
+        """Say whether every set is a Retired Credential Set (story 37)."""
+        with self.__lock:
+            return all(self.__retired)
 
     def password_same_as(self, secret: Secret) -> bool:
         """Say whether any set's password is `secret`, without saying which."""

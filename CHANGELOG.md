@@ -18,7 +18,10 @@ None. This is the first release.
 
 ### Allow-list and Device Role
 
-The first allow-list ([spec #37](https://github.com/b-git-hub/network-analyser/issues/37)).
+The first allow-list ([spec #37](https://github.com/b-git-hub/network-analyser/issues/37)). Give the tool's account a Device Role that permits these commands:
+
+- IOS/IOS-XE: `terminal length 0`, `terminal width 511`, `show version`, `show privilege` (#49).
+- NX-OS: `terminal length 0`, `terminal width 511`, `show version`, `show user-account <username>` (the account's own name; #49).
 
 ### Added
 

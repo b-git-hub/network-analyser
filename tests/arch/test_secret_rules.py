@@ -6,12 +6,13 @@ that silently stopped matching would fail too.
 """
 
 import ast
+import builtins
 import textwrap
 from collections.abc import Callable
 
 import pytest
 
-from tests.support.source_scan import parents, source_files
+from tests.support.source_scan import PACKAGE, parents, source_files
 
 type Rule = Callable[[str, ast.Module], list[str]]
 
@@ -89,8 +90,22 @@ def _is_allowed_name(node: ast.expr | None) -> bool:
 # Exception text can quote device output or a secret (decision #30, section 12), so a caught
 # exception is mapped to a fixed message, never shown or stored. Inside `except ... as e:`,
 # `e` may only be re-raised, chained, type-checked, passed to one of these functions, or have
-# one of these numeric attributes read.
-EXCEPTION_SAFE_CALLS = frozenset({"type", "isinstance", "describe_internal_error", "fixed_message"})
+# one of these numeric attributes read. Functions are named in full (module path and name),
+# so a function elsewhere that merely shares a name is not trusted (#38 retro).
+EXCEPTION_SAFE_CALLS = frozenset(
+    {
+        "builtins.type",
+        "builtins.isinstance",
+        # The top-level handler: the type and a file:line stack only (story 91).
+        "network_analyser.cli.crash.describe_internal_error",
+        # The tool's own errors, raised with fixed text.
+        "network_analyser.cli.run_folder.fixed_message",
+        # A caught exception's type and the fixed message for it (story 166, #48).
+        "network_analyser.records.events.error_event",
+        # #49: the fixed message per Netmiko and Paramiko exception type, via error_event.
+        "network_analyser.device_gateway.ssh.library_error",
+    }
+)
 # `lineno` and `colno` are where a TOML run file failed to parse (#41): numbers only.
 EXCEPTION_SAFE_ATTRIBUTES = frozenset({"code", "errno", "winerror", "lineno", "colno"})
 
@@ -98,6 +113,7 @@ EXCEPTION_SAFE_ATTRIBUTES = frozenset({"code", "errno", "winerror", "lineno", "c
 def exception_text_used(relative: str, tree: ast.Module) -> list[str]:
     """Find uses of a caught exception that could show or keep its text."""
     up = parents(tree)
+    names = _qualified_names(relative, tree)
     handlers = [
         (handler.name, node)
         for handler in ast.walk(tree)
@@ -111,21 +127,54 @@ def exception_text_used(relative: str, tree: ast.Module) -> list[str]:
         if isinstance(node, ast.Name)
         and node.id == name
         and isinstance(node.ctx, ast.Load)
-        and not _safe_exception_use(node, up)
+        and not _safe_exception_use(node, up, names)
     ]
 
 
-def _safe_exception_use(node: ast.Name, up: dict[ast.AST, ast.AST]) -> bool:
+def _safe_exception_use(node: ast.Name, up: dict[ast.AST, ast.AST], names: dict[str, str]) -> bool:
     parent = up.get(node)
     if isinstance(parent, ast.Raise):
         return True
     if isinstance(parent, ast.Attribute):
         return parent.attr in EXCEPTION_SAFE_ATTRIBUTES
     if isinstance(parent, ast.Call) and node in parent.args:
-        func = parent.func
-        name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
-        return name in EXCEPTION_SAFE_CALLS
+        return _called(parent.func, names) in EXCEPTION_SAFE_CALLS
     return False
+
+
+def _qualified_names(relative: str, tree: ast.Module) -> dict[str, str]:
+    """Map each name bound at the top of a file to the full name of what it stands for."""
+    parts = [PACKAGE, *relative.removesuffix(".py").split("/")]
+    is_package = parts[-1] == "__init__"
+    if is_package:
+        parts.pop()
+    names = {n: f"builtins.{n}" for n in dir(builtins)}
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                bound = alias.asname or alias.name.split(".")[0]
+                names[bound] = alias.name if alias.asname else bound
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            if node.level:
+                anchor = parts if is_package else parts[:-1]
+                anchor = anchor[: len(anchor) - (node.level - 1)]
+                base = ".".join([*anchor, node.module] if node.module else anchor)
+            for alias in node.names:
+                names[alias.asname or alias.name] = f"{base}.{alias.name}"
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            names[node.name] = f"{'.'.join(parts)}.{node.name}"
+    return names
+
+
+def _called(func: ast.expr, names: dict[str, str]) -> str | None:
+    """Return the full name of a called function, or None when it cannot be told."""
+    if isinstance(func, ast.Name):
+        return names.get(func.id)
+    if isinstance(func, ast.Attribute):
+        base = _called(func.value, names)
+        return None if base is None else f"{base}.{func.attr}"
+    return None
 
 
 # == Rule: file writes ==
@@ -259,6 +308,9 @@ def test_environment_reads_are_caught_except_named_ones_in_winsys() -> None:
 
 def test_using_the_text_of_a_caught_exception_is_caught() -> None:
     code = """
+        from network_analyser.cli.crash import describe_internal_error
+        from network_analyser.cli.run_folder import fixed_message
+        from network_analyser.records import events
         try:
             pass
         except OSError as e:
@@ -271,15 +323,49 @@ def test_using_the_text_of_a_caught_exception_is_caught() -> None:
                 raise
             code = e.errno
             describe_internal_error(e)
+            events.error_event(e, step="x", ip=None, messages={})
             raise FixedError(fixed_message(e)) from e
     """
 
     assert _scan(exception_text_used, "device_gateway/ssh.py", code) == [
-        "device_gateway/ssh.py:5 uses the text of `e`",
-        "device_gateway/ssh.py:6 uses the text of `e`",
-        "device_gateway/ssh.py:7 uses the text of `e`",
         "device_gateway/ssh.py:8 uses the text of `e`",
+        "device_gateway/ssh.py:9 uses the text of `e`",
+        "device_gateway/ssh.py:10 uses the text of `e`",
+        "device_gateway/ssh.py:11 uses the text of `e`",
     ]
+
+
+def test_a_mapper_is_trusted_by_its_full_name_not_by_its_name_alone() -> None:
+    code = """
+        from network_analyser.topology.helpers import fixed_message
+        def describe_internal_error(error):
+            return str(error)
+        try:
+            pass
+        except OSError as e:
+            fixed_message(e)
+            describe_internal_error(e)
+            library_error(e)
+    """
+
+    assert _scan(exception_text_used, "topology/build.py", code) == [
+        "topology/build.py:8 uses the text of `e`",
+        "topology/build.py:9 uses the text of `e`",
+        "topology/build.py:10 uses the text of `e`",
+    ]
+
+
+def test_the_gateways_own_mapper_is_trusted_where_it_is_defined() -> None:
+    code = """
+        def library_error(error):
+            return error_event(error)
+        try:
+            pass
+        except OSError as e:
+            library_error(e)
+    """
+
+    assert _scan(exception_text_used, "device_gateway/ssh.py", code) == []
 
 
 def test_file_writes_are_caught_outside_the_writer_helpers() -> None:

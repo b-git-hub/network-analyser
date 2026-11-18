@@ -26,6 +26,7 @@ from network_analyser.cli.prompts import Prompter
 from network_analyser.cli.run_file import RunFile
 from network_analyser.cli.text import escape_controls
 from network_analyser.records import RunRequest, ScopeRecord, Source, Sourced
+from network_analyser.records.run_request import Timeouts
 from network_analyser.scope import Refusal, ScopeRefused
 
 NOTHING_CONTACTED = "Nothing was contacted."
@@ -54,6 +55,17 @@ def scope_and_seeds(
             args.failure_budget, from_file.failure_budget, FAILURE_BUDGET_DEFAULT
         ),
         sweep=_option(args.sweep, from_file.sweep, default=False),
+        timeouts=_timeouts(args),
+    )
+
+
+def _timeouts(args: argparse.Namespace) -> Timeouts:
+    """The per-step timeouts: a flag, else the default (story 50). Never from a run file."""
+    default = Timeouts()
+    return Timeouts(
+        connect=args.connect_timeout or default.connect,
+        login=args.login_timeout or default.login,
+        command=args.command_timeout or default.command,
     )
 
 
