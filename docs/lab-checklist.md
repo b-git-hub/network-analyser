@@ -182,6 +182,7 @@ From [Python network automation libraries and packaging as a Windows exe](https:
 | G4 | Does the unsigned build run at all? Record whether Smart App Control is on (Windows Security → App & browser control) and whether any IT policy blocks the exe, a `.pyd` or a DLL. A block is the trigger to bring signing forward. | | |
 | G5 | Masked prompt, paste: a password pasted from your password manager arrives whole, with one `*` per character. | | |
 | G6 | Masked prompt, keys: Ctrl+C at any secret prompt cancels cleanly, with no traceback, nothing saved and exit code 3. Backspace removes a character; arrow and function keys put nothing into the password. | | |
+| G7 | `build.ps1` on your PC (added by [#44](https://github.com/b-git-hub/network-analyser/issues/44); its Windows-only steps were only reviewed, never run, when it was written). From a clean clone, in Windows PowerShell 5.1: `powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1`. Record: it finds python.org Python on its own (or which `-Python` path you passed); it refuses uv's own Python and a dirty checkout; the build ends `BUILD SUCCEEDED` with the commit and version; `dist\network-analyser\_internal` holds `paramiko\` and `scp.py` as plain `.py` files; the exe's Properties → Details show the same version as `--version`; `THIRD-PARTY-NOTICES.txt` is in the zip; `Get-FileHash` of the zip matches its line in `SHA256SUMS.txt`. | | |
 
 ## Walkthrough of the tool
 
