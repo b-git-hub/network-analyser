@@ -1,2 +1,25 @@
 # Agent git worktrees (Claude Code sessions)
 .claude/worktrees/
+
+# Python and tooling
+.venv/
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# Run outputs and secrets-adjacent files never belong in the repo (CLAUDE.md).
+# Synthetic test fixtures live under tests/fixtures/synthetic/ and are kept.
+runs/
+*.age
+known_hosts
+topology.json
+audit.log
+run-report.html
+diagram.html
+diagram.drawio
+relock-*.txt
+!tests/fixtures/synthetic/**
