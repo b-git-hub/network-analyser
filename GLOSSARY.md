@@ -25,7 +25,7 @@ A device the tool logged into during a Run and identified as a supported Platfor
 _Avoid_: Managed device, polled device
 
 **Unvisited Device**:
-A device known to exist (from a Neighbour advertisement, MAC table or ARP table) that is not a Visited Device. Either it was not logged into, because it is outside the Scope, advertised as an unsupported Platform, unreachable, or refused by the connection safety policy; or it was logged into but found to be an unsupported Platform, and left at once.
+A device known to exist (from a Neighbour advertisement, routing data, MAC table or ARP table) that is not a Visited Device. Either it was not logged into, because it is outside the Scope, advertised as an unsupported Platform, known only from routing or ARP data, unreachable, or refused by the connection safety policy; or it was logged into but found to be an unsupported Platform, and left at once.
 _Avoid_: Unmanaged device, ghost
 
 **Platform**:
