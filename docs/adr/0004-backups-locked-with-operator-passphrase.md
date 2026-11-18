@@ -13,7 +13,8 @@ Decided on [Backup storage and encryption](https://github.com/b-git-hub/network-
 - **No recovery.** A forgotten passphrase loses every Backup it locked. The tool says so at first-Run setup and recommends a password manager. There is deliberately no second way in.
 - **One secret writes and reads everything.** Anyone who learns the passphrase can open every Backup. There is no per-colleague sharing. A Backup is taken away as its locked file, and whoever opens it needs the passphrase.
 - **Still standard age.** `age -d <file>` opens a Backup without Network Analyser. The tool also offers `show-backup`, which prints to the console and never writes plaintext to disk.
-- **Cost per file.** age's scrypt costs about a second per encryption at its default work factor, paid once per Backup. The default is not lowered.
+- **Cost per file.** age's scrypt costs about a second per encryption, paid once per Backup. pyrage (on the Rust `age` crate) has no work-factor setting: each lock times scrypt on the PC it runs on and picks the level that takes about 1 s there. That is about 2^18 (256 MiB) on the expected PC and up to 2^20 (1 GiB) on a fast one. The level is never lowered by the tool. A Backup opens on any PC up to about 16 times slower than the one that locked it.
+- **One lock at a time.** pyrage holds Python's GIL while scrypt runs, so locks never overlap and every other thread pauses for about a second per lock. Backups are locked by one worker of their own, and the run report records each Backup's level and warns below 2^18. Decided on [Expected network size and Run limits](https://github.com/b-git-hub/network-analyser/issues/27).
 - **Changing the passphrase** re-locks every Backup and Run manifest in place with the `change-passphrase` command. Copies made before the change stay locked with the old passphrase. Decided on [Changing the Backup Passphrase](https://github.com/b-git-hub/network-analyser/issues/22).
 
 ## Considered Options
