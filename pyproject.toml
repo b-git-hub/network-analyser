@@ -22,6 +22,11 @@ dev = [
     "ruff==0.17.5",
     "types-paramiko==5.1.0.20261030",
 ]
+# Only build.ps1 needs these (ticket #44). PyInstaller is a build tool: it is not shipped,
+# apart from its bootloader (GPL with an exception that allows distributing it).
+build = [
+    "pyinstaller==6.22.3",
+]
 
 [tool.uv]
 # Not built or installed as a package: `uv sync --locked --no-build` (decisions #32, #44, #47)
@@ -29,6 +34,9 @@ dev = [
 package = false
 no-build = true
 required-version = ">=0.13"
+# `uv sync --locked --no-build` installs the build tools too, so build.ps1 runs the
+# ticket's command as written (ticket #44).
+default-groups = ["dev", "build"]
 # Never use a Python that uv downloaded: only an installed python.org CPython (ticket #38).
 python-preference = "only-system"
 python-downloads = "never"
