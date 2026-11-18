@@ -8,6 +8,7 @@ A dated, historical record kept by the coordinating (chief-of-staff) session and
 - [implementer-brief](implementer-brief.md): the standing brief every ticket implementer follows.
 - [spec-37-follow-ups](spec-37-follow-ups.md): work one ticket surfaced for a later one.
 - [merger-brief](merger-brief.md): how a finished ticket branch is merged into the integration branch.
+- [cloud-container-checks](cloud-container-checks.md): how to run the project's checks in a Linux cloud container (uv 0.13.9 shim).
 - [agent-worktree-friction](agent-worktree-friction.md): known quirks of agent worktrees and how briefs work around them.
 
 ## Decisions
