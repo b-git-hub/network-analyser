@@ -18,11 +18,12 @@ LABEL_MAX = 32
 _MAX_SUFFIX = 999
 _PROBE_PREFIX = ".network-analyser-probe-"
 
-# Accounts whose ability to modify the Run folder raises no warning (#26): SYSTEM and
-# Administrators, plus CREATOR OWNER and OWNER RIGHTS, which stand for whoever creates or
-# owns an item. To create one inside the folder an account needs a right of its own, which
-# is warned about. The operator's own SID is added at the check.
-_TRUSTED_SIDS = frozenset({"S-1-5-18", "S-1-5-32-544", "S-1-3-0", "S-1-3-4"})
+# Accounts whose ability to modify the Run folder raises no warning (#26), nor their access
+# to the Trust Store folder (#69): SYSTEM and Administrators, plus CREATOR OWNER and OWNER
+# RIGHTS, which stand for whoever creates or owns an item. To create one inside the folder
+# an account needs a right of its own, which is warned about. The operator's own SID is
+# added at the check.
+TRUSTED_SIDS = frozenset({"S-1-5-18", "S-1-5-32-544", "S-1-3-0", "S-1-3-4"})
 
 _PLACES = {
     _winsys.DriveKind.NETWORK: "a network location",
@@ -41,6 +42,9 @@ class FolderFacts:
         default=_winsys.modify_grants
     )
     user_sid: Callable[[], str | None] = field(default=_winsys.current_user_sid)
+    read_grants: Callable[[str], tuple[_winsys.Grant, ...] | None] = field(
+        default=_winsys.read_grants
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,8 +145,8 @@ def _permissions_warning(
             "it could swap in a booby-trapped diagram.html or plant a fake Backup; check "
             "its permissions."
         )
-    trusted = _TRUSTED_SIDS | {operator_sid}
-    others = list(dict.fromkeys(_shown(g.name) for g in grants if g.sid not in trusted))
+    trusted = TRUSTED_SIDS | {operator_sid}
+    others = list(dict.fromkeys(shown_name(g.name) for g in grants if g.sid not in trusted))
     if not others:
         return None
     return (
@@ -152,7 +156,7 @@ def _permissions_warning(
     )
 
 
-def _shown(name: str) -> str:
+def shown_name(name: str) -> str:
     """Return a Windows account name as printable ASCII, anything else escaped as hex."""
     return "".join(
         c if " " <= c <= "~" else c.encode("unicode_escape").decode("ascii") for c in name

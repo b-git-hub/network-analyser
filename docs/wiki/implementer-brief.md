@@ -26,6 +26,7 @@ You implement ONE ticket of spec https://github.com/b-git-hub/network-analyser/i
 - If the ticket, spec, notes and your prompt disagree, the ticket wins (and closed decision tickets win over your prompt); if the ticket itself conflicts with CLAUDE.md security rules, stop and report rather than guess.
 - If you need something the environment can't give (Windows-only APIs, devices, pwsh), fake it behind a seam and say so in your report.
 - If you had to work around tooling or a convention, say so: I fix the environment, not you.
+- The `tdd` skill asks you to confirm interfaces and seams with the user. You are a subagent: take the interfaces from the ticket, spec and existing code, and list any you chose in your report instead of asking. (Added 2026-11-18 after #46.)
 
 ## Report (≤10 lines)
 Branch name, final commit sha, test/lint status, any deviation from the ticket, any follow-up work that should become a new issue, and any friction in the environment.

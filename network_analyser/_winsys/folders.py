@@ -1,6 +1,7 @@
-"""What Windows says about a folder: its drive kind, sync roots, and who may modify it.
+"""What Windows says about a folder: its drive kind, sync roots, and who may read or modify it.
 
-Used by the Run folder checks (#42, stories 120-121; decided on #26). Every function here
+Used by the Run folder checks (#42, stories 120-121; decided on #26) and the Trust Store
+folder check (#69; decided on #7). Every function here
 only reads: none changes a permission, a registry value or a file. On other systems each
 says it cannot tell (UNKNOWN, no sync roots, None), so tests inject answers instead.
 """
@@ -21,7 +22,7 @@ class DriveKind(Enum):
 
 @dataclass(frozen=True, slots=True)
 class Grant:
-    """An account that an allow entry in a folder's permissions lets modify it."""
+    """An account that an allow entry in a folder's or file's permissions lets read or modify it."""
 
     sid: str
     """The account's SID, e.g. `S-1-5-18`."""
@@ -136,6 +137,13 @@ if sys.platform == "win32":
         | 0x10000000  # GENERIC_ALL
         | 0x40000000  # GENERIC_WRITE
     )
+    # Rights that let an account read what is in a file or list a folder: read data or list
+    # the folder, and the generic read and all rights (#69).
+    _READ_RIGHTS = (
+        0x1  # FILE_READ_DATA / FILE_LIST_DIRECTORY
+        | 0x10000000  # GENERIC_ALL
+        | 0x80000000  # GENERIC_READ
+    )
     _TOKEN_QUERY = 0x8
     _TOKEN_USER = 1
     _ONEDRIVE_ACCOUNTS = r"Software\Microsoft\OneDrive\Accounts"
@@ -229,6 +237,18 @@ if sys.platform == "win32":
         they let an account change the files a Run writes there. Deny entries are ignored,
         so the answer errs towards warning.
         """
+        return _grants(path, _MODIFY_RIGHTS)
+
+    def read_grants(path: str) -> tuple[Grant, ...] | None:
+        """Return the accounts a folder's or file's allow entries let read it, or None if unread.
+
+        Counted as `modify_grants` counts: entries for what is created inside count too,
+        and deny entries are ignored, so the answer errs towards warning.
+        """
+        return _grants(path, _READ_RIGHTS)
+
+    def _grants(path: str, rights: int) -> tuple[Grant, ...] | None:
+        """Return the accounts an allow entry on `path` gives any of `rights`, or None."""
         dacl = ctypes.c_void_p()
         descriptor = ctypes.c_void_p()
         status = _advapi32.GetNamedSecurityInfoW(
@@ -257,7 +277,7 @@ if sys.platform == "win32":
                 ace = _AccessAllowedAce.from_address(ace_pointer.value)
                 if ace.AceType not in _ACCESS_ALLOWED_ACE_TYPES:
                     continue
-                if not ace.Mask & _MODIFY_RIGHTS:
+                if not ace.Mask & rights:
                     continue
                 sid = ace_pointer.value + _AccessAllowedAce.SidStart.offset
                 text = _sid_string(sid)
@@ -301,6 +321,10 @@ else:
         return ()
 
     def modify_grants(path: str) -> tuple[Grant, ...] | None:  # noqa: ARG001 (as on Windows)
+        """Say None (cannot tell): the permissions read is written for Windows only."""
+        return None
+
+    def read_grants(path: str) -> tuple[Grant, ...] | None:  # noqa: ARG001 (as on Windows)
         """Say None (cannot tell): the permissions read is written for Windows only."""
         return None
 
