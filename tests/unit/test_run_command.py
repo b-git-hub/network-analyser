@@ -1,40 +1,25 @@
 """`network-analyser run` up to the checked Scope and Seeds, driven as the operator would.
 
-Until the Run-start ticket lands, `run` stops after showing the checked Scope and Seeds
-(ticket #41) and exits 4 with a "not built yet" line. Nothing is ever contacted.
+The Scope is shown as soon as it is checked (ticket #41); the Seeds and options are recapped
+in the Ready-to-start block (#45). Tests that need that block answer the secret prompts and
+then decline to start, so nothing is ever contacted and no Run folder is made.
 """
 
-import io
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from network_analyser.cli import ExitCode, main
+from network_analyser.cli import ExitCode
+from tests.support import fake_age
+from tests.support.run_driver import Runner, first_run
 
-NOT_BUILT = "The rest of the Run is not built yet; nothing was contacted."
 NOTHING_CONTACTED = "Nothing was contacted."
+DECLINED = first_run(start="n")  # the secret prompts, then "n" at Start the Run?
 
 
-@dataclass(frozen=True)
-class Outcome:
-    code: int
-    out: str
-    err: str
-
-
-class Runner:
-    """Runs `network-analyser run` with what the operator types on stdin."""
-
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-        self._monkeypatch = monkeypatch
-        self._capsys = capsys
-
-    def __call__(self, *argv: str, typed: str = "") -> Outcome:
-        self._monkeypatch.setattr("sys.stdin", io.StringIO(typed))
-        code = main(["run", *argv])
-        captured = self._capsys.readouterr()
-        return Outcome(code, captured.out, captured.err)
+@pytest.fixture(autouse=True)
+def _fast_age(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_age.use_fake_age(monkeypatch)
 
 
 @pytest.fixture
@@ -51,16 +36,25 @@ def _write(tmp_path: Path, text: str) -> str:
 # -- flags (stories 1, 7-10) --------------------------------------------------------------
 
 
-def test_flags_give_the_scope_and_seeds_and_the_run_stops_before_anything_else(
+def test_flags_give_the_scope_and_seeds_and_the_scope_is_shown_before_any_secret(
     run: Runner,
 ) -> None:
-    got = run("--scope", "192.0.2.0/24", "--exclude", "192.0.2.128/25", "--seed", "192.0.2.1")
+    got = run(
+        "--scope",
+        "192.0.2.0/24",
+        "--exclude",
+        "192.0.2.128/25",
+        "--seed",
+        "192.0.2.1",
+        typed=DECLINED,
+    )
 
-    assert got.code == ExitCode.INTERNAL_ERROR
-    assert "Scope (command line): 128 addresses in 1 range\n  192.0.2.0/24\n" in got.out
-    assert "Exclusions (command line):\n  192.0.2.128/25\n" in got.out
-    assert "Seeds (command line): 192.0.2.1\n" in got.out
-    assert NOT_BUILT in got.err
+    assert got.code == ExitCode.STOPPED
+    assert got.out.startswith(
+        "Scope (command line): 128 addresses in 1 range\n  192.0.2.0/24\n"
+        "Exclusions (command line):\n  192.0.2.128/25\n"
+    )
+    assert "  Seeds           192.0.2.1 (command line)\n" in got.out
 
 
 def test_overlapping_flags_are_merged_and_the_warning_is_shown(run: Runner) -> None:
@@ -132,9 +126,9 @@ def test_with_no_flags_the_scope_and_seeds_are_asked_and_bad_lines_asked_again(
     ]
     typed = "".join(f"{line}\n" for line in lines)
 
-    got = run(typed=typed)
+    got = run(typed=typed + DECLINED)
 
-    assert got.code == ExitCode.INTERNAL_ERROR
+    assert got.code == ExitCode.STOPPED
     assert "Refused: sw-a: hostnames are refused; give an IPv4 address. Enter that line again." in (
         got.err
     )
@@ -142,14 +136,14 @@ def test_with_no_flags_the_scope_and_seeds_are_asked_and_bad_lines_asked_again(
     assert "Scope (asked): 128 addresses in 1 range\n  192.0.2.0/24\n" in got.out
     assert "Exclusions (asked):\n  192.0.2.128/25\n" in got.out
     assert "Refused: Seed 198.51.100.1: this Seed is outside the Scope." in got.err
-    assert "Seeds (asked): 192.0.2.1, 192.0.2.2\n" in got.out
+    assert "  Seeds           192.0.2.1, 192.0.2.2 (asked)\n" in got.out
 
 
 def test_an_empty_scope_is_not_accepted_at_the_prompt(run: Runner) -> None:
-    got = run(typed="\n!192.0.2.5\n\n192.0.2.0/24\n\n192.0.2.1\n")
+    got = run(typed="\n!192.0.2.5\n\n192.0.2.0/24\n\n192.0.2.1\n" + DECLINED)
 
     assert got.err.count("At least one Scope entry is needed.") == 2
-    assert "Seeds (asked): 192.0.2.1" in got.out
+    assert "  Seeds           192.0.2.1 (asked)" in got.out
 
 
 def test_exclusions_that_remove_everything_are_refused_and_the_prompt_goes_on(
@@ -162,11 +156,11 @@ def test_exclusions_that_remove_everything_are_refused_and_the_prompt_goes_on(
 
 
 def test_seeds_are_asked_when_only_the_scope_was_given(run: Runner) -> None:
-    got = run("--scope", "192.0.2.0/24", typed="\n192.0.2.9\n")
+    got = run("--scope", "192.0.2.0/24", typed="\n192.0.2.9\n" + DECLINED)
 
     assert "At least one Seed is needed." in got.err
     assert "Scope (command line): 256 addresses" in got.out
-    assert "Seeds (asked): 192.0.2.9" in got.out
+    assert "  Seeds           192.0.2.9 (asked)" in got.out
 
 
 def test_input_ending_at_a_prompt_cancels_the_run(run: Runner) -> None:
@@ -194,15 +188,15 @@ sweep = true
 def test_a_run_file_gives_every_setting_and_says_where_each_came_from(
     run: Runner, tmp_path: Path
 ) -> None:
-    got = run("--from", _write(tmp_path, FULL_FILE))
+    got = run("--from", _write(tmp_path, FULL_FILE), typed=DECLINED)
 
-    assert got.code == ExitCode.INTERNAL_ERROR
+    assert got.code == ExitCode.STOPPED
     assert "Scope (run file): 384 addresses in 2 ranges" in got.out
     assert "Exclusions (run file):\n  192.0.2.128/25\n" in got.out
-    assert "Seeds (run file): 192.0.2.1" in got.out
+    assert "  Seeds           192.0.2.1 (run file)" in got.out
+    assert "  Failure budget  2 failed logins per set, then it is retired (run file)" in got.out
     assert (
-        "Options: label site-a (run file); parallel 20 (run file); "
-        "failure budget 2 (run file); Sweep on (run file)"
+        "  Options         label site-a (run file); parallel 20 (run file); Sweep on (run file)"
     ) in got.out
 
 
@@ -216,27 +210,30 @@ def test_flags_win_over_the_run_file(run: Runner, tmp_path: Path) -> None:
         "5",
         "--label",
         "site-b",
+        typed=DECLINED,
     )
 
     assert "Scope (run file): 384 addresses" in got.out
-    assert "Seeds (command line): 198.51.100.7" in got.out
+    assert "  Seeds           198.51.100.7 (command line)" in got.out
     assert "label site-b (command line); parallel 5 (command line)" in got.out
 
 
 def test_options_left_out_everywhere_take_their_defaults(run: Runner) -> None:
-    got = run("--scope", "192.0.2.0/24", "--seed", "192.0.2.1")
+    got = run("--scope", "192.0.2.0/24", "--seed", "192.0.2.1", typed=DECLINED)
 
-    assert (
-        "Options: no label (default); parallel 10 (default); failure budget 3 (default); "
-        "Sweep off (default)"
-    ) in got.out
+    assert "  Failure budget  3 failed logins per set, then it is retired (default)" in got.out
+    assert "  Options         no label (default); parallel 10 (default); Sweep off (default)" in (
+        got.out
+    )
 
 
 def test_a_run_file_without_a_scope_has_it_asked(run: Runner, tmp_path: Path) -> None:
-    got = run("--from", _write(tmp_path, 'seeds = ["192.0.2.1"]\n'), typed="192.0.2.0/24\n\n")
+    got = run(
+        "--from", _write(tmp_path, 'seeds = ["192.0.2.1"]\n'), typed="192.0.2.0/24\n\n" + DECLINED
+    )
 
     assert "Scope (asked): 256 addresses" in got.out
-    assert "Seeds (run file): 192.0.2.1" in got.out
+    assert "  Seeds           192.0.2.1 (run file)" in got.out
 
 
 def test_a_bad_scope_entry_in_a_run_file_refuses_the_run(run: Runner, tmp_path: Path) -> None:

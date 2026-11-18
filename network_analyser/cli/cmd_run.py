@@ -1,27 +1,50 @@
-"""`network-analyser run`: start a Run.
+"""`network-analyser run`: start a Run, in the decided order (spec #37 "Run-start order").
 
-Until the Run-start ticket (#45) lands, `run` stops after showing the checked Scope and Seeds
-(ticket #41). No packet is ever sent. Before anything else, and before any prompt, it takes
-the single-instance lock and checks a Run folder can be made where it will go (#42); the
-lock is held until `run` ends.
+    lock and folder checks -> Scope and Seeds -> crash-dump check -> Backup Passphrase
+    -> Credential Sets -> Ready to start -> Run folder created and registered -> crawl
+
+Before any prompt it takes the single-instance lock, checks a Run folder can be made where
+it will go (#42) and refuses while a `change-passphrase` is unfinished (story 112); the lock
+is held until `run` ends. Every refusal before the confirm exits 2, and Ctrl+C, input that
+ends, or `n` at the confirm exits 3, with nothing contacted (stories 15, 29).
+
+Until the device tickets land, the Run ends cleanly once its folder is created and
+registered: no packet is ever sent.
 """
 
 import argparse
 import sys
+from datetime import UTC, datetime
 
-from network_analyser.cli import run_file, run_start
+from network_analyser import backup_store, run_output
+from network_analyser.cli import ready, run_file, run_secrets, run_start
+from network_analyser.cli.crash_dump_guard import guard_crash_dumps
 from network_analyser.cli.exit_codes import ExitCode
 from network_analyser.cli.parser import PROG
 from network_analyser.cli.prompts import Prompter
 from network_analyser.cli.run_folder import (
     RefusedError,
     check_where_run_folder_goes,
+    console_text,
+    create_and_register,
     find_data_folder,
     fixed_message,
     hold_instance_lock,
     refuse,
 )
 from network_analyser.cli.text import escape_controls
+from network_analyser.credentials import CredentialSets
+from network_analyser.records import RunRequest, Source, Sourced
+
+_CHANGE_PENDING = (
+    "a change of the Backup Passphrase is unfinished, so Backups may be under either "
+    f'passphrase. Finish it with "{PROG} change-passphrase", then start the Run again.'
+)
+_LABEL_IS_A_SECRET = (
+    "Refused: the label is the same as a password or the Backup Passphrase you typed. The "
+    "label goes\ninto the Run folder name and the Run register, so it must never be a "
+    f"secret. {run_secrets.NOTHING_CONTACTED}"
+)
 
 
 def run(args: argparse.Namespace) -> ExitCode:
@@ -29,28 +52,66 @@ def run(args: argparse.Namespace) -> ExitCode:
     try:
         data = find_data_folder()
         with hold_instance_lock(data):
-            check_where_run_folder_goes(data, args.runs_dir)
-            return _after_folder_checks(args)
+            check = check_where_run_folder_goes(data, args.runs_dir)
+            _refuse_while_a_change_is_pending(data)
+            return _after_folder_checks(args, data, check)
     except RefusedError as error:
         refuse(args.command, fixed_message(error))
         return ExitCode.REFUSED
 
 
-def _after_folder_checks(args: argparse.Namespace) -> ExitCode:
+def _refuse_while_a_change_is_pending(data: run_output.DataFolder) -> None:
+    if backup_store.change_is_pending(data.change_pending):
+        raise RefusedError(_CHANGE_PENDING)
+
+
+def _after_folder_checks(
+    args: argparse.Namespace, data: run_output.DataFolder, check: run_output.RunsParentCheck
+) -> ExitCode:
     loaded = _load_run_file(args.run_file)
     if isinstance(loaded, ExitCode):
         return loaded
-    request = run_start.scope_and_seeds(args, loaded, Prompter.for_this_process())
+    ask = Prompter.for_this_process()
+    request = run_start.scope_and_seeds(args, loaded, ask)
     if isinstance(request, ExitCode):
         return request
-    # Next, from later tickets: the crash-dump check, the Backup Passphrase and Credential
-    # Sets (#45), then cli.run_folder.create_and_register once the operator confirms.
+    sets = _secrets(request, data, ask)
+    if isinstance(sets, ExitCode):
+        return sets
+    started = datetime.now(UTC)
+    source = Source.COMMAND_LINE if args.runs_dir is not None else Source.DEFAULT
+    print(ready.ready_block(request, sets.views(), Sourced(check.parent, source), started))
+    if not ready.confirm_start(ask):
+        print("Run cancelled. Nothing was contacted.", file=sys.stderr)
+        return ExitCode.STOPPED
+    folder = create_and_register(data, check, started, request.label.value)
+    print(f"Run folder created: {console_text(str(folder.path))}")
+    # Next, from the device tickets (#49 on): the crawl, with the Backup Passphrase going to
+    # backup_store's locking worker, and `check.notices` and the Credential Sets' views to
+    # the Run report (#66).
     print(
-        f"{PROG} run: Scope and Seeds checked. "
-        "The rest of the Run is not built yet; nothing was contacted.",
+        f"{PROG} run: the crawl is not built yet, so the Run ends here. No device was contacted.",
         file=sys.stderr,
     )
-    return ExitCode.INTERNAL_ERROR
+    return ExitCode.CLEAN
+
+
+def _secrets(
+    request: RunRequest, data: run_output.DataFolder, ask: Prompter
+) -> CredentialSets | ExitCode:
+    """The crash-dump check, the Backup Passphrase, then the Credential Sets (ADR 0004)."""
+    if not guard_crash_dumps(ask):
+        return ExitCode.REFUSED
+    passphrase = run_secrets.backup_passphrase(data.check_file, ask)
+    if isinstance(passphrase, ExitCode):
+        return passphrase
+    sets = run_secrets.credential_sets(ask, passphrase)
+    if isinstance(sets, ExitCode):
+        return sets
+    if run_secrets.label_is_a_secret(request.label.value, passphrase, sets):
+        print(_LABEL_IS_A_SECRET, file=sys.stderr)
+        return ExitCode.REFUSED
+    return sets
 
 
 def _load_run_file(path: str | None) -> run_file.RunFile | ExitCode | None:

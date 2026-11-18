@@ -6,5 +6,6 @@ Passphrase is held only in `backup_store` (CODING_STANDARDS.md, "Secrets").
 """
 
 from network_analyser.credentials.secret import Secret
+from network_analyser.credentials.sets import MAX_SETS, CredentialSet, CredentialSets
 
-__all__ = ["Secret"]
+__all__ = ["MAX_SETS", "CredentialSet", "CredentialSets", "Secret"]

@@ -70,6 +70,20 @@ class Prompter:
             raise EOFError
         return answer.rstrip("\r\n")
 
+    def yes_no(self, question: str, *, default: bool) -> bool:
+        """Ask a yes-or-no question; Enter gives `default`, and other answers ask again.
+
+        Raises:
+            EOFError: input ended before an answer was given.
+        """
+        while True:
+            answer = self.line(question).strip().lower()
+            if answer in {"y", "yes"} or (default and not answer):
+                return True
+            if answer in {"n", "no"} or (not default and not answer):
+                return False
+            self.say("  Answer y or n.")
+
     def secret(self, prompt: str) -> Secret:
         """Ask for a secret and return it, showing one `*` per character typed.
 

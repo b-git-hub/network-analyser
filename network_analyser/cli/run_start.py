@@ -3,8 +3,10 @@
     lock and folder checks -> Scope and Seeds -> crash-dump check -> Backup Passphrase
     -> Credential Sets -> Ready to start -> Run folder created and registered -> crawl
 
-This file holds the Scope and Seeds step (ticket #41). It comes before every secret prompt,
-so a typo in the Scope or a Seed is caught before any secret is typed (story 11). Each
+This file holds the Scope and Seeds step (ticket #41). The Scope is shown as soon as it is
+checked; the Seeds and options are recapped in the Ready-to-start block (`cli.ready`, #45).
+This step comes before every secret prompt, so a typo in the Scope or a Seed is caught
+before any secret is typed (story 11). Each
 setting comes from a flag, else the run file, else a prompt or its default (stories 2-4).
 A Scope or Seeds given by flag or run file is refused in full on any bad entry (story 8);
 at the prompt, a bad line is asked again (story 6). Questions go through the cli
@@ -42,8 +44,7 @@ def scope_and_seeds(
     seeds = _seeds(args, from_file, fence.value, ask)
     if isinstance(seeds, ExitCode):
         return seeds
-    print(f"Seeds ({seeds.source.value}): {', '.join(str(s) for s in seeds.value)}")
-    request = RunRequest(
+    return RunRequest(
         scope=fence,
         exclusions_source=_exclusions_source(args, from_file, fence.value),
         seeds=seeds,
@@ -54,8 +55,6 @@ def scope_and_seeds(
         ),
         sweep=_option(args.sweep, from_file.sweep, default=False),
     )
-    _show_options(request)
-    return request
 
 
 # -- Scope ---------------------------------------------------------------------------------
@@ -168,21 +167,6 @@ def _ask_seeds(fence: ScopeRecord, ask: Prompter) -> tuple[IPv4Address, ...]:
         for refusal in result.refusals:
             ask.say(f"  Refused: {_describe(refusal)}.")
         ask.say("  Enter the Seeds again.")
-
-
-# -- Options -------------------------------------------------------------------------------
-
-
-def _show_options(request: RunRequest) -> None:
-    label = request.label
-    parts = [
-        (f"label {escape_controls(label.value, limit=40)}" if label.value else "no label")
-        + f" ({label.source.value})",
-        f"parallel {request.parallel.value} ({request.parallel.source.value})",
-        f"failure budget {request.failure_budget.value} ({request.failure_budget.source.value})",
-        f"Sweep {'on' if request.sweep.value else 'off'} ({request.sweep.source.value})",
-    ]
-    print(f"Options: {'; '.join(parts)}")
 
 
 # -- Helpers -------------------------------------------------------------------------------
