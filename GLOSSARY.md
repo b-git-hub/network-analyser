@@ -64,6 +64,10 @@ _Avoid_: Run index, history
 
 ## Outputs
 
+**Run folder**:
+The folder a Run writes everything it produces into: its Backups, Topology, diagram and run report. Every Run gets a new one, and the tool never deletes it.
+_Avoid_: Output directory, results folder, run directory
+
 **Backup**:
 The running configuration of a Visited Device captured during a Run, held encrypted at rest.
 _Avoid_: Config dump, snapshot, archive
