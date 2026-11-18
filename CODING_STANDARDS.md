@@ -75,7 +75,7 @@ Changing the import table or an owner is a design decision: say why in the commi
 - Build with red-green TDD. Test behaviour through a module's public interface with plain data; no tests of private helpers.
 - Layout: `tests/security/` holds only the six v1 security tests (spec #37), named `test_<n>_*.py` and marked `security`. `tests/arch/` holds static architecture rules. `tests/unit/` holds everything else.
 - A static rule is also tested against a planted violation, so a rule that stops matching fails.
-- Fixtures are synthetic: IPv4 only from RFC 5737 (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24), hostnames like `sw-a`, secrets like `CANARY-pw-…`. The lab file's secrets are `CHANGE_ME` [tests/arch/test_fixture_hygiene.py]. Never commit captured device output, configs, `*.age`, `known_hosts` or Run folders.
+- Fixtures are synthetic: IPv4 only from RFC 5737 (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24), plus, only to prove a refusal, the blocks the Scope never touches (`records.NEVER_TARGETS`: 0.0.0.0/8, 127.0.0.0/8, 224.0.0.0/4, 240.0.0.0/4), hostnames like `sw-a`, secrets like `CANARY-pw-…`. The lab file's secrets are `CHANGE_ME` [tests/arch/test_fixture_hygiene.py]. Never commit captured device output, configs, `*.age`, `known_hosts` or Run folders.
 - Tests never touch the network; a fixture in `tests/conftest.py` refuses every connection. Fake devices at the `device_gateway` seam.
 - Anything that needs Windows is behind a `_winsys` function with an injected fake in tests, and is checked by hand on Windows (lab checklist).
 
