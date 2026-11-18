@@ -42,6 +42,10 @@ _Avoid_: Job, scan, session
 One username and password the operator supplies for a Run. The password exists only in memory for that Run and is never written anywhere; the username may be.
 _Avoid_: Login, account, profile
 
+**Device Role**:
+The permissions the operator gives the tool's account on a device: exactly the commands the tool sends, and no more. The Credential Set is what logs in; the Device Role is what that login may do.
+_Avoid_: Read-only user, service account role, tool profile
+
 **Retired Credential Set**:
 A Credential Set that is no longer tried for the rest of a Run because it used up its allowance of failed logins.
 _Avoid_: Locked set, disabled set
