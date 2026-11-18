@@ -18,7 +18,8 @@ uv run --locked python scripts/check.py
 - Python is python.org CPython 3.14, exact patch in `.python-version`. uv never downloads or uses its own Python (`[tool.uv]` in `pyproject.toml`). Dependencies are hash-locked in `uv.lock`; a version bump is its own deliberate commit.
 - The project is not a built package (`package = false`): there is no console script. The version lives in `network_analyser/_version.py` and must equal `pyproject.toml`'s `version` [tests/arch/test_project.py].
 - No `# noqa` or `# type: ignore` without a code and a reason on the same line.
-- There is no CI in v1 (decisions #28, #32, #47). The release workflow and `build.ps1` run the same checks.
+- There is no CI in v1 (decisions #28, #32, #47). The release workflow (`.github/workflows/release.yml`, tag-only) runs `build.ps1` itself, so both run the same checks. How to release: [docs/releasing.md](docs/releasing.md).
+- `CHANGELOG.md` entries follow the template in [docs/releasing.md](docs/releasing.md): `### Breaking changes`, then `### Allow-list and Device Role`, `None.` when empty [tests/unit/test_release_gate.py].
 - `build.ps1` (ticket #44) builds the Windows zip on Windows PowerShell 5.1: plain ASCII, no `&&` or `||` [tests/arch/test_build_script.py]; lint it with PSScriptAnalyzer's `PSUseCompatibleSyntax` for 5.1 after any change. Its logic lives in testable Python under `scripts/` (run as `python -m scripts.<name>`): the licence check and notices, the version resource, and the zip with its sums. A new runtime dependency must pass the licence check [tests/unit/test_third_party_notices.py]; a package whose wheel ships no licence text needs its text in `scripts/licence_texts/<name>-<version>.txt`, copied from its own hash-checked source release.
 
 ## 2. Layout and module boundaries ([ADR 0003](docs/adr/0003-modular-monolith-for-v1.md))
@@ -86,7 +87,7 @@ Changing the import table or an owner is a design decision: say why in the commi
 ## 8. Read-only and allow-list
 
 - Commands reach a device only through `device_gateway`'s single allow-list gate. The allow-list is literals in each `platforms` module, never read from a file or the environment.
-- Adding a command to the allow-list is a breaking change (decision #32): bump the minor version, add a CHANGELOG line telling the operator to re-apply the Device Role, and keep security test 2 passing.
+- Adding a command to the allow-list is a breaking change (decision #32): bump the minor version, list the command under `### Breaking changes` and `### Allow-list and Device Role` in CHANGELOG.md (the release notes then remind the operator to re-apply the Device Role), and keep security test 2 passing.
 
 ## 9. Commits
 
