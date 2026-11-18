@@ -12,6 +12,7 @@ from pathlib import Path
 
 from network_analyser import _winsys, backup_store, run_output
 from network_analyser.cli.parser import PROG
+from network_analyser.credentials import SecretScan
 
 
 class RefusedError(Exception):
@@ -76,6 +77,7 @@ def create_and_register(
     check: run_output.RunsParentCheck,
     started: datetime,
     label: str | None,
+    scan: SecretScan,
 ) -> run_output.RunFolder:
     """Create the Run folder and add it to the Run register straight away (story 123).
 
@@ -92,7 +94,13 @@ def create_and_register(
         msg = f"the Run folder could not be created under {console_text(str(check.parent))}."
         raise RefusedError(msg) from error
     try:
-        backup_store.register_run_folder(data.run_register, folder.path)
+        backup_store.register_run_folder(data.run_register, folder.path, scan=scan)
+    except backup_store.RegisterRefusedError as error:
+        msg = (
+            "the Run folder was created, but its path holds text that is a typed secret, so "
+            "it was not added to the Run register. No device was contacted."
+        )
+        raise RefusedError(msg) from error
     except OSError as error:
         msg = (
             "the Run folder was created but could not be added to the Run register, "

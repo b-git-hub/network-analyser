@@ -15,6 +15,7 @@ from network_analyser import _winsys, backup_store, run_output
 from network_analyser.cli import ExitCode, main
 from network_analyser.cli.run_folder import RefusedError, create_and_register, fixed_message
 from network_analyser.cli.trust_folder import check_trust_folder
+from network_analyser.credentials import SecretScan
 
 NOT_BUILT = "not built yet"
 
@@ -117,7 +118,7 @@ def test_the_run_folder_enters_the_register_the_moment_it_is_created(tmp_path: P
     check = run_output.check_runs_parent(tmp_path / "runs")
     started = datetime(2026, 11, 18, 10, 15, 30, tzinfo=UTC)
 
-    folder = create_and_register(data, check, started, label="lab")
+    folder = create_and_register(data, check, started, label="lab", scan=SecretScan())
 
     assert folder.path == tmp_path / "runs" / "20261118T101530Z_lab"
     assert folder.path.is_dir()

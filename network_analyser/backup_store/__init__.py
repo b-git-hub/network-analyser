@@ -14,12 +14,17 @@ from network_analyser.backup_store.check_file import (
     passphrase_problem,
     unlock_check_file,
 )
-from network_analyser.backup_store.register import register_run_folder, registered_run_folders
+from network_analyser.backup_store.register import (
+    RegisterRefusedError,
+    register_run_folder,
+    registered_run_folders,
+)
 
 __all__ = [
     "PASSPHRASE_MIN",
     "BackupPassphrase",
     "CheckFileError",
+    "RegisterRefusedError",
     "change_is_pending",
     "create_check_file",
     "passphrase_problem",

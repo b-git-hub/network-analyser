@@ -139,8 +139,8 @@ WRITE_OWNERS: frozenset[str] = frozenset(
         # #42: the "can a Run folder be written here" probe file, written before any prompt,
         # so it holds only a fixed word, never a secret.
         "run_output/folder.py",
-        # #42: the Run register, paths only, temp-then-rename. #48's secret scan is not
-        # built yet; the register holds no typed secret (labels pass the allow-list).
+        # #42: the Run register, paths only, temp-then-rename. #48: a new entry holding a
+        # typed secret is refused, never written.
         "backup_store/register.py",
         # #45: the Backup check file, temp-then-rename. It holds only age ciphertext of a
         # fixed, known phrase; the passphrase itself never reaches the file.
@@ -148,6 +148,10 @@ WRITE_OWNERS: frozenset[str] = frozenset(
         # #46: the Trust Store, OpenSSH known_hosts lines of public host keys only,
         # temp-then-rename. It never holds a secret, so #48's scan has nothing to find.
         "trust_store/store.py",
+        # #48: audit.log, created exclusively and appended to one line at a time. Every
+        # value and every line passes through the secret scan; only schema fields of plain
+        # data are written, never device output.
+        "run_output/audit.py",
     }
 )
 _WRITE_CALLS = frozenset({"write_text", "write_bytes", "symlink_to", "hardlink_to", "touch"})

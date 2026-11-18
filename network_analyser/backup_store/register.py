@@ -6,11 +6,22 @@ UTC time and the operator's `--label`. `change-passphrase` reads it to find ever
 a Run folder is added the moment it is created (story 123). Entries are never removed: a
 folder no longer where the register says is reported as "not found" (#58). The format is
 part of the compatibility promise (decision #32).
+
+Its text passes through the Run's secret scan (#42 follow-up, #48). A path cannot be written
+as `[blocked]`, since `change-passphrase` could then never find its Backups, so a new entry
+that holds a typed secret is refused instead and nothing is written. Earlier entries are
+copied as they are: they were already on disk.
 """
 
 import os
 import secrets
 from pathlib import Path
+
+from network_analyser.credentials import SecretScan
+
+
+class RegisterRefusedError(Exception):
+    """The Run folder's path holds a typed secret, so it was not added. Fixed text."""
 
 
 def registered_run_folders(register: Path) -> tuple[Path, ...]:
@@ -23,16 +34,22 @@ def registered_run_folders(register: Path) -> tuple[Path, ...]:
     return tuple(dict.fromkeys(Path(line) for line in lines if line))
 
 
-def register_run_folder(register: Path, run_folder: Path) -> None:
+def register_run_folder(register: Path, run_folder: Path, *, scan: SecretScan) -> None:
     """Add `run_folder` (an absolute path) to the register, unless it is already there.
 
     The new register is written to a temporary file beside the old one, flushed to disk,
     then renamed over it, so a crash leaves either the old list or the new one, never half.
     The caller holds the single-instance lock, so no other process writes it meanwhile.
+
+    Raises:
+        RegisterRefusedError: the path holds one of the Run's typed secrets.
     """
     folders = registered_run_folders(register)
     if run_folder in folders:
         return
+    if scan.holds_secret(str(run_folder)):
+        msg = "the Run folder's path holds text that is a typed secret"
+        raise RegisterRefusedError(msg)
     text = "".join(f"{folder}\n" for folder in (*folders, run_folder))
     register.parent.mkdir(parents=True, exist_ok=True)
     temporary = register.with_name(f"{register.name}.tmp-{secrets.token_hex(8)}")

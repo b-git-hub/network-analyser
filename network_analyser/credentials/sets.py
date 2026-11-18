@@ -9,6 +9,7 @@ module (and, at the login itself, `device_gateway`); what the rest of the tool s
 from collections.abc import Sequence
 from typing import Final, NoReturn, final, override
 
+from network_analyser.credentials.scan import SecretScan
 from network_analyser.credentials.secret import HELD_IN_MEMORY, Secret
 from network_analyser.records import CredentialSetView, Platform
 
@@ -40,6 +41,10 @@ class CredentialSet:
     def password_same_as(self, secret: Secret) -> bool:
         """Say, in constant time, whether this set's password is `secret` (story 27)."""
         return self.__password.same_as(secret)
+
+    def add_to_scan(self, scan: SecretScan) -> None:
+        """Have the secret scan look for this set's password in everything written."""
+        scan.watch(self.__password)
 
     @override
     def __init_subclass__(cls) -> NoReturn:
@@ -85,6 +90,11 @@ class CredentialSets:
     def password_same_as(self, secret: Secret) -> bool:
         """Say whether any set's password is `secret`, without saying which."""
         return any(s.password_same_as(secret) for s in self.__sets)
+
+    def add_to_scan(self, scan: SecretScan) -> None:
+        """Have the secret scan look for every set's password in everything written (#30)."""
+        for credential_set in self.__sets:
+            credential_set.add_to_scan(scan)
 
     def __len__(self) -> int:
         """Return how many sets there are."""

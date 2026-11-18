@@ -1,7 +1,8 @@
-"""Where the per-user folder is, and Windows long paths (spec #37 "Per-user data"; #26).
+"""Where the per-user folder is, Windows long paths, and who runs the tool on which PC.
 
-The only file that reads the environment, and only `LOCALAPPDATA`, by literal name
-(CODING_STANDARDS.md, "Secrets"). Nothing secret is ever read from the environment.
+Spec #37 "Per-user data"; #26; #30 section 7. The only file that reads the environment, and
+only `LOCALAPPDATA`, `USERDOMAIN` and `COMPUTERNAME`, by literal name (CODING_STANDARDS.md,
+"Secrets"). Nothing secret is ever read from the environment.
 """
 
 import os
@@ -22,6 +23,25 @@ def local_app_data() -> Path | None:
         return None
     path = Path(value)
     return path if path.is_absolute() else None
+
+
+def pc_name() -> str | None:
+    """Return the PC's name (`%COMPUTERNAME%`) for the Audit log, or None when it is unset."""
+    return os.environ.get("COMPUTERNAME") or None
+
+
+def windows_account() -> str | None:
+    r"""Return the account the tool runs as, `DOMAIN\user`, or None when it cannot be read.
+
+    Usernames are not secret (decided on #6). The user comes from the operating system
+    (`GetUserNameW` on Windows), not the environment.
+    """
+    try:
+        user = os.getlogin()
+    except OSError:
+        return None
+    domain = os.environ.get("USERDOMAIN")
+    return f"{domain}\\{user}" if domain else user
 
 
 def extended_length(path: str) -> str:
