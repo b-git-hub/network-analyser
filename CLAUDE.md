@@ -11,7 +11,21 @@ Everything lives on GitHub, not Azure DevOps.
 - Board: https://github.com/users/b-git-hub/projects/1
 - Planning map: https://github.com/b-git-hub/network-analyser/issues/1 (label `wayfinder:map`). Its child issues are decision tickets labelled `wayfinder:research|prototype|grilling|task`. Read the map before starting any planning work.
 
-Every task that comes out of a session becomes a GitHub issue in this repo, added to the board. The board's "Auto-add sub-issues to project" workflow adds any sub-issue of an item already on the board, so wayfinder tickets (sub-issues of the map) need no manual step. Cloud sessions cannot reach the board, so an issue that is not a sub-issue must be added by the operator, or by the board's "Auto-add to project" workflow if it is switched on. Use the `gh` CLI. On this machine it may only be reachable at `C:\Program Files\GitHub CLI\gh.exe`. Blocking uses GitHub's native "blocked by" relationship, and parent/child uses sub-issues.
+Every task that comes out of a session becomes a GitHub issue in this repo, added to the board. The board's "Auto-add sub-issues to project" workflow adds any sub-issue of an item already on the board, so wayfinder tickets (sub-issues of the map) need no manual step. Cloud sessions cannot reach the board, so an issue that is not a sub-issue must be added by the operator, or by the board's "Auto-add to project" workflow if it is switched on. Use the `gh` CLI. Blocking uses GitHub's native "blocked by" relationship, and parent/child uses sub-issues.
+
+### Setting "blocked by" from a cloud session
+
+Cloud sessions cannot set "blocked by": the GitHub MCP tools have no dependency operation. When a session needs a blocking edge, it hands the operator one ready-to-paste command per edge:
+
+```
+gh api repos/b-git-hub/network-analyser/issues/<blocked number>/dependencies/blocked_by -F issue_id=<blocker's internal id>
+```
+
+- `issue_id` is the blocker's internal issue **id** (for example `6464387517`), not its number. Take it from the `id` that `issue_write` returns on create, or from `issue_read`.
+- Give one command per code block, with no `&&`: the operator runs Windows PowerShell 5.1, which rejects `&&`.
+- `gh` is installed with winget and is on the operator's PATH as plain `gh`.
+- Say which ticket blocks which, and why, beside the commands.
+- Also note "Waits on: <ticket name>" in the blocked ticket's body, so the dependency is readable before the operator runs the command.
 
 ## Security comes first
 
