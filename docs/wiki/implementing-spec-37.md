@@ -27,3 +27,4 @@ How [spec #37](https://github.com/b-git-hub/network-analyser/issues/37) (Network
 - 2026-11-18: merged #42 at `f5617ad`; no conflicts, check.py all green, 346 tests passed.
 - 2026-11-18: wave 2 started: #45 and #46 (after #41, #42, #43 merged); #44 still running.
 - 2026-11-18: merged #44 at `ad98071`; no conflicts, check.py all green, 372 tests passed; adds default `build` dependency group (PyInstaller).
+- 2026-11-18: merged #46 at `2c3a5a9`; no conflicts, check.py all green, 403 tests passed.
