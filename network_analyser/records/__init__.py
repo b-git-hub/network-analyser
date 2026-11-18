@@ -6,6 +6,12 @@ records. Never a `Secret`, a callable, a socket, a file or a live session, and n
 running config. Imports nothing from the package (CODING_STANDARDS.md, "Data").
 """
 
+from network_analyser.records.host_keys import (
+    HostKey,
+    HostKeyCheck,
+    HostKeyVerdict,
+    MalformedHostKeyError,
+)
 from network_analyser.records.platform import CredentialSetView, Platform
 from network_analyser.records.run_request import RunRequest, Source, Sourced
 from network_analyser.records.scope import NEVER_TARGETS, AddressRange, Placement, ScopeRecord
@@ -14,6 +20,10 @@ __all__ = [
     "NEVER_TARGETS",
     "AddressRange",
     "CredentialSetView",
+    "HostKey",
+    "HostKeyCheck",
+    "HostKeyVerdict",
+    "MalformedHostKeyError",
     "Placement",
     "Platform",
     "RunRequest",

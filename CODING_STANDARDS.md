@@ -19,6 +19,7 @@ uv run --locked python scripts/check.py
 - The project is not a built package (`package = false`): there is no console script. The version lives in `network_analyser/_version.py` and must equal `pyproject.toml`'s `version` [tests/arch/test_project.py].
 - No `# noqa` or `# type: ignore` without a code and a reason on the same line.
 - There is no CI in v1 (decisions #28, #32, #47). The release workflow and `build.ps1` run the same checks.
+- `build.ps1` (ticket #44) builds the Windows zip on Windows PowerShell 5.1: plain ASCII, no `&&` or `||` [tests/arch/test_build_script.py]; lint it with PSScriptAnalyzer's `PSUseCompatibleSyntax` for 5.1 after any change. Its logic lives in testable Python under `scripts/` (run as `python -m scripts.<name>`): the licence check and notices, the version resource, and the zip with its sums. A new runtime dependency must pass the licence check [tests/unit/test_third_party_notices.py]; a package whose wheel ships no licence text needs its text in `scripts/licence_texts/<name>-<version>.txt`, copied from its own hash-checked source release.
 
 ## 2. Layout and module boundaries ([ADR 0003](docs/adr/0003-modular-monolith-for-v1.md))
 

@@ -145,6 +145,9 @@ WRITE_OWNERS: frozenset[str] = frozenset(
         # #45: the Backup check file, temp-then-rename. It holds only age ciphertext of a
         # fixed, known phrase; the passphrase itself never reaches the file.
         "backup_store/check_file.py",
+        # #46: the Trust Store, OpenSSH known_hosts lines of public host keys only,
+        # temp-then-rename. It never holds a secret, so #48's scan has nothing to find.
+        "trust_store/store.py",
     }
 )
 _WRITE_CALLS = frozenset({"write_text", "write_bytes", "symlink_to", "hardlink_to", "touch"})
