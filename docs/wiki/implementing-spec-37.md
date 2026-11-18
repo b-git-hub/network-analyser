@@ -30,3 +30,4 @@ How [spec #37](https://github.com/b-git-hub/network-analyser/issues/37) (Network
 - 2026-11-18: merged #46 at `2c3a5a9`; no conflicts, check.py all green, 403 tests passed.
 - 2026-11-18: merged #45 at `3586eab`; no conflicts, check.py all green, 459 tests passed.
 - 2026-11-18: merged #69 at `671ed95`; no conflicts, check.py all green, 475 tests passed.
+- 2026-11-18: merged #47 at `b428a5e`; no conflicts, check.py all green, 498 tests passed; adds release workflow, release_gate.py and CHANGELOG.md (no tags pushed).
