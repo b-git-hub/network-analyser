@@ -21,3 +21,5 @@ How [spec #37](https://github.com/b-git-hub/network-analyser/issues/37) (Network
 - 2026-11-18: operator went AFK asking for a CML-testable build; started #38 before exploration notes landed so the frontier keeps moving.
 - 2026-11-18: merged #39 at `2c4c9e3`; lab file and checklist only, no conflicts; yamllint not installed, so the YAML was only checked to parse (all secrets in it are CHANGE_ME placeholders).
 - 2026-11-18: merged #38 at `fc2a616`; no conflicts; first merge with tests and linters: `uv run --locked python scripts/check.py` (ruff format, ruff lint, mypy strict for Linux and win32, pytest) all green, 128 tests passed.
+- 2026-11-18: 12:40–15:30 UTC the 5-hour usage limit stopped implementers #41–#44 mid-ticket; resumed at 15:37 with SendMessage. See [usage-limits](usage-limits.md).
+- 2026-11-18: merged #43 at `9b7dcc5`; no conflicts, check.py all green, 160 tests passed.

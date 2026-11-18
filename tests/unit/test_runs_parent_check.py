@@ -3,7 +3,7 @@
 It also says when that place is a network, cloud-synced or removable location, and warns
 when accounts other than the operator, SYSTEM and Administrators can modify what is put
 there (#42, stories 119-121; decided on #26). Windows answers are faked here; they are
-checked by hand on a Windows PC (lab checklist, G7 and G8).
+checked by hand on a Windows PC (lab checklist, G10 and G11).
 """
 
 from pathlib import Path

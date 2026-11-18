@@ -50,7 +50,7 @@ def main(
             return int(stop.code or 0)
         command: str = args.command
         return COMMANDS[command](args)
-    except KeyboardInterrupt:
+    except KeyboardInterrupt, EOFError:  # Ctrl+C, or input ended at a prompt (story 29)
         print("Cancelled.", file=sys.stderr)
         return ExitCode.STOPPED
     except Exception as error:  # noqa: BLE001 (the top-level handler, story 91)
