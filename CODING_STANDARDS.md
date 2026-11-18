@@ -90,7 +90,7 @@ Changing the import table or an owner is a design decision: say why in the commi
 
 - Commands reach a device only through `device_gateway`'s single allow-list gate, `DeviceSession.send(platform, command)` [security test 1]; the Netmiko connection refuses any write that is not a bare RETURN or a permitted line, so the library's own session set-up passes the same gate. The allow-list is literals in each `platforms/<platform>/commands.py`, never read from a file or the environment: exact strings, or templates whose parameters match a strict pattern that never matches a space.
 - No Netmiko call that enters configuration or enable mode, saves or commits, no `ConnectHandler`/`SSHClient`/`AutoAddPolicy`, and no session log other than None [tests/arch/test_read_only.py].
-- Adding a command to the allow-list is a breaking change (decision #32): bump the minor version, list the command under `### Breaking changes` and `### Allow-list and Device Role` in CHANGELOG.md (the release notes then remind the operator to re-apply the Device Role), and keep security test 2 passing.
+- Adding a command to the allow-list is a breaking change (decision #32): bump the minor version, list the command under `### Breaking changes` and `### Allow-list and Device Role` in CHANGELOG.md (the release notes then remind the operator to re-apply the Device Role), keep security test 2 passing, and regenerate the lab's Device Role with `uv run --locked python -m scripts.lab_roles` [tests/unit/test_lab_role.py]. `role-snippet` builds the role from the allow-list itself (`platforms/*/role.py`); a template whose parameter is not the account's username has no role form yet, so the ticket adding one extends `platforms/roles.py` rather than widening the role.
 
 ## 9. Commits
 
