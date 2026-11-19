@@ -85,6 +85,8 @@ class FakeDevice:
     gate: Callable[[str], bool] | None = None
     on_login: Callable[[], None] | None = None
     """Called inside each password attempt, before the device answers (to hold it open)."""
+    login_lost: bool = False
+    """The connection drops after the password is sent, before the device answers."""
 
 
 class _FakeShell:
@@ -132,6 +134,8 @@ class _FakeLink:
         self._device.passwords_received.append(value)
         if self._device.on_login is not None:
             self._device.on_login()
+        if self._device.login_lost:
+            return LoginResult.LOST
         return LoginResult.SUCCEEDED if value == self._device.password else LoginResult.FAILED
 
     def open_shell(self, permits: Callable[[str], bool]) -> Shell | ErrorRaised:

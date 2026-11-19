@@ -211,6 +211,18 @@ def test_a_failure_budget_outside_one_to_five_is_refused(budget: int) -> None:
         sets.try_lease(1, failure_budget=budget)
 
 
+@pytest.mark.parametrize("number", [0, -1, 3])
+def test_a_set_number_that_is_not_one_of_the_sets_is_refused(number: int) -> None:
+    sets = CredentialSets([_set("netops-ro"), _set("svc-b")])
+
+    with pytest.raises(ValueError, match="no Credential Set"):
+        sets.try_lease(number, failure_budget=3)
+    with pytest.raises(ValueError, match="no Credential Set"):
+        sets.wait_for_turn(number, failure_budget=3)
+    with pytest.raises(ValueError, match="no Credential Set"):
+        sets.failures(number)
+
+
 def test_waiting_for_a_turn_ends_when_the_login_in_flight_finishes() -> None:
     sets = CredentialSets([_set("netops-ro")])
     first = sets.try_lease(1, failure_budget=3)

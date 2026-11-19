@@ -241,10 +241,10 @@ class CredentialSets:
         its logins in flight already match the failure budget it has left.
 
         Raises:
-            ValueError: `failure_budget` is not 1 to 5.
+            ValueError: there is no set `number`, or `failure_budget` is not 1 to 5.
         """
+        index = self.__index(number)
         _check_budget(failure_budget)
-        index = number - 1
         with self.__turns:
             if not self.__has_turn(index, failure_budget):
                 return None
@@ -256,22 +256,28 @@ class CredentialSets:
     def wait_for_turn(self, number: int, *, failure_budget: int) -> None:
         """Wait until set `number` could be leased, or is retired.
 
-        Another worker may take the turn first, so `try_lease` can still return None.
+        Another worker may take the turn first, so `try_lease` can still return None. Never
+        call it while holding an SSH connection open: the wait has no end but other logins.
 
         Raises:
-            ValueError: `failure_budget` is not 1 to 5.
+            ValueError: there is no set `number`, or `failure_budget` is not 1 to 5.
         """
+        index = self.__index(number)
         _check_budget(failure_budget)
-        index = number - 1
         with self.__turns:
             self.__turns.wait_for(
                 lambda: self.__retired[index] or self.__has_turn(index, failure_budget)
             )
 
     def failures(self, number: int) -> int:
-        """Return how many failed logins set `number` has spent this Run."""
+        """Return how many failed logins set `number` has spent this Run.
+
+        Raises:
+            ValueError: there is no set `number`.
+        """
+        index = self.__index(number)
         with self.__turns:
-            return self.__failures[number - 1]
+            return self.__failures[index]
 
     def all_retired(self) -> bool:
         """Say whether every set is a Retired Credential Set (story 37)."""
@@ -295,6 +301,13 @@ class CredentialSets:
         """Have the secret scan look for every set's password in everything written (#30)."""
         for credential_set in self.__sets:
             credential_set.add_to_scan(scan)
+
+    def __index(self, number: int) -> int:
+        """Return set `number`'s index; a number from outside (0, -1) must not wrap round."""
+        if not 1 <= number <= len(self.__sets):
+            msg = f"there is no Credential Set {number}"
+            raise ValueError(msg)
+        return number - 1
 
     def __has_turn(self, index: int, failure_budget: int) -> bool:
         """Say whether set `index` may start a login now. Call holding the lock."""
