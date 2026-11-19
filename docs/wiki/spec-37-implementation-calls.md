@@ -43,6 +43,21 @@ Calls made by #65's implementer where the ticket left something open. Each is th
 13. **Not verified in draw.io Desktop.** No Windows draw.io was available to the implementer. Lab row W5 should confirm it opens offline with both pages, the hidden layer, the double-line Bundle (`shape=link;width=6`), and that the dash patterns read as dashed vs dotted.
 14. **Security test 4's draw.io scan** skips the `<object>` tag (draw.io's data wrapper, not an HTML embed) but still fails on a URL, `xmlns`, `link=`, a doctype or entity, `<iframe>`, `<link>`, `src=`/`href=`, `url(` and `@import`.
 
+## Sweep (#55), 2026-11-19
+
+Where the ticket left a choice, the conservative one was taken:
+
+- The probe sends no bytes. It reads the server identification string and closes before key exchange. A host that waits for a client string before sending its own is recorded as having no banner and is not logged into.
+- The 2 second budget covers the connect and the banner read together, not `--connect-timeout`.
+- Login from a Sweep uses the existing anchored patterns: `SSH-2.0-Cisco-*` for IOS/IOS-XE, and the provisional `SSH-2.0-OpenSSH_* FIPS` for NX-OS (lab checklist A2). `CISCO_WLC` is not a Seed.
+- The size check uses `ScopeRecord.address_count` (exclusions already removed; network and broadcast edges still counted). More than 65,536 is refused with exit 2 before any prompt continues. More than 4,096 warns, and exactly 4,096 or 65,536 does not refuse. Edges are not probed: `contains()` still skips them.
+- `--sweep-inflight` above 100 is refused by the parser. `sweep()` also clamps to 100, and treats a non-positive value as 1.
+- Operator Seeds are still logged into when their banner does not match (story 64). Only extra Seeds require a match. Other SSH hosts stay on the Sweep result and are never dialled for a password.
+- Each probe is an audit event `probe_attempted` (address, port, TCP result, whether a banner was read). The identification string is not in the audit log; it is kept, printable, on `CrawlResult.sweep` for the report.
+- No `--no-sweep` flag. A run file `sweep = true` cannot be turned off from the command line. That remains an operator decision (from #41).
+- The Sweep runs only after the operator confirms, inside the audit trail. It does not watch a stop token; that belongs to #56.
+- `socket` may be imported from `device_gateway/probe.py` as well as `ssh.py`, because the probe must not use Paramiko (Paramiko's handshake is the key exchange).
+
 15. **L3 Adjacency, Subnets and MAC/ARP inference (#62), 2026-11-19, on top of `b-git-hub/network-analyser@5a3e126`.** The number follows #65's calls (items 6-14). Made by #62's implementer where the ticket left it open; each is the conservative choice and is reversible.
    - **Format version stays 1.** `adjacencies` and `subnets` are optional keys. An older `render` ignores them. They are not in `diagram.read_topology`'s schema, so #65's draw.io Routing page still draws no routing lines until #64 extends that schema and `diagram/drawio.py`. Link status gains `inferred`. Evidence gains source `interface`, because story 124's list has no source for interface addressing and labelling it `routing` would be false.
    - **Confidence is the Link status `inferred`.** The diagram already draws that dotted. There is no numeric score.
