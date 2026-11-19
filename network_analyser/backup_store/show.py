@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Final
 
 from network_analyser.backup_store import check_file
+from network_analyser.backup_store.change_pending import PassphraseFiles
 from network_analyser.backup_store.check_file import CheckFileError, change_is_pending
 from network_analyser.backup_store.locker import BACKUP_SUFFIX, BACKUPS_FOLDER, scrypt_level
 from network_analyser.credentials import Secret
@@ -56,21 +57,6 @@ class Unopened(Enum):
         "it does not open with that passphrase, which is the old one. A change of the Backup "
         "Passphrase is unfinished, so this Backup is probably already under the new passphrase"
     )
-
-
-@dataclass(frozen=True, slots=True)
-class PassphraseFiles:
-    """The per-user files that tell which passphrase a Backup should open with.
-
-    Attributes:
-        check_file: the check file, locked with the current Backup Passphrase (#45).
-        previous_check_file: while a change is pending, the old passphrase's check file.
-        change_pending: the marker an unfinished `change-passphrase` leaves (#58).
-    """
-
-    check_file: Path
-    previous_check_file: Path
-    change_pending: Path
 
 
 @dataclass(frozen=True, slots=True)
