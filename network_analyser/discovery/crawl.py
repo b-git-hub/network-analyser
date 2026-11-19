@@ -143,20 +143,21 @@ def crawl(  # noqa: PLR0913 (the Seeds, the visit and the Run's settings, all by
     """
     return _Crawl(
         visit,
-        scope,
-        emit,
-        skipped or (lambda _record: None),
-        all_retired or (lambda: False),
-        stop or device_gateway.RunStop(),
+        scope=scope,
+        emit=emit,
+        skipped=skipped or (lambda _record: None),
+        all_retired=all_retired or (lambda: False),
+        stop=stop or device_gateway.RunStop(),
     ).run(seeds, parallel, tick or (lambda _queued: None))
 
 
 class _Crawl:
     """The queue, what has been seen, and what has been found. Used by the main thread."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 (see `crawl`)
         self,
         visit: Visit,
+        *,
         scope: ScopeRecord,
         emit: Emit,
         skipped: Skipped,

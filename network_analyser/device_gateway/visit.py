@@ -294,6 +294,23 @@ class _Visitor:
         """Dial (with the one retry), read the identification string, check the host key."""
         if self.stop.requested:  # #56: no new connection once the Run is stopping
             return self.unvisited(UnvisitedReason.RUN_STOPPED)
+        link = self.dial_with_retry()
+        if isinstance(link, DeviceRecord):
+            return link
+        refused = self.read_presented(link)
+        if refused is not None:
+            self.stop.release(link)
+            return self.unvisited(refused)
+        holder = (
+            None if self.identity is None else self.identity.claim_host_key(self.ip, link.host_key)
+        )
+        if holder is not None and holder != self.ip:
+            self.stop.release(link)  # story 73: the same device, already examined: no password
+            return Alias(self.ip, holder, AliasEvidence.HOST_KEY)
+        return link
+
+    def dial_with_retry(self) -> Link | DeviceRecord:
+        """Dial, retrying once after a wait (story 51); say why not, if no link was made."""
         pinned = self.trust.key_types(self.ip, SSH_PORT)
         link = self.dial_once(pinned, retry=False)
         if isinstance(link, DialFailed) and not link.algorithms_too_old:
@@ -315,16 +332,6 @@ class _Visitor:
                 if link.algorithms_too_old
                 else UnvisitedReason.UNREACHABLE
             )
-        refused = self.read_presented(link)
-        if refused is not None:
-            self.stop.release(link)
-            return self.unvisited(refused)
-        holder = (
-            None if self.identity is None else self.identity.claim_host_key(self.ip, link.host_key)
-        )
-        if holder is not None and holder != self.ip:
-            self.stop.release(link)  # story 73: the same device, already examined: no password
-            return Alias(self.ip, holder, AliasEvidence.HOST_KEY)
         return link
 
     def dial_once(self, key_types: tuple[str, ...], *, retry: bool) -> Link | DialFailed:
@@ -455,13 +462,30 @@ class _Visitor:
             closing=lambda: self.stop.closing,
         )
         shell = link.open_shell(session.permits)
-        if not isinstance(shell, ev.ErrorRaised):
-            session.attach(shell)
-        else:
+        if isinstance(shell, ev.ErrorRaised):
             self.emit(shell)
             if self.stop.closing:
                 return self.unvisited(UnvisitedReason.RUN_STOPPED, view)
             return self.partial(view, NO_SHELL)
+        session.attach(shell)
+        try:
+            found = self.work(session, view)
+        finally:
+            session.close()
+        if isinstance(found, DeviceRecord | Alias):
+            return found
+        backup, dropped_by = found
+        if not isinstance(backup, str):
+            self.backup_sink(*backup)  # the session is closed first: the sink may wait its turn
+        reason = backup if isinstance(backup, str) else dropped_by
+        if reason is not None:
+            return self.partial(view, reason, session)
+        return self.record(ev.DeviceOutcome.VISITED, view, session.platform)
+
+    def work(
+        self, session: DeviceSession, view: CredentialSetView
+    ) -> tuple[tuple[BackupCapture, str] | str, str | None] | DeviceRecord | Alias:
+        """Every command of the session: the Backup (or why none) and why it dropped, if so."""
         try:
             found = self.identify(session, view)
             if isinstance(found, DeviceRecord | Alias):
@@ -478,14 +502,7 @@ class _Visitor:
             return self.partial(view, DROP_REASONS[type(dropped)], session)
         except CommandRefusedError:
             return self.partial(view, REFUSED_COMMAND, session)
-        finally:
-            session.close()
-        if not isinstance(backup, str):
-            self.backup_sink(*backup)  # the session is closed first: the sink may wait its turn
-        reason = backup if isinstance(backup, str) else dropped_by
-        if reason is not None:
-            return self.partial(view, reason, session)
-        return self.record(ev.DeviceOutcome.VISITED, view, session.platform)
+        return backup, dropped_by
 
     def identify(
         self, session: DeviceSession, view: CredentialSetView

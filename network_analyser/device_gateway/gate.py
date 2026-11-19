@@ -16,7 +16,7 @@ from ipaddress import IPv4Address
 from typing import Final
 
 from network_analyser import platforms
-from network_analyser.device_gateway.link import Shell
+from network_analyser.device_gateway.link import Reply, Shell
 from network_analyser.device_gateway.stop import CLOSED_BY_OPERATOR
 from network_analyser.device_gateway.text import clean_output
 from network_analyser.records import Platform
@@ -155,6 +155,10 @@ class DeviceSession:
         size = 0 if reply.text is None else len(reply.text)
         result = CommandResult.ERROR if reply.too_large else reply.result
         self._emit(CommandSent(self._ip, command, took, size, result))
+        return self._body(reply)
+
+    def _body(self, reply: Reply) -> str:
+        """The reply's output, prompt removed; raise if the session must be dropped."""
         if self._closing():
             raise ClosedByOperatorError
         if reply.too_large:
