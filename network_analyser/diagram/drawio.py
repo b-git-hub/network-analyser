@@ -9,8 +9,11 @@ or export to Visio. It is plain, uncompressed XML with two pages:
   Lines to Unvisited Devices sit on a layer that starts hidden, as the HTML shows them only
   for the device picked.
 - **Routing**: the Visited Devices at the same positions, each with its interface addresses in
-  its shape data. `topology.json` format version 1 holds no routing adjacency, so no routing
-  lines are drawn, and a note on the page says so (decision in
+  its shape data. Two-device shared subnets are solid lines labelled with the prefix,
+  routing-protocol neighbourships dashed lines labelled with the protocol, and each Subnet of
+  three or more devices a node joined to each of them, where `diagram.html` puts it (#64).
+  Devices with no L3 interface are faded. A `topology.json` from before L3 data was recorded
+  gets no routing lines and a note saying why (decisions in
   docs/wiki/spec-37-implementation-calls.md).
 
 Device details (hostname, Platform, model, version, management IP, serial) are in each
@@ -52,10 +55,17 @@ SEGMENT_SIZE: Final = 30.0
 LABEL_LIFT: Final = 16.0
 PARALLEL_STEP: Final = 32.0
 NO_VALUE: Final = "\u2014"
+SUBNET_WIDTH: Final = 110.0
+SUBNET_HEIGHT: Final = 30.0
 NO_ROUTING_NOTE: Final = (
-    "Routing page: this version of Network Analyser draws no routing lines, because "
-    "topology.json format version 1 holds no routing adjacency. Each device's interface "
+    "Routing page: no routing lines are drawn, because this topology.json was written "
+    "before Network Analyser recorded L3 Adjacencies and Subnets. Each device's interface "
     "addresses are in its shape data (l3_interfaces)."
+)
+ROUTING_KEY: Final = (
+    "Routing page: a solid line labelled with a prefix is a subnet two devices share; a "
+    "dashed line is a routing-protocol neighbourship (OSPF, EIGRP, BGP); a rounded node is "
+    "a Subnet three or more devices share. Faded devices have no L3 interface."
 )
 HIDDEN_LAYER: Final = "Links to Unvisited Devices (hidden until you show this layer)"
 MAIN_LAYER: Final = "Devices and links"
@@ -80,6 +90,13 @@ _UNKNOWN_STATUS: Final = f"{_GREY}strokeWidth=1.6;dashed=1;dashPattern=5 3;"
 _KEEPALIVE: Final = "strokeColor=#5a6676;strokeWidth=1.2;dashed=1;dashPattern=1 3;"
 _SEGMENT_LINE: Final = f"{_GREY}strokeWidth=1.6;dashed=1;dashPattern=3 3;"
 _BUNDLE: Final = "shape=link;width=6;"
+_L3_LINE: Final = "strokeColor=#0b6e99;strokeWidth=1.6;dashed=0;"
+_PROTOCOL_LINE: Final = "strokeColor=#0b6e99;strokeWidth=1.6;dashed=1;dashPattern=6 4;"
+_FADED: Final = "opacity=35;textOpacity=50;"
+_SUBNET_NODE: Final = (
+    "rounded=1;arcSize=50;whiteSpace=wrap;html=0;fontSize=10;fontFamily=Consolas;"
+    "fillColor=#e3f1f8;fontColor=#18212c;strokeColor=#0b6e99;strokeWidth=1.2;"
+)
 _NODE_BASE: Final = (
     "rounded=1;arcSize=15;whiteSpace=wrap;html=0;overflow=hidden;fontSize=11;"
     "fillColor=#ffffff;fontColor=#18212c;strokeWidth=1.2;"
@@ -404,7 +421,7 @@ class _Sheet:
         point = self._layout.positions[ident]
         return _Box(point.x - width / 2, point.y - height / 2, width, height)
 
-    def _device_shape(self, ids: _Ids, record: Mapping[str, Plain]) -> str:
+    def _device_shape(self, ids: _Ids, record: Mapping[str, Plain], *, faded: bool = False) -> str:
         ident = _id(record)
         platform = record.get("platform")
         style = _NODE_BASE + _PLATFORM_COLOURS.get(
@@ -412,6 +429,8 @@ class _Sheet:
         )
         if record.get("outcome") == "partial":
             style += _PARTIAL
+        if faded:
+            style += _FADED
         model = self._string(record.get("model")) or ""
         label = _lines(self._name(ident), model) if model else _lines(self._name(ident))
         return _vertex(
@@ -582,7 +601,7 @@ class _Sheet:
                 )
         return edges
 
-    def _bends(self, edges: list[_Edge]) -> dict[int, Point]:
+    def _bends(self, edges: list[_Edge], places: Mapping[str, Point]) -> dict[int, Point]:
         """Where parallel lines between one pair of shapes bow out, so none hides another."""
         key = [tuple(sorted((e.a, e.b))) for e in edges]
         total = Counter(key)
@@ -591,7 +610,7 @@ class _Sheet:
         for index, pair in enumerate(key):
             count, position = total[pair], seen[pair]
             seen[pair] += 1
-            first, second = self._layout.positions[pair[0]], self._layout.positions[pair[1]]
+            first, second = places[pair[0]], places[pair[1]]
             length = hypot(second.x - first.x, second.y - first.y)
             offset = (position - (count - 1) / 2) * PARALLEL_STEP
             if count > 1 and length > 0:
@@ -622,7 +641,7 @@ class _Sheet:
                 drawn.add(ident)
                 shapes.append(make(ids, record))
         edges = [e for e in self._physical_edges() if e.a != e.b and e.a in drawn and e.b in drawn]
-        bends = self._bends(edges)
+        bends = self._bends(edges, self._layout.positions)
         lines: list[str] = []
         for index, edge in enumerate(edges):
             parent = "2" if edge.a in unvisited or edge.b in unvisited else "1"
@@ -637,21 +656,168 @@ class _Sheet:
     def routing(self) -> str:
         """Return the Routing page."""
         ids = _Ids()
-        shapes: list[str] = []
+        adjacencies = self._content.get("adjacencies")
+        subnets = self._content.get("subnets")
+        recorded = isinstance(adjacencies, tuple) and isinstance(subnets, tuple)
         drawn: set[str] = set()
+        shapes = self._routing_devices(ids, drawn, recorded=recorded)
+        places = dict(self._layout.positions)
+        edges = self._routing_l3(ids, drawn, places, shapes)
+        edges = [e for e in edges if e.a != e.b and e.a in drawn and e.b in drawn]
+        lines: list[str] = []
+        bends = self._bends(edges, places)
+        for index, edge in enumerate(edges):
+            ident = ids.take(edge.seed)
+            lines.append(_edge_cell(ident, edge, "1", bends.get(index)))
+            for suffix, text, position in (("a", edge.a_label, "-0.7"), ("b", edge.b_label, "0.7")):
+                if text:
+                    lines.append(_end_label(ids.take(f"{ident}-{suffix}"), text, position, ident))
+        points = [places[i] for i in drawn]
+        left = min((p.x for p in points), default=0.0) - NODE_WIDTH / 2
+        top = min((p.y for p in points), default=0.0) - NODE_HEIGHT / 2 - 70
+        text = ROUTING_KEY if recorded else NO_ROUTING_NOTE
+        note = _vertex(ids.take("note"), _lines(text), _NOTE, _Box(left, top, 640.0, 48.0))
+        body = note + "".join(shapes) + "".join(lines)
+        return _page("routing", ROUTING, body, hidden_layer=False)
+
+    # ---------- the Routing page's parts ----------
+
+    def _routing_devices(self, ids: _Ids, drawn: set[str], *, recorded: bool) -> list[str]:
+        """Shapes for every Visited Device, and for Unvisited Devices the L3 data names."""
+        in_l3 = self._l3_members()
+        shapes: list[str] = []
         for record in self._devices:
             ident = _id(record)
             if ident in drawn or ident not in self._layout.positions:
                 continue
             drawn.add(ident)
-            shapes.append(self._device_shape(ids, record))
-        points = [self._layout.positions[i] for i in drawn]
-        left = min((p.x for p in points), default=0.0) - NODE_WIDTH / 2
-        top = min((p.y for p in points), default=0.0) - NODE_HEIGHT / 2 - 70
-        note = _vertex(
-            ids.take("note"), _lines(NO_ROUTING_NOTE), _NOTE, _Box(left, top, 640.0, 48.0)
+            faded = recorded and ident not in in_l3 and not self._has_l3(record)
+            shapes.append(self._device_shape(ids, record, faded=faded))
+        for record in self._unvisited:
+            ident = _id(record)
+            if ident in in_l3 and ident not in drawn and ident in self._layout.positions:
+                drawn.add(ident)
+                shapes.append(self._unvisited_shape(ids, record))
+        return shapes
+
+    def _routing_l3(
+        self, ids: _Ids, drawn: set[str], places: dict[str, Point], shapes: list[str]
+    ) -> list[_Edge]:
+        """Add the Subnet shapes; return the Subnet and Adjacency lines."""
+        edges: list[_Edge] = []
+        for record in _records(self._content, "subnets"):
+            ident = _id(record)
+            if ident in places or ident not in self._layout.subnets:
+                continue
+            places[ident] = self._layout.subnets[ident]
+            drawn.add(ident)
+            shapes.append(self._subnet_shape(ids, record))
+            edges.extend(self._subnet_edges(record))
+        for record in _records(self._content, "adjacencies"):
+            edge = self._adjacency_edge(record)
+            if edge is not None:
+                edges.append(edge)
+        return edges
+
+    def _l3_members(self) -> set[str]:
+        members: set[str] = set()
+        for record in _records(self._content, "adjacencies"):
+            members.update(str(e["device"]) for e in self._ends(record))
+        for record in _records(self._content, "subnets"):
+            members.update(
+                str(a["device"])
+                for a in _tuple(record.get("attachments"))
+                if isinstance(a, Mapping) and isinstance(a.get("device"), str)
+            )
+        return members
+
+    def _has_l3(self, record: Mapping[str, Plain]) -> bool:
+        """Whether the device has an L3 interface; True when its interfaces are unknown."""
+        interfaces = record.get("interfaces")
+        if not isinstance(interfaces, tuple):
+            return True
+        for interface in interfaces:
+            ip = interface.get("ip") if isinstance(interface, Mapping) else None
+            if not isinstance(ip, Mapping):
+                continue
+            if "unknown" in ip or _tuple(ip.get("addresses")) or ip.get("unnumbered") is True:
+                return True
+        return False
+
+    def _subnet_shape(self, ids: _Ids, record: Mapping[str, Plain]) -> str:
+        ident = _id(record)
+        prefix, vrf = self._txt(record.get("prefix")), self._txt(record.get("vrf"))
+        point = self._layout.subnets[ident]
+        width = max(SUBNET_WIDTH, len(prefix) * 7.0 + 24)
+        attached = [
+            f"{self._name(str(a['device']))} {self._ifn(a.get('interface'))} "
+            f"{self._txt(a.get('address'))}"
+            for a in _tuple(record.get("attachments"))
+            if isinstance(a, Mapping) and isinstance(a.get("device"), str)
+        ]
+        data = (
+            ("prefix", prefix),
+            ("vrf", vrf),
+            ("attachments", "; ".join(attached) if attached else "none"),
+            ("evidence", self._evidence(_tuple(record.get("evidence")))),
+            ("topology_id", ident),
         )
-        return _page("routing", ROUTING, note + "".join(shapes), hidden_layer=False)
+        box = _Box(point.x - width / 2, point.y - SUBNET_HEIGHT / 2, width, SUBNET_HEIGHT)
+        return _vertex(
+            ids.take(f"n-{ident}"), _lines(prefix, f"VRF {vrf}"), _SUBNET_NODE, box, data=data
+        )
+
+    def _subnet_edges(self, record: Mapping[str, Plain]) -> list[_Edge]:
+        ident = _id(record)
+        edges: list[_Edge] = []
+        seen: set[str] = set()
+        for attachment in _tuple(record.get("attachments")):
+            if not isinstance(attachment, Mapping) or not isinstance(attachment.get("device"), str):
+                continue
+            device = str(attachment["device"])
+            if device in seen:
+                continue
+            seen.add(device)
+            port = self._ifn(attachment.get("interface"))
+            data = (
+                ("ends", f"{self._name(device)} {port} {self._txt(attachment.get('address'))}"),
+                ("topology_id", ident),
+            )
+            edges.append(
+                _Edge(
+                    f"e-{ident}-{len(edges)}",
+                    ident,
+                    device,
+                    "",
+                    "",
+                    port,
+                    _EDGE_BASE + _L3_LINE,
+                    data,
+                )
+            )
+        return edges
+
+    def _adjacency_edge(self, record: Mapping[str, Plain]) -> _Edge | None:
+        ends = self._ends(record)
+        if len(ends) != 2:  # noqa: PLR2004 (two ends)
+            return None
+        a, b = str(ends[0]["device"]), str(ends[1]["device"])
+        kind = record.get("kind")
+        shared = kind == "shared subnet"
+        label = self._txt(record.get("prefix")) if shared else self._txt(kind)
+        ports = [
+            ", ".join(self._ifn(n) for n in _tuple(e.get("interfaces"))) for e in (ends[0], ends[1])
+        ]
+        data = (
+            ("kind", self._txt(kind)),
+            ("vrf", self._txt(record.get("vrf"))),
+            ("prefix", self._txt(record.get("prefix"))),
+            ("ends", f"{self._name(a)} {ports[0]} - {self._name(b)} {ports[1]}".strip()),
+            ("evidence", self._evidence(_tuple(record.get("evidence")))),
+            ("topology_id", _id(record)),
+        )
+        style = _EDGE_BASE + (_L3_LINE if shared else _PROTOCOL_LINE)
+        return _Edge(f"e-{_id(record)}", a, b, label, ports[0], ports[1], style, data)
 
 
 def _page(ident: str, title: str, body: str, *, hidden_layer: bool) -> str:

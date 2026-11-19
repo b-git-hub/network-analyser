@@ -13,12 +13,14 @@ import pytest
 
 from network_analyser import diagram
 from tests.support.topology_documents import (
+    adjacency,
     bundle,
     device,
     document,
     link,
     name,
     read,
+    subnet,
     unvisited_device,
 )
 
@@ -250,6 +252,83 @@ def test_the_routing_page_says_when_the_file_holds_no_routing_lines() -> None:
     notes = [_cell(e).get("value", "") for i, e in _cells(page).items() if i == "note"]
     assert notes
     assert "no routing" in notes[0].lower()
+
+
+def _routed() -> Any:  # noqa: ANN401 (JSON data)
+    data = _three_switches()
+    l3 = {
+        "name": name("Vlan99"),
+        "ip": {"vrf": "default", "addresses": ["198.51.100.1/24"], "unnumbered": None},
+    }
+    data["devices"][0]["interfaces"] = [l3]
+    data["devices"][1]["interfaces"] = [l3]
+    data["adjacencies"] = [
+        adjacency("adj-000000000001", "dev-S1", "dev-S2", prefix="192.0.2.8/30"),
+        adjacency("adj-000000000002", "dev-S1", "dev-S2", "OSPF"),
+    ]
+    data["subnets"] = [
+        subnet(
+            "subnet-000000000001",
+            "198.51.100.0/24",
+            ("dev-S1", "Vlan99", "198.51.100.1/24"),
+            ("dev-S2", "Vlan99", "198.51.100.2/24"),
+            ("dev-S3", "Vlan99", "198.51.100.3/24"),
+        )
+    ]
+    return data
+
+
+def test_the_routing_page_draws_shared_subnets_labelled_with_the_prefix() -> None:
+    cells = _cells(_page(_root(_file(_routed())), "Routing"))
+
+    line = cells["e-adj-000000000001"]
+    assert line.get("label") == "192.0.2.8/30"
+    assert _cell(line).get("source") == "n-dev-S1"
+    assert _cell(line).get("target") == "n-dev-S2"
+    assert line.get("topology_id") == "adj-000000000001"
+    assert _style(line).get("dashed", "0") == "0"
+
+
+def test_the_routing_page_draws_protocol_neighbourships_labelled_with_the_protocol() -> None:
+    cells = _cells(_page(_root(_file(_routed())), "Routing"))
+
+    line = cells["e-adj-000000000002"]
+    assert line.get("label") == "OSPF"
+    assert _style(line)["dashed"] == "1"
+    assert line.get("vrf") == "default"
+
+
+def test_a_subnet_is_a_node_joined_to_each_device_on_it() -> None:
+    topology = read(_routed())
+    spot = diagram.place(topology).subnets["subnet-000000000001"]
+    cells = _cells(_page(_root(diagram.draw_drawio(topology, lambda text: text)), "Routing"))
+
+    node = cells["n-subnet-000000000001"]
+    assert "198.51.100.0/24" in _cell(node).get("value", node.get("label", ""))
+    assert _centre(node) == pytest.approx((spot.x, spot.y), abs=0.1)
+    joined = {
+        _cell(e).get("target")
+        for e in _edges(_page(_root(_file(_routed())), "Routing"))
+        if _cell(e).get("source") == "n-subnet-000000000001"
+    }
+    assert joined == {"n-dev-S1", "n-dev-S2", "n-dev-S3"}
+
+
+def test_devices_with_no_l3_interface_are_faded_on_the_routing_page() -> None:
+    data = _routed()
+    data["subnets"] = []
+    cells = _cells(_page(_root(_file(data)), "Routing"))
+
+    assert "opacity" not in _style(cells["n-dev-S1"])
+    assert float(_style(cells["n-dev-S3"])["opacity"]) < 100
+    assert "opacity" not in _style(_cells(_page(_root(_file(data)), "Physical"))["n-dev-S3"])
+
+
+def test_with_l3_data_the_routing_page_carries_no_missing_lines_note() -> None:
+    cells = _cells(_page(_root(_file(_routed())), "Routing"))
+
+    notes = [_cell(e).get("value", "") for i, e in cells.items() if i == "note"]
+    assert all("no routing" not in note.lower() for note in notes)
 
 
 def test_unknown_values_read_as_unknown_never_as_empty() -> None:

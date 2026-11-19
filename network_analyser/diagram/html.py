@@ -1,4 +1,7 @@
-r"""`draw_html(topology, redact)`: the self-contained `diagram.html` (#63, stories 142-153).
+r"""`draw_html(topology, redact)`: the self-contained `diagram.html` (#63, #64, stories 142-153).
+
+Two tabs: the Map (Physical, Routing and VLAN views, each device in the same place) and
+Findings (the list of what to look at; picking one draws only its neighbourhood).
 
 The page is one file that works offline. It loads nothing: no CDN, web font, telemetry or
 third-party JavaScript, only our own plain JavaScript and CSS from `assets/`, inlined. A
@@ -76,7 +79,11 @@ def _layout_data(layout: Layout) -> dict[str, _Data]:
         }
         for label in layout.labels
     ]
-    return {"positions": positions, "labels": labels}
+    subnets: list[_Data] = [
+        [ident, round(point.x, 1), round(point.y, 1)]
+        for ident, point in sorted(layout.subnets.items())
+    ]
+    return {"positions": positions, "labels": labels, "subnets": subnets}
 
 
 def _encode(value: object, redact: Callable[[str], str]) -> str:
