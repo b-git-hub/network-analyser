@@ -146,6 +146,7 @@ From [#14](https://github.com/b-git-hub/network-analyser/issues/14) and [ADR 000
 | C11 | IOS-XE (`role-snippet`, [#53](https://github.com/b-git-hub/network-analyser/issues/53)): does the view keep `commands exec include terminal length 0` and `terminal width 511` with their values, and does the fallback take `privilege exec level 7 terminal length 0`? If the device refuses or drops the value, record the form it keeps; Netmiko's session set-up must still pass. | | |
 | C12 | NX-OS (`role-snippet`): does a new account get `network-operator` by default, and does `no username netanalyser role network-operator` remove it, so that `show user-account netanalyser` lists only `NA-READ`? | | |
 | C13 | TACACS+, only if a TACACS+ server is available (`role-snippet --tacacs`): does `cli-view-name=NA-READ` in the profile place the IOS-XE account in the view, and `shell:roles="NA-READ"` give the NX-OS account only that role? Does an anchored ISE row (`show`, `^version$`) permit `show version` and refuse `show version detail`? | | |
+| C14 | IOS-XE per-VRF commands ([#59](https://github.com/b-git-hub/network-analyser/issues/59)): the view names each per-VRF form by its words before the VRF (`commands exec include show ip arp vrf`, `show ip eigrp vrf`, `show ip bgp vpnv4 vrf`, `show ip route vrf`). Does that let `show ip arp vrf BLUE`, `show ip eigrp vrf BLUE neighbors`, `show ip bgp vpnv4 vrf BLUE summary` and `show ip route vrf BLUE static` run under `NA-READ`? Does `commands exec include show interfaces` also permit `show interfaces switchport` and `show interfaces trunk` (record whether the separate lines are needed)? With `--tacacs`, does the ISE row's VRF pattern permit a VRF name and refuse `BLUE \| redirect ...`? | | |
 
 ### D. Backups
 
@@ -230,6 +231,17 @@ From [NX-OS collection and parsers](https://github.com/b-git-hub/network-analyse
 | I5 | A table with no rows (for example `show ip arp vrf all \| json` in a VRF with no entries, or LLDP with no Neighbours) comes back as an empty reply, not an object with an empty table. | | |
 | I6 | After W1, nx-sw1's entry in `topology.json` has its interfaces (down ones included), VLANs, port-channels, vPC (domain, peer-link, keepalive with its source address) and the `management` VRF marked, and `skipped` lists nothing for it. Record any part listed as skipped and its reason. | | |
 | I7 | The size of `show interface \| json` on the largest Nexus you run (`bytes_received` in `audit.log`). The tool drops a session whose reply passes 1,000,000 characters. | | |
+
+### J. IOS/IOS-XE collection
+
+From [IOS/IOS-XE collection and parsers](https://github.com/b-git-hub/network-analyser/issues/59). The command strings were written from documentation (B1 covers them in general); the replies the parsers read are hand-written, shaped like Catalyst output, and read with ntc-templates `cisco_ios` or the tool's own readers. Run each check on xe-sw1, xe-sw2 and xe-rtr1, logged in as `netanalyser`, and describe what you see; never paste output.
+
+| ID | Check | Result | Date (UTC) |
+|---|---|---|---|
+| J1 | Each collection command on the IOS/IOS-XE allow-list (`network-analyser role-snippet ios-xe` lists them) runs under the `NA-READ` view. After W1, `audit.log` has no `parse_failed` line with reason `denied` for an IOS/IOS-XE node, except for features the node lacks (IOL has no `show etherchannel summary` without a port-channel? record what each answers). | | |
+| J2 | The error texts `ios_xe/replies.py` classifies: a command outside the view (`% Invalid input` with a caret?), a feature that is off (`show ip bgp summary` with no BGP: `% BGP not active`? `show glbp brief` and `show vrrp brief` with none configured: empty, or a `%` line?). Record each first line's form, with any value replaced. | | |
+| J3 | After W1, each IOS/IOS-XE node's entry in `topology.json` has its interfaces (down ones included, with VRF, masks and secondaries), VLANs, port-channels, VRFs (`Mgmt-intf` marked) and stack members, and `skipped` lists nothing for it. Record any part listed as skipped and its reason; `not understood` means a template or reader misread the device's text. | | |
+| J4 | Stack member numbers: on a stack (or StackWise Virtual pair, if any is available), `show version` lists each member with its model and serial, and interfaces on member 2 carry member 2. On a lone switch, interfaces carry no member number. | | |
 
 ## Walkthrough of the tool
 

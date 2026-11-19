@@ -26,6 +26,7 @@ from network_analyser.platforms.identify import (
     ssh_id_hint,
 )
 from network_analyser.platforms.ios_xe import backup as ios_xe_backup
+from network_analyser.platforms.ios_xe import collect as ios_xe_collect
 from network_analyser.platforms.ios_xe import commands as ios_xe_commands
 from network_analyser.platforms.ios_xe import identify as ios_xe
 from network_analyser.platforms.ios_xe import role as ios_xe_role
@@ -147,11 +148,11 @@ def collect(platform: Platform, send: Send, version: VersionFacts) -> Collection
 
     Every part of the result is a reading or unknown (#52); a denied or unreadable command
     leaves its own data unknown and is listed as a problem, never ending the visit. None
-    when this version of the tool collects nothing from `platform` (IOS/IOS-XE until #59).
+    when this version of the tool collects nothing from `platform`.
     """
     if platform is Platform.NX_OS:
         return nxos_collect.collect(send, version)
-    return None
+    return ios_xe_collect.collect(send, version)
 
 
 def role_snippet(platform: Platform, username: str | None, *, tacacs: bool) -> str:
