@@ -13,6 +13,7 @@ are never scan targets, and an ARP entry that is not a next hop creates nothing.
 import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from ipaddress import IPv4Address
 from typing import Final
 
 from network_analyser.records.collected import Reading
@@ -27,6 +28,7 @@ from network_analyser.records.topology import (
     LinkStatus,
     SegmentPort,
     SharedSegment,
+    UnplacedNextHop,
 )
 from network_analyser.records.unknown import Unknown
 from network_analyser.topology import ids
@@ -44,11 +46,19 @@ type Names = Callable[[str], str]
 
 @dataclass(frozen=True, slots=True)
 class Inference:
-    """The Links, Shared Segments and findings MAC/ARP inference adds."""
+    """The Links, Shared Segments, findings and unplaced next hops MAC/ARP inference adds."""
 
     links: tuple[Link, ...]
     segments: tuple[SharedSegment, ...]
     findings: tuple[Finding, ...]
+    unplaced: tuple[UnplacedNextHop, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _Miss:
+    """Why a next hop was not placed. The reason is fixed text, never a hostname."""
+
+    reason: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +69,8 @@ class _Placement:
     port: InterfaceName
     far: str
     evidence: tuple[Evidence, ...]
+    ip: IPv4Address
+    vrf: str
 
 
 def infer(
@@ -73,6 +85,7 @@ def infer(
     internal = {device.id: _internal(device, links, segments) for device in devices}
     placements: list[_Placement] = []
     findings: list[Finding] = []
+    unplaced: list[UnplacedNextHop] = []
     for hop in hops:
         if _connected(hop.reporter, hop.far, links, segments):
             continue
@@ -82,34 +95,63 @@ def infer(
         placed = _place(device, hop, internal.get(hop.reporter, frozenset()), names)
         if isinstance(placed, Finding):
             findings.append(placed)
-        elif placed is not None:
+            unplaced.append(_unplaced(hop, "conflicting evidence"))
+        elif isinstance(placed, _Miss):
+            unplaced.append(_unplaced(hop, placed.reason))
+        else:
             placements.append(placed)
     made_links, made_segments, disagreements = _assemble(placements, names)
+    unplaced.extend(_left_unplaced(placements, made_links, made_segments))
     return Inference(
         links=tuple(sorted(made_links, key=lambda link: link.id)),
         segments=tuple(sorted(made_segments, key=lambda segment: segment.id)),
         findings=tuple(sorted((*findings, *disagreements), key=lambda finding: finding.id)),
+        unplaced=tuple(sorted(unplaced, key=lambda hop: (hop.reporter, str(hop.ip), hop.far))),
     )
+
+
+def _unplaced(hop: NextHop, reason: str) -> UnplacedNextHop:
+    """One next hop the report should list, with a fixed reason."""
+    return UnplacedNextHop(hop.reporter, hop.far, hop.vrf, hop.ip, reason)
+
+
+def _left_unplaced(
+    placements: Sequence[_Placement],
+    links: Sequence[Link],
+    segments: Sequence[SharedSegment],
+) -> list[UnplacedNextHop]:
+    """Placements that became neither a Link nor a Shared Segment."""
+    missed: list[UnplacedNextHop] = []
+    for place in placements:
+        pair = {place.local, place.far}
+        on_link = any({end.device for end in link.ends} == pair for link in links)
+        on_segment = any(pair <= {port.device for port in segment.ports} for segment in segments)
+        if not on_link and not on_segment:
+            missed.append(
+                UnplacedNextHop(place.local, place.far, place.vrf, place.ip, "conflicting evidence")
+            )
+    return missed
 
 
 def _place(
     device: Known, hop: NextHop, internal: frozenset[str], names: Names
-) -> _Placement | Finding | None:
+) -> _Placement | Finding | _Miss:
     macs = _arp_macs(device, hop)
-    if macs is None:
-        return None
-    if len(macs) != 1:
-        return _conflict(device, hop, names, "more than one MAC") if len(macs) > 1 else None
+    if macs is None or len(macs) != 1:
+        if macs is not None and len(macs) > 1:
+            return _conflict(device, hop, names, "more than one MAC")
+        why = "ARP was not collected" if macs is None else "no ARP entry"
+        return _Miss(why)
     ports = _learned_ports(device, next(iter(macs)))
     if ports is None:
-        return None
+        return _Miss("MAC table was not collected")
     edge = {
         short: name
         for short, name in ports.items()
         if short not in internal and _NOT_EDGE.match(short) is None
     }
     if any(short in internal for short in ports) or not edge:
-        return None
+        return _Miss("no single edge port")
     if len(edge) > 1:
         return _conflict(device, hop, names, f"learned on {len(edge)} edge ports")
     evidence = _unique(
@@ -119,7 +161,7 @@ def _place(
             _table(device, "mac", EvidenceSource.MAC),
         )
     )
-    return _Placement(device.id, next(iter(edge.values())), hop.far, evidence)
+    return _Placement(device.id, next(iter(edge.values())), hop.far, evidence, hop.ip, hop.vrf)
 
 
 def _arp_macs(device: Known, hop: NextHop) -> set[str] | None:
@@ -217,6 +259,8 @@ def _merged(group: Sequence[_Placement]) -> _Placement:
         first.port,
         first.far,
         _unique(item for place in group for item in place.evidence),
+        first.ip,
+        first.vrf,
     )
 
 

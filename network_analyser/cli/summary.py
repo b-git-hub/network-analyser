@@ -36,7 +36,7 @@ from network_analyser.records.backup import BackupResults
 from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord, LandingPrivilege, UnvisitedReason
 from network_analyser.records.events import CredentialSetRetired, DeviceOutcome
-from network_analyser.run_output import RunFolder
+from network_analyser.run_output import RUN_REPORT_FILE, RunFolder
 
 ATTENTION_REASONS: Final = frozenset(
     {
@@ -50,7 +50,6 @@ ATTENTION_REASONS: Final = frozenset(
 )
 """The Unvisited reasons the operator can act on: marked `!!` and listed first (story 87)."""
 DIAGRAM_FILE: Final = "diagram.html"
-RUN_REPORT_FILE: Final = "run-report.html"
 _ROLE_SNIPPET: Final = {Platform.IOS_XE: "ios-xe", Platform.NX_OS: "nx-os"}
 _NEXT_STEP: Final = {
     UnvisitedReason.UNREACHABLE: (

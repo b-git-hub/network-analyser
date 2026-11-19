@@ -74,6 +74,7 @@ def build(records: Iterable[DeviceRecord], *, scope: ScopeRecord | None = None) 
         unknown_interface_names=_unknown_names(devices, claims),
         adjacencies=layer.adjacencies,
         subnets=layer.subnets,
+        unplaced_next_hops=inferred.unplaced,
     )
 
 

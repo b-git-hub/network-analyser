@@ -1,10 +1,9 @@
 """Security test 5, canary no-secrets (spec #37, Testing Decisions; decided on #28, #30).
 
 A canary Credential Set password and Backup Passphrase never appear in `repr`/`str`, the
-console output, `audit.log`, `topology.json` (#52), `diagram.html` (#63) or `diagram.drawio`
-(#65), and nothing from
-the `netmiko`/`paramiko` loggers reaches any file or the console. Plain pytest, no device. A
-later ticket extends it to `run-report.html` (#66).
+console output, `audit.log`, `topology.json` (#52), `diagram.html` (#63), `diagram.drawio`
+(#65) or `run-report.html` (#66), and nothing from
+the `netmiko`/`paramiko` loggers reaches any file or the console. Plain pytest, no device.
 """
 
 import dataclasses
@@ -26,6 +25,7 @@ from network_analyser.cli.parser import build_parser
 from network_analyser.cli.run_topology import save_topology
 from network_analyser.credentials import CredentialSet, CredentialSets, Secret, SecretScan
 from network_analyser.records.events import LoginAttempted, LoginResult
+from network_analyser.run_output.report import write_run_report
 from tests.support import fake_age
 from tests.support.run_driver import (
     BACKUP_CANARY,
@@ -37,6 +37,7 @@ from tests.support.run_driver import (
 )
 from tests.support.topology_documents import device, document
 from tests.support.topology_records import neighbour, port, visited
+from tests.unit.test_run_report import _report
 
 pytestmark = pytest.mark.security
 
@@ -79,6 +80,9 @@ def test_a_whole_run_shows_no_secret_on_the_console_or_in_any_file(
     assert (folder / "topology.json").is_file()
     assert (folder / "diagram.html").is_file()
     assert (folder / "diagram.drawio").is_file()
+    assert (folder / "run-report.html").is_file()
+    report_text = (folder / "run-report.html").read_text(encoding="utf-8")
+    assert "<script" not in report_text.lower()
     written = [p for p in data_folder().root.rglob("*") if p.is_file()]
     for canary in CANARIES:
         assert [p for p in written if canary.encode() in p.read_bytes()] == []
@@ -156,6 +160,46 @@ def test_a_secret_that_slips_into_topology_json_never_reaches_the_diagram(tmp_pa
         for canary in (*CANARIES, quoted, "CANARY-pw"):
             assert canary not in text, name
     assert scan.hits >= 6  # at least the three in each file
+
+
+def test_a_secret_that_slips_into_device_text_never_reaches_the_run_report(tmp_path: Path) -> None:
+    quoted = 'CANARY-pw-"<q>'
+    scan = _scan()
+    scan.watch(Secret(quoted))
+    page_report = _report()
+    record = page_report.devices[0]
+    hostile = dataclasses.replace(record, version=None)
+    built = dataclasses.replace(
+        page_report.topology,
+        findings=(
+            dataclasses.replace(
+                page_report.topology.findings[0],
+                summary=f"see {quoted} {DEVICE_CANARY} {BACKUP_CANARY}",
+            ),
+        ),
+    )
+    folder = run_output.RunFolder(path=tmp_path, io_path=tmp_path)
+
+    write_run_report(
+        folder,
+        dataclasses.replace(
+            page_report,
+            devices=(dataclasses.replace(hostile, ssh_id=DEVICE_CANARY),),
+            topology=dataclasses.replace(
+                built,
+                devices=tuple(
+                    dataclasses.replace(device, hostname=BACKUP_CANARY) for device in built.devices
+                ),
+            ),
+        ),
+        scan,
+    )
+
+    text = (tmp_path / "run-report.html").read_text(encoding="utf-8")
+    for canary in (*CANARIES, quoted, "CANARY-pw"):
+        assert canary not in text
+    assert "[blocked]" in text
+    assert scan.hits >= 1
 
 
 def test_nothing_the_ssh_libraries_log_reaches_a_file_or_the_console(

@@ -3,7 +3,8 @@
 A static scan of a generated `diagram.html` finds no `http(s)://`, no `<script src>` and no
 fetch calls, nor any other way for the page to load or send anything, even when device
 text is written to look like one (#63). The same scan of a generated `diagram.drawio` finds
-no URL and no namespace to fetch (#65). The `run-report.html` half follows in #66.
+no URL and no namespace to fetch (#65). A generated `run-report.html` has no `http(s)://`,
+no `<script>` at all, and a Content-Security-Policy `<meta>` tag (#66).
 """
 
 import json
@@ -13,6 +14,9 @@ from pathlib import Path
 import pytest
 
 from network_analyser.cli import ExitCode, main
+from network_analyser.credentials import SecretScan
+from network_analyser.run_output import RunFolder
+from network_analyser.run_output.report import write_run_report
 from tests.support.topology_documents import (
     adjacency,
     device,
@@ -21,6 +25,7 @@ from tests.support.topology_documents import (
     subnet,
     unvisited_device,
 )
+from tests.unit.test_run_report import _report
 
 pytestmark = pytest.mark.security
 
@@ -160,3 +165,37 @@ def drawio_offences(text: str) -> list[str]:
 )
 def test_the_scan_finds_a_planted_reference_in_a_drawio_file(planted: str) -> None:
     assert drawio_offences(planted)
+
+
+def report_offences(page: str) -> list[str]:
+    """Name a URL or a script tag in a Run report. Relative diagram links are allowed."""
+    found: list[str] = []
+    if re.search(r"https?://", page, re.IGNORECASE):
+        found.append("a URL")
+    if re.search(r"<script", page, re.IGNORECASE):
+        found.append("a script")
+    return found
+
+
+@pytest.mark.parametrize(
+    ("planted", "what"),
+    [
+        ("http://evil.example/x", "a URL"),
+        ("HTTPS://evil.example/x", "a URL"),
+        ("<script>alert(1)</script>", "a script"),
+        ("<SCRIPT src=x>", "a script"),
+    ],
+)
+def test_the_report_scan_finds_a_planted_url_or_script(planted: str, what: str) -> None:
+    assert what in report_offences(planted)
+
+
+def test_a_run_report_cannot_reach_the_network(tmp_path: Path) -> None:
+    folder = RunFolder(path=tmp_path, io_path=tmp_path)
+    write_run_report(folder, _report(), SecretScan())
+
+    page = (tmp_path / "run-report.html").read_text(encoding="utf-8")
+    assert report_offences(page) == []
+    assert 'http-equiv="Content-Security-Policy"' in page
+    assert "script-src 'none'" in page
+    assert "dev-S1" in page

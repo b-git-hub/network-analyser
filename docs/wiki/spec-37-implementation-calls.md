@@ -98,3 +98,16 @@ Calls made by #56's implementer where the ticket left something open. Each is th
    - **"Not checked" items come from `skipped`.** A `vlan_mismatch` row names its Link or Bundle in a trailing `(link-…)` / `(bundle-…)`, which the page reads; other rows are grouped per device under "Data not collected from a Visited Device". No finding is made from them.
    - **The Findings neighbourhood is drawn at Map positions** (story 144: devices keep their place in every view), not prototype C's separate radial layout.
    - **draw.io Routing page draws Adjacencies (solid for a shared prefix, dashed for a protocol), Subnet nodes and fading.** Markers are not drawn in `diagram.drawio` (follow-up).
+
+## Ticket #66 (`run-report.html`), 2026-11-19
+
+Calls made by #66's implementer where the ticket left something open. Each is the conservative option and reversible. Written on top of `b-git-hub/network-analyser@86a11b2`. Code: `run_output/report.py`, assembled in `cli/run_report.py`.
+
+1. **`VLAN on one end only` is the only noisy finding.** Kinds 2-4 (differing native VLAN, trunk facing access, differing access VLANs) and `conflicting evidence` are listed in full, including a Bundle member mismatch. A next hop that already has a Link or a Shared Segment is not listed as having no Link, because it is drawn. A hop that stayed unplaced is listed with a fixed reason: ARP was not collected, no ARP entry, MAC table was not collected, no single edge port, or conflicting evidence.
+2. **`unplaced_next_hops` is an optional `topology.json` key. Format version stays 1.** `diagram.read_topology` drops unknown keys, so `render` ignores the list. The report reads it from the Topology the Run just built, not by parsing the file.
+3. **Notices are on the report and do not change the exit code.** `RunsParentCheck.notices` and the Trust Store warning from `check_trust_folder` (#69) are listed under Needs attention. Exit codes stay as #56 decided them.
+4. **The start time is the Run folder's timestamp**, taken before the operator confirms. The end time is when the report is written.
+5. **The secret-scan count on the page is the hits after the device sections are scanned.** The summary and the whole-file scan can count a stretch again; the console warning uses the later total. `://` in device text is written as an entity after HTML escaping, so a hostname cannot leave `http://` in the file. A link is emitted only when the Topology id matches `[A-Za-z0-9._-]{1,200}`.
+6. **Writing the report is best-effort.** Any exception while writing prints one fixed warning and does not replace the Run's ending. The default ending is `crashed` until the crawl returns, so a crash before or during the crawl still writes `ended: crashed`, with empty records when the crawl never started. An audit-log failure that returns exit 3 before the crawl starts is `ended: stopped` and does not claim Ctrl+C. `render` does not write the report.
+7. **IPv6-only unvisited neighbours are already on the Topology** (`seen only in routing or ARP data` is separate; an IPv6-only neighbour is recorded by `topology/devices.py`). The report lists `topology.unvisited` and does not change the crawl.
+8. **The Topology is built twice on a finished Run**, once for `topology.json` and once for the report. The report does not read the file: `run_output` must not import `diagram` to parse it.

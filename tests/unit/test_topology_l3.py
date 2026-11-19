@@ -355,6 +355,19 @@ def test_a_session_that_is_not_up_is_not_an_adjacency() -> None:
     assert topology.build(records, scope=LAN).adjacencies == ()
 
 
+def test_a_next_hop_with_no_arp_is_listed_as_having_no_link() -> None:
+    built = topology.build(
+        [_device(A, "S1", "rtr-a", routing=(_ospf(GW),))],
+        scope=LAN,
+    )
+
+    (hop,) = built.unplaced_next_hops
+    assert hop.ip == IPv4Address(GW)
+    assert hop.reporter == "dev-S1"
+    assert hop.reason == "ARP was not collected"
+    assert built.links == ()
+
+
 def test_an_in_scope_next_hop_cdp_never_advertised_is_unvisited_and_not_a_target() -> None:
     built = topology.build(
         [_device(A, "S1", "rtr-a", routing=(_ospf(GW),), static=(_static(GW),))],
