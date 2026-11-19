@@ -7,7 +7,7 @@ any OS (or says it cannot) so callers can run, and inject fakes, in tests on Lin
 nothing from the package. `ctypes`, `msvcrt` and `winreg` are imported only here.
 """
 
-from network_analyser._winsys.console import Console, open_console
+from network_analyser._winsys.console import Console, open_console, stdout_is_console
 from network_analyser._winsys.elevation import is_elevated
 from network_analyser._winsys.folders import (
     DriveKind,
@@ -51,6 +51,7 @@ __all__ = [
     "pc_name",
     "read_grants",
     "read_machine_key",
+    "stdout_is_console",
     "suppress_error_reporting",
     "sync_roots",
     "unlock",
