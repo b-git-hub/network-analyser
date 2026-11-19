@@ -38,6 +38,7 @@ from network_analyser.cli import (
     progress,
     ready,
     run_file,
+    run_report,
     run_secrets,
     run_start,
     run_topology,
@@ -68,7 +69,7 @@ from network_analyser.records import Platform, RunRequest, Source, Sourced
 from network_analyser.records.backup import BackupCapture, BackupResults
 from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord
-from network_analyser.records.events import AuditEvent, CtrlCPressed
+from network_analyser.records.events import AuditEvent, CtrlCPressed, RunEnding
 from network_analyser.records.identity import Alias
 from network_analyser.records.sweep import SweepResult
 from network_analyser.trust_store import TrustStore
@@ -98,9 +99,9 @@ def run(args: argparse.Namespace) -> ExitCode:
             data = find_data_folder()
             with hold_instance_lock(data):
                 check = check_where_run_folder_goes(data, args.runs_dir)
-                check_trust_folder(data)  # #69: only the operator may reach the Trust Store
+                trust_warning = check_trust_folder(data)  # #69; the warning goes in the report
                 _refuse_while_a_change_is_pending(data)
-                return _after_folder_checks(args, data, check, scan)
+                return _after_folder_checks(args, data, check, scan, trust_warning)
         except RefusedError as error:
             refuse(args.command, fixed_message(error))
             return ExitCode.REFUSED
@@ -118,6 +119,7 @@ def _after_folder_checks(
     data: run_output.DataFolder,
     check: run_output.RunsParentCheck,
     scan: SecretScan,
+    trust_warning: str | None,
 ) -> ExitCode:
     loaded = _load_run_file(args.run_file)
     if isinstance(loaded, ExitCode):
@@ -145,7 +147,15 @@ def _after_folder_checks(
     print(f"Run folder created: {console_text(str(folder.path))}")
 
     collected = run_topology.Collector()  # kept as they come, for topology.json (#52)
-
+    notices = check.notices if trust_warning is None else (*check.notices, trust_warning)
+    draft = run_report.Draft(
+        folder=folder,
+        scan=scan,
+        started_at=started,
+        request=request,
+        strict_host_keys=bool(args.strict_host_keys),
+        notices=notices,
+    )
     crawl = _crawler(
         args,
         request=request,
@@ -155,17 +165,30 @@ def _after_folder_checks(
         folder=folder,
         collected=collected,
         scan=scan,
+        draft=draft,
     )
 
     try:
-        return run_topology.then_save(
+        code = run_topology.then_save(
             folder,
             collected,
             scan,
             lambda: run_trail.run_with_audit_trail(request, sets, folder, scan, crawl),
             scope=request.scope.value,
         )
+    except KeyboardInterrupt:
+        draft.ending = RunEnding.STOPPED
+        draft.ctrl_c = True
+        raise
+    else:
+        stopped = draft.captured is not None and draft.captured.stopped is not None
+        if stopped or code == ExitCode.STOPPED:
+            draft.ending = RunEnding.STOPPED
+        else:
+            draft.ending = RunEnding.COMPLETED
+        return code
     finally:
+        run_report.publish(draft)  # also after Ctrl+C, and best-effort when the Run crashed
         print(summary.where_to_look(folder))
 
 
@@ -230,6 +253,7 @@ def _crawler(  # noqa: PLR0913 (everything the crawl needs, from the steps befor
     folder: run_output.RunFolder,
     collected: run_topology.Collector,
     scan: SecretScan,
+    draft: run_report.Draft,
 ) -> run_trail.Crawl:
     """The crawl of a confirmed Run: Sweep, progress, Ctrl+C handling and Backups."""
 
@@ -297,39 +321,53 @@ def _crawler(  # noqa: PLR0913 (everything the crawl needs, from the steps befor
         # so a Sweep can be abandoned before any login; the crawl below is #56.
         seeds = request.seeds.value
         swept: SweepResult | None = None
-        if request.sweep.value:
-            swept = discovery.sweep(
-                request.scope.value,
-                inflight=request.sweep_inflight.value,
-                emit=emit,
-            )
-            seeds = discovery.combine_seeds(seeds, swept.login_seeds)
-
-        with signals.ctrl_c_stops(stop) as ctrl_c:
-
-            def tick(queued: int) -> None:
-                ctrl_c.handle(announce)
-                shown.tick(queued)
-
-            try:
-                result = discovery.crawl(
-                    seeds,
-                    visit,
-                    scope=request.scope.value,
-                    parallel=request.parallel.value,
+        result: CrawlResult | None = None
+        backups: BackupResults | None = None
+        try:
+            if request.sweep.value:
+                swept = discovery.sweep(
+                    request.scope.value,
+                    inflight=request.sweep_inflight.value,
                     emit=emit,
-                    skipped=collected.add,
-                    all_retired=sets.all_retired,
-                    stop=stop,
-                    tick=tick,
                 )
-            finally:
-                shown.finish()
-                backups = locker.finish()  # what was captured is locked, Ctrl+C or not
-                ctrl_c.handle(announce)
-        return (
-            dataclasses.replace(result, credential_sets=sets.results(), sweep=swept),
-            backups,
-        )
+                seeds = discovery.combine_seeds(seeds, swept.login_seeds)
+
+            with signals.ctrl_c_stops(stop) as ctrl_c:
+
+                def tick(queued: int) -> None:
+                    ctrl_c.handle(announce)
+                    shown.tick(queued)
+
+                try:
+                    result = discovery.crawl(
+                        seeds,
+                        visit,
+                        scope=request.scope.value,
+                        parallel=request.parallel.value,
+                        emit=emit,
+                        skipped=collected.add,
+                        all_retired=sets.all_retired,
+                        stop=stop,
+                        tick=tick,
+                    )
+                finally:
+                    shown.finish()
+                    backups = locker.finish()  # what was captured is locked, Ctrl+C or not
+                    ctrl_c.handle(announce)
+            return (
+                dataclasses.replace(result, credential_sets=sets.results(), sweep=swept),
+                backups,
+            )
+        finally:
+            # Kept for the report, including when the crawl raises (#66).
+            draft.capture(
+                run_report.captured_from(
+                    collected.records(),
+                    backups,
+                    sets,
+                    swept,
+                    None if result is None else result.stopped,
+                )
+            )
 
     return crawl

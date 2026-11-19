@@ -202,7 +202,7 @@ WRITE_OWNERS: frozenset[str] = frozenset(
         # data are written, never device output.
         "run_output/audit.py",
         # #52: the one scanned writer for the Run folder's plaintext files (topology.json,
-        # later the diagrams and the Run report). Every string passes through the secret scan
+        # the diagrams, and the Run report). Every string passes through the secret scan
         # before any escaping, then the whole text again; temp-then-rename.
         "run_output/scanned_file.py",
         # #51: Backups and manifest.age, temp-then-rename, never replacing a file. Only age

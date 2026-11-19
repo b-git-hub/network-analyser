@@ -63,6 +63,11 @@ def _run_folder_files() -> set[str]:
     return {p.name for p in folder.iterdir()}
 
 
+def _run_folder_text(name: str) -> str:
+    (folder,) = sorted(data_folder().runs.iterdir())
+    return (folder / name).read_text(encoding="utf-8")
+
+
 def _audit() -> list[dict[str, object]]:
     (folder,) = sorted(data_folder().runs.iterdir())
     text = (folder / "audit.log").read_text(encoding="utf-8")
@@ -91,7 +96,10 @@ def test_the_first_ctrl_c_lets_the_session_finish_and_queues_nothing_new(run: Ru
     assert lines[-1]["event"] == "run_ended"
     assert lines[-1]["ended"] == "stopped"
     assert lines[-1]["backups_written"] == 1  # not 0 (#51 follow-up)
-    assert {"topology.json", "diagram.html"} <= _run_folder_files()  # story 85
+    assert {"topology.json", "diagram.html", "run-report.html"} <= _run_folder_files()
+    report = _run_folder_text("run-report.html")
+    assert "ended: stopped" in report
+    assert "<script" not in report.lower()
 
 
 def test_the_second_ctrl_c_closes_the_session_and_leaves_the_device_partial(
@@ -121,5 +129,9 @@ def test_the_full_paths_are_printed_last(run: Runner) -> None:
     got = run(*FLAGS, typed=first_run())
 
     (folder,) = sorted(data_folder().runs.iterdir())
-    tail = got.out.rstrip("\n").splitlines()[-2:]
-    assert tail == [f"Run folder  {folder}", f"Diagram     {folder / 'diagram.html'}"]
+    tail = got.out.rstrip("\n").splitlines()[-3:]
+    assert tail == [
+        f"Run folder  {folder}",
+        f"Diagram     {folder / 'diagram.html'}",
+        f"Run report  {folder / 'run-report.html'}",
+    ]

@@ -66,6 +66,7 @@ def test_records_become_objects_with_their_field_names() -> None:
         "unknown_interface_names",
         "adjacencies",
         "subnets",
+        "unplaced_next_hops",
     }
 
 

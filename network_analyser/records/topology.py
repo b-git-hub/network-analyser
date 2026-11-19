@@ -430,6 +430,28 @@ class UnknownInterfaceName:
 
 
 @dataclass(frozen=True, slots=True)
+class UnplacedNextHop:
+    """A routing next hop that was given neither a Link nor a Shared Segment (#66).
+
+    A hop CDP or LLDP already connects, or that MAC/ARP placed, is not one of these.
+    One that fell on a Shared Segment is drawn, so it is not listed here either.
+
+    Attributes:
+        reporter: the Visited Device that has the route or neighbour.
+        far: the device the next-hop address was resolved to.
+        vrf: the VRF it was learned in.
+        ip: the next-hop address.
+        reason: why no Link was placed, as fixed text. Never a hostname.
+    """
+
+    reporter: str
+    far: str
+    vrf: str
+    ip: IPv4Address
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
 class Topology:
     """The devices and Links found in a Run, and everything learned about them.
 
@@ -448,3 +470,5 @@ class Topology:
     """L3 Adjacencies (#62): shared prefixes of two devices, and protocol neighbourships."""
     subnets: tuple[Subnet, ...]
     """Prefixes in one VRF shared by three or more devices (#62)."""
+    unplaced_next_hops: tuple[UnplacedNextHop, ...] = ()
+    """Next hops with no Link and no Shared Segment (#66). Empty when every hop was placed."""

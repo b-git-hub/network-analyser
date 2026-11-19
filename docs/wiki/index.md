@@ -14,7 +14,7 @@ A dated, historical record kept by the coordinating (chief-of-staff) session and
 - [agent-worktree-friction](agent-worktree-friction.md): known quirks of agent worktrees and how briefs work around them.
 
 ## Decisions
-- [spec-37-implementation-calls](spec-37-implementation-calls.md): 2026-11-18 calls on CI, uv packaging, secret holders and config sinks while building spec #37; 2026-11-19 calls on `diagram.drawio` (#65).
+- [spec-37-implementation-calls](spec-37-implementation-calls.md): 2026-11-18 calls on CI, uv packaging, secret holders and config sinks while building spec #37; 2026-11-19 calls on `diagram.drawio` (#65) and `run-report.html` (#66).
 - [operator-wants-cml-build](operator-wants-cml-build.md): 2026-11-18 standing instruction to finish a CML-testable Windows build unattended.
 - [delivery-one-draft-pr](delivery-one-draft-pr.md): spec #37 ships as one draft PR from the integration branch.
 

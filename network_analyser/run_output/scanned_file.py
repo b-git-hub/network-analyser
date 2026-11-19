@@ -1,9 +1,10 @@
 """The one scanned writer for the Run folder's plaintext files (#48 follow-up; #52).
 
-`topology.json` (#52), and later `diagram.html`, `diagram.drawio` (#63, #65) and
-`run-report.html` (#66), are written here and nowhere else. The modules that make them
-(`topology`, `diagram`) may import only `records`, so they hand their text or data to the cli,
-which writes it through this module with the Run's `SecretScan`:
+`topology.json` (#52), `diagram.html`, `diagram.drawio` (#63, #65) and `run-report.html`
+(#66) are written here and nowhere else. `topology` and `diagram` may import only `records`,
+so they hand their text or data to the cli, which writes it through this module. The Run
+report is assembled in the cli and written by `run_output.report` through the same function,
+with the Run's `SecretScan`:
 
 - every piece of text passes through the scan, and a match is written as `[blocked]` (the
   Run carries on and warns once at the end, story 164);
