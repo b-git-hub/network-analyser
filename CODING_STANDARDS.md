@@ -38,7 +38,7 @@ One package, `network_analyser/`, with the eleven modules from the spec plus two
 
 [tests/arch/test_module_boundaries.py]. Libraries have one owner each:
 
-- `netmiko`, `paramiko`, `socket`: only `device_gateway` [security test 3: tests/security/test_3_import_rule.py], and inside it only `device_gateway/ssh.py` [tests/arch/test_module_boundaries.py]. The rest of the gateway works on the plain `link.Dial` seam, which tests fake (tests/support/fake_device.py).
+- `netmiko`, `paramiko`: only `device_gateway`, and inside it only `device_gateway/ssh.py` [security test 3: tests/security/test_3_import_rule.py; tests/arch/test_module_boundaries.py]. `socket`: only `device_gateway`, in `ssh.py` (a full session) and `probe.py` (the Sweep's TCP 22 banner read, which closes before key exchange, #55). The rest of the gateway works on the plain `link.Dial` seam, which tests fake (tests/support/fake_device.py).
 - `pyrage`: only `backup_store`. `textfsm`, `ntc_templates`: only `platforms`.
 - `ctypes`, `msvcrt`, `winreg`: only `_winsys`. Every Windows-only call sits in `_winsys` behind a function that also runs (or says it can't) on Linux, so tests can inject a fake. Branch on the platform at module level (`if sys.platform == "win32": def f(): ... else: def f(): ...`), as `_winsys/elevation.py` does; a `sys.platform` check inside a function body trips mypy's `warn_unreachable` under `--platform win32`.
 - `tomllib`: only `cli`. `logging`: only `cli/library_loggers.py`, which keeps the netmiko and paramiko loggers silent. Our own code never uses `logging`.

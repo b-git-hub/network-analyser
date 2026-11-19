@@ -23,7 +23,7 @@ and the Run ends with a summary of every device found.
 import argparse
 import dataclasses
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from ipaddress import IPv4Address
 
@@ -66,6 +66,7 @@ from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord
 from network_analyser.records.events import AuditEvent, CredentialSetRetired, CtrlCPressed
 from network_analyser.records.identity import Alias
+from network_analyser.records.sweep import SweepResult
 
 _CHANGE_PENDING = (
     "a change of the Backup Passphrase is unfinished, so Backups may be under either "
@@ -192,9 +193,10 @@ def _after_folder_checks(
             )
 
         with signals.ctrl_c_presses(stop):  # no KeyboardInterrupt while visits run
+            seeds, swept = _swept_seeds(request, emit)
             try:
                 result = discovery.crawl(
-                    request.seeds.value,
+                    seeds,
                     visit,
                     scope=request.scope.value,
                     parallel=request.parallel.value,
@@ -210,7 +212,7 @@ def _after_folder_checks(
                 backups = locker.finish()
                 for press in stop.presses_to_audit():  # pressed while the last were locked
                     emit(CtrlCPressed(press=press, sessions_running=0))
-        return dataclasses.replace(result, credential_sets=sets.results()), backups
+        return dataclasses.replace(result, credential_sets=sets.results(), sweep=swept), backups
 
     code = run_topology.then_save(
         folder,
@@ -220,6 +222,24 @@ def _after_folder_checks(
     )
     print(summary.output_paths(folder))
     return code
+
+
+def _swept_seeds(
+    request: RunRequest, emit: Callable[[AuditEvent], None]
+) -> tuple[Sequence[IPv4Address], SweepResult | None]:
+    """The Seeds to crawl from, with those the opt-in Sweep allows (#55).
+
+    Run after the confirm and inside the audit trail. A Ctrl+C during the Sweep is acted on
+    when the crawl starts (#56).
+    """
+    if not request.sweep.value:
+        return request.seeds.value, None
+    swept = discovery.sweep(
+        request.scope.value,
+        inflight=request.sweep_inflight.value,
+        emit=emit,
+    )
+    return discovery.combine_seeds(request.seeds.value, swept.login_seeds), swept
 
 
 def _console_redraws() -> bool:
