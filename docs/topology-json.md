@@ -58,7 +58,7 @@ Ids hold only letters, digits, `.`, `-` and `_`. Items point at devices by id.
 | `links` | physical Links |
 | `segments` | Shared Segments |
 | `bundles` | Bundles |
-| `findings` | things to look at (conflicts, Bundle member mismatches; later VLAN Mismatches) |
+| `findings` | things to look at (conflicts, Bundle member mismatches, VLAN Mismatches) |
 | `adjacencies` | L3 Adjacencies (#62). Empty when there are none |
 | `subnets` | Subnets (#62): a prefix in one VRF shared by three or more devices. Empty when there are none |
 | `skipped` | data not collected, per device, so its checks were skipped (story 126) |
@@ -106,11 +106,13 @@ A prefix in one VRF on exactly two devices is one adjacency of kind `shared subn
 
 ### `findings[]`
 
-`id`, `kind` (`conflicting evidence`, `Bundle member mismatch`; later tickets add theirs), `summary` (one line), `devices[]`, `items[]` (Link, Bundle, Segment ids), `evidence[]`.
+`id`, `kind`, `summary` (one line), `devices[]`, `items[]` (Link, Bundle, Segment ids), `evidence[]`.
+
+`kind` is `conflicting evidence`, `Bundle member mismatch`, or a VLAN Mismatch (#61, 2026-11-19): `VLAN on one end only`, `differing native VLAN`, `trunk facing access`, `differing access VLANs`. A VLAN Mismatch's `items` is the Link or the Bundle, never a member Link. Its `evidence[].source` is `VLAN` for switchport and VLAN-database commands, or `CDP` when the native VLAN was advertised by an Unvisited Device. `format_version` stays `1`: `kind` and `source` are plain strings an older `render` already keeps.
 
 ### `skipped[]` and `unknown_interface_names[]`
 
-`skipped[]`: `device`, `data` (the `records/collected.py` field: `cdp`, `lldp`, `interfaces`, `vlans`, `port_channels`, `vpc`, `vrfs`, `arp`, `mac`, `routing_neighbours`, `static_routes`, `fhrp`, `stack_members`), `reason`.
+`skipped[]`: `device`, `data`, `reason`. `data` is a `records/collected.py` field (`cdp`, `lldp`, `interfaces`, `vlans`, `port_channels`, `vpc`, `vrfs`, `arp`, `mac`, `routing_neighbours`, `static_routes`, `fhrp`, `stack_members`) when that part was not collected. #61 also writes `vlan_mismatch` when a VLAN check on a Link or Bundle could not run; the reason names the gap and the link or bundle id. That is not a mismatch.
 
 `unknown_interface_names[]`: `device`, `reported`.
 
@@ -118,8 +120,8 @@ A prefix in one VRF on exactly two devices is one adjacency of kind `shared subn
 
 - **#59, #60 (collection):** fill `DeviceRecord.collected` with a `Collected`. Each part is a `Reading(commands, value, gaps)` or `Unknown(reason)`; never leave a part empty for "could not tell". Build every interface name with `records.interface_names.interface_name` (add new types to its table; a new entry changes no existing short name). Set `Interface.stack_member` on stacks and `Vrf.management` for `MANAGEMENT_VRFS`. Until then every Visited Device's data is unknown with the reason "not collected by this version of the tool".
 - **#50 (crawl):** put a device's learned aliases in `DeviceRecord.aliases`. For each Neighbour address the crawl decides not to visit, hand `topology.build` a `DeviceRecord(ip, outcome=UNVISITED, unvisited_reason=...)`; it merges with the advertisements of that address. `cli/run_topology.Collector.add` must see every record (it is thread-safe), so `topology.json` after Ctrl+C holds what was found so far. Unify the crawl's neighbour record with `records.collected.Neighbour`.
-- **#61, #62:** add their rules in `topology/build.py` after Bundles, their records to `records/topology.py`, and their finding kinds to `FindingKind`; new optional fields need no `format_version` bump. VLAN checks run on the Bundle (`Link.bundle`).
-  - Built by #62 (2026-11-19): `adjacencies` and `subnets` are optional keys on format version 1. `build(records, scope=...)` records in-Scope routing neighbours and static next hops that CDP/LLDP never advertised as Unvisited Devices (`seen only in routing or ARP data (not crawled)`); it does not log into them. Inferred Links use `status: inferred` and, when several fall on one edge port, the existing Shared Segment. `render` still ignores the new keys until #64 draws them.
+- **#61 (VLAN Mismatches, 2026-11-19):** rules in `topology/vlan.py`, called from `topology/build.py` after Bundles. Effective VLANs are allowed ∩ present in the VLAN database (an inactive VLAN still counts as present). Four `FindingKind`s. Both ends must be Visited with the fields known, except native VLAN, where CDP's advertised native VLAN counts from an Unvisited Device. Missing data is a `skipped` row with `data` `vlan_mismatch`, never a finding. A Bundle is checked on its port-channel interfaces, not on member Links (`Link.bundle`). No `format_version` bump.
+- **#62 (L3 Adjacency, Subnets and inference, 2026-11-19):** rules in `topology/l3.py` and `topology/inference.py`, called from `topology/build.py` after Bundles beside the VLAN checks. `adjacencies` and `subnets` are optional keys on format version 1. `build(records, scope=...)` records in-Scope routing neighbours and static next hops that CDP/LLDP never advertised as Unvisited Devices (`seen only in routing or ARP data (not crawled)`); it does not log into them. Inferred Links use `status: inferred` and, when several fall on one edge port, the existing Shared Segment. `render` still ignores the new keys until #64 draws them.
 - **#63, #64, #65 (diagram, render):** read this file only; ignore unknown keys; refuse `format_version` above the one you know; treat any `{"unknown": ...}` as unknown, never absent. Escape every string. Write pages with `run_output.write_scanned_text`, scanning each value before HTML or XML escaping.
   - Built by #63 (2026-11-19): `diagram.read_topology(text)` is the loader. It keeps only the fields listed in its schema (`diagram/topology_file.py`), reads a known field the file lacks as unknown, and refuses a non-plain id. A later ticket that draws a new field adds it to that schema. `diagram.place(topology)` gives every device's position, shared by all views and `diagram.drawio`. `cli/diagram_file.write_diagram` draws the page from the Run folder's file, at Run end and for `render`.
   - Built by #65 (2026-11-19): `diagram.draw_drawio(topology, redact)` draws `diagram.drawio` from the same `TopologyFile` and `place` positions, and `write_diagram` writes it beside `diagram.html`. Its Routing page draws no routing lines while this file holds no routing adjacency (#62); when a later ticket adds that to the schema, draw it in `diagram/drawio.py` too. Calls: [spec-37-implementation-calls](wiki/spec-37-implementation-calls.md), items 6-14.

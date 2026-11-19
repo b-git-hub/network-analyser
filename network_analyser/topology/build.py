@@ -26,6 +26,7 @@ from network_analyser.topology.devices import (
 from network_analyser.topology.inference import infer
 from network_analyser.topology.l3 import layer3
 from network_analyser.topology.links import cabling
+from network_analyser.topology.vlan import vlan_checks
 
 _PARTS = tuple(Collected.__dataclass_fields__)
 
@@ -53,6 +54,7 @@ def build(records: Iterable[DeviceRecord], *, scope: ScopeRecord | None = None) 
     cables = cabling(claims, called)
     bundled = bundling(cables.links, devices, owners, called)
     inferred = infer(devices, bundled.links, cables.segments, layer.next_hops, called)
+    checked = vlan_checks(bundled.links, bundled.bundles, devices, unvisited)
     return Topology(
         devices=tuple(visited_device(d, owners) for d in devices),
         unvisited=tuple(sorted((*unvisited, *layer.unvisited), key=lambda item: item.id)),
@@ -61,11 +63,14 @@ def build(records: Iterable[DeviceRecord], *, scope: ScopeRecord | None = None) 
         bundles=bundled.bundles,
         findings=tuple(
             sorted(
-                (*cables.findings, *bundled.findings, *inferred.findings),
+                (*cables.findings, *bundled.findings, *inferred.findings, *checked.findings),
                 key=lambda finding: finding.id,
             )
         ),
-        skipped=tuple(check for d in devices for check in _skipped(d)),
+        skipped=(
+            *tuple(check for device in devices for check in _skipped(device)),
+            *checked.skipped,
+        ),
         unknown_interface_names=_unknown_names(devices, claims),
         adjacencies=layer.adjacencies,
         subnets=layer.subnets,
