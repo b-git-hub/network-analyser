@@ -6,6 +6,7 @@ writes it through `run_output`'s scanned writer, so a typed secret is never writ
 164). The topology module never sees the scan or a file: it turns records into plain data.
 """
 
+import dataclasses
 import sys
 import threading
 from collections.abc import Callable
@@ -15,6 +16,7 @@ from network_analyser import run_output, topology
 from network_analyser.cli.exit_codes import ExitCode
 from network_analyser.credentials import SecretScan
 from network_analyser.records.device import DeviceRecord
+from network_analyser.records.identity import Alias
 
 TOPOLOGY_FILE: Final = "topology.json"
 NOT_WRITTEN: Final = (
@@ -24,23 +26,37 @@ NOT_WRITTEN: Final = (
 
 
 class Collector:
-    """The device records of a Run, kept as the crawl hands them back. Thread-safe."""
+    """The device records of a Run, kept as the crawl hands them back. Thread-safe.
+
+    An `Alias` (another IP of a device already examined, #50) is kept too, and folded into
+    that device's `aliases` when the records are read.
+    """
 
     def __init__(self) -> None:
         """Start with no records."""
         self._records: list[DeviceRecord] = []
+        self._aliases: list[Alias] = []
         self._lock = threading.Lock()
 
-    def add(self, record: DeviceRecord) -> DeviceRecord:
+    def add[R: (DeviceRecord, Alias, DeviceRecord | Alias)](self, record: R) -> R:
         """Keep `record`, and return it."""
         with self._lock:
-            self._records.append(record)
+            if isinstance(record, Alias):
+                self._aliases.append(record)
+            else:
+                self._records.append(record)
         return record
 
     def records(self) -> tuple[DeviceRecord, ...]:
-        """Every record kept so far, in the order they came."""
+        """Every record kept so far, in the order they came, with its aliases folded in."""
         with self._lock:
-            return tuple(self._records)
+            records, aliases = tuple(self._records), tuple(self._aliases)
+        return tuple(_with_aliases(r, aliases) for r in records)
+
+
+def _with_aliases(record: DeviceRecord, aliases: tuple[Alias, ...]) -> DeviceRecord:
+    found = tuple(a.ip for a in aliases if a.same_as == record.ip and a.ip not in record.aliases)
+    return dataclasses.replace(record, aliases=(*record.aliases, *found)) if found else record
 
 
 def then_save(

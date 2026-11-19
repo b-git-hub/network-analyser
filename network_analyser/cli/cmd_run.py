@@ -16,8 +16,8 @@ Run's start and end (`cli.run_trail`).
 
 The Trust Store (and any `--known-hosts` file) is read before the first secret prompt, so a
 bad `--known-hosts` refuses the Run with exit 2 before anything is typed. Once the Run folder
-is created, each Seed is logged into, identified and left (#49; the crawl is #50), and the
-Run ends with a summary of each Seed's outcome.
+is created, the crawl spreads from the Seeds through CDP and LLDP inside the Scope (#50),
+and the Run ends with a summary of every device found.
 """
 
 import argparse
@@ -49,7 +49,9 @@ from network_analyser.cli.trust_keys import load_trust_store
 from network_analyser.credentials import CredentialSets, SecretScan
 from network_analyser.records import RunRequest, Source, Sourced
 from network_analyser.records.backup import BackupResults
+from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord
+from network_analyser.records.identity import Alias
 
 _CHANGE_PENDING = (
     "a change of the Backup Passphrase is unfinished, so Backups may be under either "
@@ -124,10 +126,11 @@ def _after_folder_checks(
 
     collected = run_topology.Collector()  # kept as they come, for topology.json (#52)
 
-    def crawl(audit: run_output.AuditLog) -> tuple[tuple[DeviceRecord, ...], BackupResults]:
-        # #49: the Seeds only; the crawl is #50. `check.notices` and the Credential Sets'
-        # views go to the Run report (#66). #51: each running config goes from the gateway
-        # straight to the locking worker, which locks whatever was taken even on Ctrl+C.
+    def crawl(audit: run_output.AuditLog) -> tuple[CrawlResult, BackupResults]:
+        # #50: the crawl. `check.notices` and the Credential Sets' views go to the Run
+        # report (#66). #51: each running config goes from the gateway straight to the
+        # locking worker, which locks whatever was taken even on Ctrl+C. #52: every record
+        # is kept as it comes back, for topology.json.
         locker = backup_store.BackupLocker(
             folder.io_path,
             shown=folder.path,
@@ -138,7 +141,9 @@ def _after_folder_checks(
             tool_version=__version__,
         )
 
-        def visit(ip: IPv4Address) -> DeviceRecord:
+        def visit(
+            ip: IPv4Address, *, id_gate: bool, identity: device_gateway.Identity
+        ) -> DeviceRecord | Alias:
             return device_gateway.visit(
                 ip,
                 scope=request.scope.value,
@@ -148,15 +153,24 @@ def _after_folder_checks(
                 failure_budget=request.failure_budget.value,
                 backup_sink=locker.take,
                 timeouts=request.timeouts,
+                id_gate=id_gate,
+                identity=identity,
             )
 
         try:
-            records = discovery.visit_seeds(
-                request.seeds.value, lambda ip: collected.add(visit(ip))
+            result = discovery.crawl(
+                request.seeds.value,
+                lambda ip, *, id_gate, identity: collected.add(
+                    visit(ip, id_gate=id_gate, identity=identity)
+                ),
+                scope=request.scope.value,
+                parallel=request.parallel.value,
+                emit=audit.record,
+                skipped=collected.add,
             )
         finally:
             backups = locker.finish()
-        return records, backups
+        return result, backups
 
     return run_topology.then_save(
         folder,

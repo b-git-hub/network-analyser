@@ -185,7 +185,8 @@ def _add_run(commands: _Commands) -> None:
         "--parallel",
         type=_int_between(1, PARALLEL_MAX),
         metavar="N",
-        help=f"devices worked on at once (default {PARALLEL_DEFAULT}, at most {PARALLEL_MAX})",
+        help=f"devices worked on at once (default {PARALLEL_DEFAULT}, at most {PARALLEL_MAX}). "
+        f"More than {PARALLEL_DEFAULT} adds load on TACACS+/RADIUS servers.",
     )
     connections.add_argument(
         "--failure-budget",
