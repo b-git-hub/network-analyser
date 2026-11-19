@@ -2,8 +2,8 @@
 
 The order: Visited Devices and their addresses; which device each CDP and LLDP entry is
 (Unvisited Devices merged); Links and Shared Segments; vPC labels and Bundles; then what was
-not collected and the interface names the table did not know. Later rules (#61 VLAN
-Mismatches, #62 L3 Adjacency and inference) slot in after Bundles.
+not collected and the interface names the table did not know. VLAN Mismatches (#61) run
+after Bundles. Later rules (#62 L3 Adjacency and inference) slot in beside them.
 """
 
 from collections.abc import Iterable
@@ -23,6 +23,7 @@ from network_analyser.topology.devices import (
     visited_device,
 )
 from network_analyser.topology.links import cabling
+from network_analyser.topology.vlan import vlan_checks
 
 _PARTS = tuple(Collected.__dataclass_fields__)
 
@@ -42,14 +43,17 @@ def build(records: Iterable[DeviceRecord]) -> Topology:
     }
     cables = cabling(claims, lambda device: names.get(device, device))
     bundled = bundling(cables.links, devices, owners, lambda device: names.get(device, device))
+    checked = vlan_checks(bundled.links, bundled.bundles, devices, unvisited)
+    findings = (*cables.findings, *bundled.findings, *checked.findings)
+    skipped = tuple(check for device in devices for check in _skipped(device))
     return Topology(
         devices=tuple(visited_device(d, owners) for d in devices),
         unvisited=tuple(unvisited),
         links=tuple(sorted(bundled.links, key=lambda link: link.id)),
         segments=cables.segments,
         bundles=bundled.bundles,
-        findings=tuple(sorted((*cables.findings, *bundled.findings), key=lambda f: f.id)),
-        skipped=tuple(check for d in devices for check in _skipped(d)),
+        findings=tuple(sorted(findings, key=lambda finding: finding.id)),
+        skipped=(*skipped, *checked.skipped),
         unknown_interface_names=_unknown_names(devices, claims),
     )
 
