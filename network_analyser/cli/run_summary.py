@@ -4,16 +4,18 @@ The full summary and the Run report come later (#56, #66). This one lists every 
 Run tried (with the other IPs it was found at), every device it only heard of, then a
 "Needs your attention" list with a next step for each item (story 88): the exact
 `trust-key` line for a changed host key, a note for a landing privilege too low for the
-tool's commands, and why the Run stopped early, if it did. Device text is escaped before
-it is printed (story 81); no device output is ever shown.
+tool's commands, a check for each Retired Credential Set, and why the Run stopped early, if
+it did. Each Credential Set's results are listed too (#54). Device text and usernames are
+escaped before they are printed (story 81); no device output is ever shown.
 """
 
 from network_analyser.cli.parser import PROG
 from network_analyser.cli.text import escape_controls
-from network_analyser.records import HostKeyVerdict
+from network_analyser.discovery import ALL_SETS_RETIRED
+from network_analyser.records import CredentialSetResult, HostKeyVerdict
 from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord, LandingPrivilege, UnvisitedReason
-from network_analyser.records.events import DeviceOutcome
+from network_analyser.records.events import CredentialSetRetired, DeviceOutcome
 
 
 def summary(result: CrawlResult) -> str:
@@ -39,6 +41,9 @@ def summary(result: CrawlResult) -> str:
             f"New host keys trusted on first use: {new_keys}. Check each fingerprint on the "
             "device console."
         )
+    if result.credential_sets:
+        lines.append("Credential Sets:")
+        lines.extend(f"  {_set_line(s)}" for s in result.credential_sets)
     attention = _all_attention(result)
     if attention:
         lines.append("Needs your attention:")
@@ -51,14 +56,50 @@ def needs_attention(result: CrawlResult) -> bool:
     return bool(_all_attention(result))
 
 
+def retirement_notice(event: CredentialSetRetired) -> str:
+    """The line shown the moment a set is retired: its number, username and the usual cause."""
+    return (
+        f"Credential Set {event.credential_set} ({escape_controls(event.username, limit=64)}) "
+        f"is retired after {_logins(event.failures)} and will not be tried again this Run. "
+        "A mistyped password is the usual cause."
+    )
+
+
 def _all_attention(result: CrawlResult) -> list[str]:
     items = [item for r in result.devices for item in _attention(r)]
-    if result.stopped:
+    items.extend(_retired_step(s) for s in result.credential_sets if s.retired)
+    if result.stopped == ALL_SETS_RETIRED:
+        items.append(f"The Run stopped early: {result.stopped}. No further login was started.")
+    elif result.stopped:
         items.append(
             f"The Run stopped early: {result.stopped}. No further login was started. Check "
             "the disk holding the per-user data folder, then run again."
         )
     return items
+
+
+def _set_line(result: CredentialSetResult) -> str:
+    view = result.view
+    limit = f", {view.platform_limit.value} only" if view.platform_limit else ""
+    retired = ", retired" if result.retired else ""
+    return (
+        f"Set {view.number} ({escape_controls(view.username, limit=64)}{limit}): "
+        f"{result.successes} worked, {result.failures} failed{retired}"
+    )
+
+
+def _retired_step(result: CredentialSetResult) -> str:
+    """The next step for a Retired Credential Set (story 88)."""
+    view = result.view
+    return (
+        f"Credential Set {view.number} ({escape_controls(view.username, limit=64)}) was retired "
+        f"after {_logins(result.failures)}. A mistyped password is the usual cause: check the "
+        "password and each device's AAA lockout counter, then run again."
+    )
+
+
+def _logins(failures: int) -> str:
+    return f"{failures} failed login{'' if failures == 1 else 's'}"
 
 
 def _lines(record: DeviceRecord) -> list[str]:

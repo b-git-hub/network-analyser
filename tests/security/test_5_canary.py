@@ -1,7 +1,8 @@
 """Security test 5, canary no-secrets (spec #37, Testing Decisions; decided on #28, #30).
 
 A canary Credential Set password and Backup Passphrase never appear in `repr`/`str`, the
-console output, `audit.log`, `topology.json` (#52) or `diagram.html` (#63), and nothing from
+console output, `audit.log`, `topology.json` (#52), `diagram.html` (#63) or `diagram.drawio`
+(#65), and nothing from
 the `netmiko`/`paramiko` loggers reaches any file or the console. Plain pytest, no device. A
 later ticket extends it to `run-report.html` (#66).
 """
@@ -77,6 +78,7 @@ def test_a_whole_run_shows_no_secret_on_the_console_or_in_any_file(
     assert (folder / "audit.log").is_file()
     assert (folder / "topology.json").is_file()
     assert (folder / "diagram.html").is_file()
+    assert (folder / "diagram.drawio").is_file()
     written = [p for p in data_folder().root.rglob("*") if p.is_file()]
     for canary in CANARIES:
         assert [p for p in written if canary.encode() in p.read_bytes()] == []
@@ -149,10 +151,11 @@ def test_a_secret_that_slips_into_topology_json_never_reaches_the_diagram(tmp_pa
 
     write_diagram(folder, scan)
 
-    text = (tmp_path / "diagram.html").read_text(encoding="utf-8")
-    for canary in (*CANARIES, quoted, "CANARY-pw"):
-        assert canary not in text
-    assert scan.hits == 3
+    for name in ("diagram.html", "diagram.drawio"):
+        text = (tmp_path / name).read_text(encoding="utf-8")
+        for canary in (*CANARIES, quoted, "CANARY-pw"):
+            assert canary not in text, name
+    assert scan.hits >= 6  # at least the three in each file
 
 
 def test_nothing_the_ssh_libraries_log_reaches_a_file_or_the_console(

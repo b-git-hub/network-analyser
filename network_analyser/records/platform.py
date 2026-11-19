@@ -31,3 +31,20 @@ class CredentialSetView:
     number: int
     username: str
     platform_limit: Platform | None
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialSetResult:
+    """How one Credential Set fared this Run, for the summary and the Run report (#54).
+
+    Attributes:
+        view: the set, as it may be shown.
+        successes: logins it made.
+        failures: failed logins it spent of its failure budget.
+        retired: True once it is a Retired Credential Set.
+    """
+
+    view: CredentialSetView
+    successes: int
+    failures: int
+    retired: bool
