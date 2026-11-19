@@ -16,6 +16,10 @@ DELETE_OWNERS: frozenset[str] = frozenset(
         # #42: removes its own "can a Run folder be written here" probe, made before any
         # prompt and never a Run folder.
         "run_output/folder.py",
+        # #58: removes the change-pending marker and the previous check file when a change
+        # of the Backup Passphrase finishes: the tool's own bookkeeping in the per-user
+        # folder, never a Run folder or a Backup.
+        "backup_store/change_pending.py",
     }
 )
 _DELETE_METHODS = frozenset({"unlink", "rmdir"})  # Path.unlink(), Path.rmdir()

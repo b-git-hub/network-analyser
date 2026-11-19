@@ -210,6 +210,14 @@ WRITE_OWNERS: frozenset[str] = frozenset(
         # config ever reaches the disk. Ciphertext cannot hold a typed secret to scan for,
         # and a file name that holds one is never used.
         "backup_store/locker.py",
+        # #58: the change-pending marker (start time, paths and SHA-256 fingerprints of
+        # locked files; a path holding a typed secret is left out) and the copy of the check
+        # file (age ciphertext of a fixed phrase), temp-then-rename.
+        "backup_store/change_pending.py",
+        # #58: re-locked Backups and manifests, temp-then-rename over the original. Each is
+        # unlocked, re-locked and checked in memory first, so only age ciphertext is written.
+        # Also each Run folder's re-lock record: paths and fingerprints, through the scan.
+        "backup_store/relock.py",
     }
 )
 _WRITE_CALLS = frozenset({"write_text", "write_bytes", "symlink_to", "hardlink_to", "touch"})
