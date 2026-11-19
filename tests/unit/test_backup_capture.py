@@ -89,7 +89,7 @@ def test_an_nxos_config_goes_to_the_sink(capture: Capture) -> None:
 
     capture()
 
-    assert device.lines[-1] == "show running-config"
+    assert device.lines.count("show running-config") == 1
     ((identity, config),) = capture.backups
     assert config == device_text.NXOS_RUNNING_CONFIG
     assert identity.hostname == "nx-a"

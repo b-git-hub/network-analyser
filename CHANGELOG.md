@@ -21,7 +21,7 @@ None. This is the first release.
 The first allow-list ([spec #37](https://github.com/b-git-hub/network-analyser/issues/37)). Give the tool's account a Device Role that permits these commands; `network-analyser role-snippet ios-xe|nx-os` prints it (#53):
 
 - IOS/IOS-XE: `terminal length 0`, `terminal width 511`, `show version`, `show privilege` (#49); `show running-config view full`, the Backup, always the full view and never plain `show running-config` (#51).
-- NX-OS: `terminal length 0`, `terminal width 511`, `show version`, `show user-account <username>` (the account's own name; #49); `show running-config`, the Backup (#51).
+- NX-OS: `terminal length 0`, `terminal width 511`, `show version`, `show user-account <username>` (the account's own name; #49); `show running-config`, the Backup (#51); and to collect the Topology's data (#60), each with `| json` and for every VRF at once: `show feature | json`, `show interface | json`, `show interface switchport | json`, `show ip interface vrf all | json`, `show port-channel summary | json`, `show vlan brief | json`, `show vrf | json`, `show cdp neighbors detail | json`, `show lldp neighbors detail | json`, `show vpc brief | json`, `show vpc peer-keepalive | json`, `show ip arp vrf all | json`, `show mac address-table | json`, `show ip ospf neighbors vrf all | json`, `show ip eigrp neighbors vrf all | json`, `show ip bgp summary vrf all | json`, `show ip route static vrf all | json`, `show hsrp brief | json`, `show vrrp | json`.
 
 ### Added
 

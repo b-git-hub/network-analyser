@@ -669,6 +669,25 @@ nodes:
             rule 3 permit command show version
             rule 4 permit command show user-account netanalyser
             rule 5 permit command show running-config
+            rule 6 permit command show feature | json
+            rule 7 permit command show interface | json
+            rule 8 permit command show interface switchport | json
+            rule 9 permit command show ip interface vrf all | json
+            rule 10 permit command show port-channel summary | json
+            rule 11 permit command show vlan brief | json
+            rule 12 permit command show vrf | json
+            rule 13 permit command show cdp neighbors detail | json
+            rule 14 permit command show lldp neighbors detail | json
+            rule 15 permit command show vpc brief | json
+            rule 16 permit command show vpc peer-keepalive | json
+            rule 17 permit command show ip arp vrf all | json
+            rule 18 permit command show mac address-table | json
+            rule 19 permit command show ip ospf neighbors vrf all | json
+            rule 20 permit command show ip eigrp neighbors vrf all | json
+            rule 21 permit command show ip bgp summary vrf all | json
+            rule 22 permit command show ip route static vrf all | json
+            rule 23 permit command show hsrp brief | json
+            rule 24 permit command show vrrp | json
           username netanalyser password CHANGE_ME role NA-READ
           no username netanalyser role network-operator
           password strength-check
@@ -835,6 +854,25 @@ nodes:
             rule 3 permit command show version
             rule 4 permit command show user-account netanalyser
             rule 5 permit command show running-config
+            rule 6 permit command show feature | json
+            rule 7 permit command show interface | json
+            rule 8 permit command show interface switchport | json
+            rule 9 permit command show ip interface vrf all | json
+            rule 10 permit command show port-channel summary | json
+            rule 11 permit command show vlan brief | json
+            rule 12 permit command show vrf | json
+            rule 13 permit command show cdp neighbors detail | json
+            rule 14 permit command show lldp neighbors detail | json
+            rule 15 permit command show vpc brief | json
+            rule 16 permit command show vpc peer-keepalive | json
+            rule 17 permit command show ip arp vrf all | json
+            rule 18 permit command show mac address-table | json
+            rule 19 permit command show ip ospf neighbors vrf all | json
+            rule 20 permit command show ip eigrp neighbors vrf all | json
+            rule 21 permit command show ip bgp summary vrf all | json
+            rule 22 permit command show ip route static vrf all | json
+            rule 23 permit command show hsrp brief | json
+            rule 24 permit command show vrrp | json
           username netanalyser password CHANGE_ME role NA-READ
           no username netanalyser role network-operator
           password strength-check

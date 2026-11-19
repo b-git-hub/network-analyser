@@ -142,7 +142,9 @@ def test_an_nxos_seed_reports_its_roles(visit: Visit) -> None:
 
     assert record.platform is Platform.NX_OS
     assert record.landing_privilege == LandingPrivilege("roles NA-READ", too_low=False)
-    assert visit.commands()[-2:] == ["show user-account netops-ro", "show running-config"]
+    commands = visit.commands()
+    after = commands.index("show user-account netops-ro") + 1
+    assert commands[after] == "show running-config"  # then collection (#60)
 
 
 def test_every_step_is_audited_in_order_without_device_output(visit: Visit) -> None:

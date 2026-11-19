@@ -10,9 +10,12 @@ The order is the safety (ADR 0002, ADR 0003, stories 38-48, 57-59):
 4. One password attempt. A NEW key is written once a password was sent.
 5. In the same session: the prompt, `terminal length 0`, `terminal width 511`, then
    `show version` decides the Platform. An unsupported one is left at once.
-6. The landing privilege, then the running config (#51), then leave. Nothing is sent to
-   end the session. A whole config goes to the Backup sink once the session is closed,
-   and to nothing else; one that is not a whole config leaves the device partial.
+6. The landing privilege, then the running config (#51), then the Platform's collection
+   commands (#59, #60), then leave. Nothing is sent to end the session. A whole config goes
+   to the Backup sink once the session is closed, and to nothing else; one that is not a
+   whole config leaves the device partial. A collection command that is denied or not
+   understood leaves only its data unknown; one that drops the session leaves the device
+   partial, keeping the Backup and what was collected before it.
 
 Every step is an Audit log event; no event holds device output.
 """
@@ -45,6 +48,7 @@ from network_analyser.records import (
 )
 from network_analyser.records import events as ev
 from network_analyser.records.backup import BackupCapture
+from network_analyser.records.collected import Collected
 from network_analyser.records.device import (
     DeviceRecord,
     LandingPrivilege,
@@ -59,6 +63,7 @@ SSH_PORT: Final = 22
 _SSH_ID_LIMIT: Final = 255  # RFC 4253 4.2: the whole line is at most 255 characters
 REFUSED_COMMAND: Final = "a command was refused by the allow-list gate (a bug in the tool)"
 NO_SHELL: Final = "logged in, but the device's CLI could not be opened"
+_NOT_READ: Final = "not read, the session was dropped"
 _USERNAME_DOES_NOT_FIT: Final = "the username does not fit the privilege command's pattern"
 _PARSER: Final = {
     Platform.IOS_XE: "ntc-templates cisco_ios",
@@ -300,16 +305,46 @@ class _Visitor:
             privilege = Unknown("not read: the session was dropped")
             privilege = self.read_privilege(session, found, view.username)
             backup = self.capture_backup(session, found, facts)
+            collected, dropped_by = self.collect(session, found, facts)
         except SessionDroppedError as dropped:
             return self.partial(view, DROP_REASONS[type(dropped)], session, facts, privilege)
         except CommandRefusedError:
             return self.partial(view, REFUSED_COMMAND, session, facts, privilege)
         finally:
             session.close()
-        if isinstance(backup, str):
-            return self.partial(view, backup, session, facts, privilege)
-        self.backup_sink(*backup)  # the session is closed first: the sink may wait its turn
-        return self.record(ev.DeviceOutcome.VISITED, view, session.platform, facts, privilege)
+        if not isinstance(backup, str):
+            self.backup_sink(*backup)  # the session is closed first: the sink may wait its turn
+        reason = backup if isinstance(backup, str) else dropped_by
+        if reason is not None:
+            record = self.partial(view, reason, session, facts, privilege)
+        else:
+            record = self.record(ev.DeviceOutcome.VISITED, view, session.platform, facts, privilege)
+        return dataclasses.replace(record, collected=collected)
+
+    def collect(
+        self, session: DeviceSession, platform: Platform, facts: VersionFacts
+    ) -> tuple[Collected | None, str | None]:
+        """Send the Platform's collection commands; return what they told, and any drop.
+
+        A command that drops the session leaves it and every later one unknown, and its
+        reason makes the device partial. Each denied or unreadable command is audited.
+        """
+        dropped: list[str] = []
+
+        def send(command: str) -> str | Unknown:
+            if not dropped:
+                try:
+                    return session.send(platform, command)
+                except SessionDroppedError as error:
+                    dropped.append(DROP_REASONS[type(error)])
+            return Unknown(f"{command}: {_NOT_READ}")
+
+        collection = platforms.collect(platform, send, facts)
+        if collection is None:
+            return None, None
+        for problem in collection.problems:
+            self.emit(ev.ParseFailed(self.ip, problem.command, collection.parser, problem.reason))
+        return collection.collected, (dropped[0] if dropped else None)
 
     def capture_backup(
         self, session: DeviceSession, platform: Platform, facts: VersionFacts
