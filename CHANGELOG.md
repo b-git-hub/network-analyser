@@ -20,8 +20,8 @@ None. This is the first release.
 
 The first allow-list ([spec #37](https://github.com/b-git-hub/network-analyser/issues/37)). Give the tool's account a Device Role that permits these commands; `network-analyser role-snippet ios-xe|nx-os` prints it (#53):
 
-- IOS/IOS-XE: `terminal length 0`, `terminal width 511`, `show version`, `show privilege` (#49).
-- NX-OS: `terminal length 0`, `terminal width 511`, `show version`, `show user-account <username>` (the account's own name; #49).
+- IOS/IOS-XE: `terminal length 0`, `terminal width 511`, `show version`, `show privilege` (#49); `show running-config view full`, the Backup, always the full view and never plain `show running-config` (#51).
+- NX-OS: `terminal length 0`, `terminal width 511`, `show version`, `show user-account <username>` (the account's own name; #49); `show running-config`, the Backup (#51).
 
 ### Added
 

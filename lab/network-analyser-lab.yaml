@@ -136,6 +136,7 @@ nodes:
            commands exec include terminal width 511
            commands exec include show version
            commands exec include show privilege
+           commands exec include show running-config view full
           !
           username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
           !
@@ -276,6 +277,7 @@ nodes:
            commands exec include terminal width 511
            commands exec include show version
            commands exec include show privilege
+           commands exec include show running-config view full
           !
           username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
           !
@@ -466,6 +468,7 @@ nodes:
            commands exec include terminal width 511
            commands exec include show version
            commands exec include show privilege
+           commands exec include show running-config view full
           !
           username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
           !
@@ -665,6 +668,7 @@ nodes:
             rule 2 permit command terminal width 511
             rule 3 permit command show version
             rule 4 permit command show user-account netanalyser
+            rule 5 permit command show running-config
           username netanalyser password CHANGE_ME role NA-READ
           no username netanalyser role network-operator
           password strength-check
@@ -830,6 +834,7 @@ nodes:
             rule 2 permit command terminal width 511
             rule 3 permit command show version
             rule 4 permit command show user-account netanalyser
+            rule 5 permit command show running-config
           username netanalyser password CHANGE_ME role NA-READ
           no username netanalyser role network-operator
           password strength-check

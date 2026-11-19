@@ -14,6 +14,12 @@ from network_analyser.backup_store.check_file import (
     passphrase_problem,
     unlock_check_file,
 )
+from network_analyser.backup_store.locker import (
+    BACKUPS_FOLDER,
+    MANIFEST_NAME,
+    BackupLocker,
+    scrypt_level,
+)
 from network_analyser.backup_store.register import (
     RegisterRefusedError,
     register_run_folder,
@@ -21,7 +27,10 @@ from network_analyser.backup_store.register import (
 )
 
 __all__ = [
+    "BACKUPS_FOLDER",
+    "MANIFEST_NAME",
     "PASSPHRASE_MIN",
+    "BackupLocker",
     "BackupPassphrase",
     "CheckFileError",
     "RegisterRefusedError",
@@ -30,5 +39,6 @@ __all__ = [
     "passphrase_problem",
     "register_run_folder",
     "registered_run_folders",
+    "scrypt_level",
     "unlock_check_file",
 ]

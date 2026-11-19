@@ -10,14 +10,17 @@ The order is the safety (ADR 0002, ADR 0003, stories 38-48, 57-59):
 4. One password attempt. A NEW key is written once a password was sent.
 5. In the same session: the prompt, `terminal length 0`, `terminal width 511`, then
    `show version` decides the Platform. An unsupported one is left at once.
-6. The landing privilege, then leave. Nothing is sent to end the session.
+6. The landing privilege, then the running config (#51), then leave. Nothing is sent to
+   end the session. A whole config goes to the Backup sink once the session is closed,
+   and to nothing else; one that is not a whole config leaves the device partial.
 
 Every step is an Audit log event; no event holds device output.
 """
 
 import dataclasses
+from datetime import UTC, datetime
 from ipaddress import IPv4Address
-from typing import Final
+from typing import Final, Protocol
 
 from network_analyser import platforms
 from network_analyser.credentials import CredentialSets
@@ -41,6 +44,7 @@ from network_analyser.records import (
     ScopeRecord,
 )
 from network_analyser.records import events as ev
+from network_analyser.records.backup import BackupCapture
 from network_analyser.records.device import (
     DeviceRecord,
     LandingPrivilege,
@@ -66,6 +70,14 @@ _HOST_KEY_STOPS: Final = {
 }
 
 
+class BackupSink(Protocol):
+    """Takes a captured running config: `backup_store`'s locking queue (spec-37 call 4)."""
+
+    def __call__(self, capture: BackupCapture, config: str, /) -> None:
+        """Take `config`, the device's running config exactly as sent, to be locked."""
+        ...
+
+
 def visit(  # noqa: PLR0913 (the device and everything the rules need, all by name)
     ip: IPv4Address,
     *,
@@ -74,6 +86,7 @@ def visit(  # noqa: PLR0913 (the device and everything the rules need, all by na
     sets: CredentialSets,
     emit: Emit,
     failure_budget: int,
+    backup_sink: BackupSink,
     timeouts: Timeouts = Timeouts(),  # noqa: B008 (a frozen record)
     dial: Dial | None = None,
 ) -> DeviceRecord:
@@ -86,6 +99,7 @@ def visit(  # noqa: PLR0913 (the device and everything the rules need, all by na
         sets: the Run's Credential Sets, tried in order, one password per connection.
         emit: takes each Audit log event, in order.
         failure_budget: failed logins a set may spend before it is retired.
+        backup_sink: takes the running config of a Visited Device, and nothing else does.
         timeouts: how long each step may take.
         dial: opens SSH connections; the real one (`ssh.dial`) unless a test fakes it.
     """
@@ -96,6 +110,7 @@ def visit(  # noqa: PLR0913 (the device and everything the rules need, all by na
         sets=sets,
         emit=emit,
         failure_budget=failure_budget,
+        backup_sink=backup_sink,
         timeouts=timeouts,
         dial=dial or ssh.dial,
     )
@@ -117,6 +132,7 @@ class _Visitor:
         sets: CredentialSets,
         emit: Emit,
         failure_budget: int,
+        backup_sink: BackupSink,
         timeouts: Timeouts,
         dial: Dial,
     ) -> None:
@@ -126,6 +142,7 @@ class _Visitor:
         self.sets = sets
         self.emit = emit
         self.failure_budget = failure_budget
+        self.backup_sink = backup_sink
         self.timeouts = timeouts
         self.dial = dial
         self.tried: set[int] = set()
@@ -269,6 +286,7 @@ class _Visitor:
             return self.partial(view, NO_SHELL)
         facts: VersionFacts | None = None
         privilege: LandingPrivilege | Unknown | None = None
+        backup: tuple[BackupCapture, str] | str
         try:
             session.check_prompt()
             for command in platforms.SESSION_SETUP:
@@ -281,13 +299,37 @@ class _Visitor:
             facts = self.read_version(found, shown)
             privilege = Unknown("not read: the session was dropped")
             privilege = self.read_privilege(session, found, view.username)
+            backup = self.capture_backup(session, found, facts)
         except SessionDroppedError as dropped:
             return self.partial(view, DROP_REASONS[type(dropped)], session, facts, privilege)
         except CommandRefusedError:
             return self.partial(view, REFUSED_COMMAND, session, facts, privilege)
         finally:
             session.close()
+        if isinstance(backup, str):
+            return self.partial(view, backup, session, facts, privilege)
+        self.backup_sink(*backup)  # the session is closed first: the sink may wait its turn
         return self.record(ev.DeviceOutcome.VISITED, view, session.platform, facts, privilege)
+
+    def capture_backup(
+        self, session: DeviceSession, platform: Platform, facts: VersionFacts
+    ) -> tuple[BackupCapture, str] | str:
+        """Read the running config; return it with its identity, or why it is no Backup.
+
+        The config goes only to the Backup sink (spec-37 call 4), never into a record or
+        an event. The prompt line was removed with the reply's last line break, so that
+        line break is put back: the Backup is the config exactly as the device sent it.
+        """
+        command = platforms.backup_command(platform)
+        config = session.send(platform, command, timeout=self.timeouts.backup)
+        captured_at = datetime.now(UTC)
+        problem = platforms.backup_problem(platform, config)
+        if problem is not None:
+            return problem
+        capture = BackupCapture(
+            self.ip, platform, facts.hostname, facts.serials, command, captured_at
+        )
+        return capture, f"{config}\n"
 
     def read_version(self, platform: Platform, shown: str) -> VersionFacts:
         facts = platforms.read_version(platform, shown)

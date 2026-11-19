@@ -90,7 +90,7 @@ class DeviceSession:
         """Record the Platform `show version` named: its allow-list now applies."""
         self._platform = platform
 
-    def send(self, platform: Platform | None, command: str) -> str:
+    def send(self, platform: Platform | None, command: str, *, timeout: float | None = None) -> str:
         """Send one allow-listed command and return its cleaned output, prompt removed.
 
         Args:
@@ -98,6 +98,7 @@ class DeviceSession:
                 It must be the session's own, so a command for one Platform can never
                 reach a device of another.
             command: the exact command.
+            timeout: how long its output may take; None for the command timeout.
 
         Raises:
             CommandRefusedError: not permitted; nothing was sent.
@@ -113,7 +114,7 @@ class DeviceSession:
             msg = "the command is not on the Platform's allow-list, so it was not sent"
             raise CommandRefusedError(msg)
         started = time.monotonic()
-        reply = shell.run(command, self._timeouts.command)
+        reply = shell.run(command, timeout or self._timeouts.command)
         took = round((time.monotonic() - started) * 1000)
         if reply.error is not None:
             self._emit(reply.error)
