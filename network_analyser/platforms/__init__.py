@@ -25,9 +25,12 @@ from network_analyser.platforms.identify import (
 from network_analyser.platforms.ios_xe import backup as ios_xe_backup
 from network_analyser.platforms.ios_xe import commands as ios_xe_commands
 from network_analyser.platforms.ios_xe import identify as ios_xe
+from network_analyser.platforms.ios_xe import role as ios_xe_role
 from network_analyser.platforms.nxos import backup as nxos_backup
 from network_analyser.platforms.nxos import commands as nxos_commands
 from network_analyser.platforms.nxos import identify as nxos
+from network_analyser.platforms.nxos import role as nxos_role
+from network_analyser.platforms.roles import RoleError, username_problem
 from network_analyser.records import Platform
 from network_analyser.records.device import LandingPrivilege, Unknown, VersionFacts
 
@@ -95,6 +98,23 @@ def backup_problem(platform: Platform, text: str) -> str | None:
     return check(text)
 
 
+def role_snippet(platform: Platform, username: str | None, *, tacacs: bool) -> str:
+    """Return the Device Role for `platform`, generated from its allow-list (ADR 0005).
+
+    Local form, or with `tacacs` the TACACS+ form (an ISE profile and command set). With
+    no `username`, a placeholder stands for the account's name. Only text: nothing here
+    configures a device.
+    """
+    if platform is Platform.IOS_XE:
+        return ios_xe_role.role_snippet(username, tacacs=tacacs)
+    return nxos_role.role_snippet(username, tacacs=tacacs)
+
+
+def role_username_problem(username: str) -> str | None:
+    """Return why `username` cannot go in a Device Role snippet, or None when it can."""
+    return username_problem(username)
+
+
 __all__ = [
     "ALLOW_LISTS",
     "SESSION_SETUP",
@@ -102,6 +122,7 @@ __all__ = [
     "AllowList",
     "Exact",
     "Hint",
+    "RoleError",
     "Template",
     "Unsupported",
     "backup_command",
@@ -112,5 +133,7 @@ __all__ = [
     "privilege_command",
     "read_privilege",
     "read_version",
+    "role_snippet",
+    "role_username_problem",
     "ssh_id_hint",
 ]
