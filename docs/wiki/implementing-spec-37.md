@@ -37,3 +37,5 @@ How [spec #37](https://github.com/b-git-hub/network-analyser/issues/37) (Network
 - 2026-11-18: wave 4 started after #49 merged: #50, #51, #52, #53 in parallel.
 - 2026-11-19: merged #53 at `943b4e0`; no conflicts, check.py all green, 883 tests passed; adds role-snippet command and regenerated lab/network-analyser-lab.yaml (already in the ticket).
 - 2026-11-19: merged #51 at `e71587c`; no conflicts, check.py all green, 970 tests passed; allow-list changed and the ticket already carried the regenerated lab/network-analyser-lab.yaml.
+- 2026-11-19: merged #52 at `c7324fa`; no conflicts, check.py all green, 1076 tests passed; adds topology core, topology.json and docs/topology-json.md.
+- 2026-11-19: wave 5 started: #59, #60, #63 after #52 merged (#61, #62 held back to limit concurrency against the usage limit).

@@ -2,7 +2,9 @@
 
 Owns the per-user data folder's layout, its single-instance lock and the check of who can
 reach its Trust Store folder; creating and naming the Run folder, the Run report and the
-append-only Audit log, whose writer passes every line through the secret scan. Never takes
+append-only Audit log, whose writer passes every line through the secret scan; and the one
+scanned writer for the Run folder's other plaintext files (`topology.json`, later the
+diagrams and the Run report). Never takes
 raw device output.
 """
 
@@ -27,6 +29,7 @@ from network_analyser.run_output.folder import (
     run_folder_name,
 )
 from network_analyser.run_output.lock import InstanceLock, take_instance_lock
+from network_analyser.run_output.scanned_file import write_scanned_json, write_scanned_text
 from network_analyser.run_output.trust_folder import TrustFolderCheck, check_trust_folder
 
 __all__ = [
@@ -51,4 +54,6 @@ __all__ = [
     "open_audit_log",
     "run_folder_name",
     "take_instance_lock",
+    "write_scanned_json",
+    "write_scanned_text",
 ]
