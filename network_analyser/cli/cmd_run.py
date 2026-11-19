@@ -26,7 +26,7 @@ from datetime import UTC, datetime
 from ipaddress import IPv4Address
 
 from network_analyser import backup_store, device_gateway, discovery, run_output
-from network_analyser.cli import ready, run_file, run_secrets, run_start, run_trail
+from network_analyser.cli import ready, run_file, run_secrets, run_start, run_topology, run_trail
 from network_analyser.cli.console import scanned_console
 from network_analyser.cli.crash_dump_guard import guard_crash_dumps
 from network_analyser.cli.exit_codes import ExitCode
@@ -119,6 +119,8 @@ def _after_folder_checks(
     folder = create_and_register(data, check, started, request.label.value, scan)
     print(f"Run folder created: {console_text(str(folder.path))}")
 
+    collected = run_topology.Collector()  # kept as they come, for topology.json (#52)
+
     def crawl(audit: run_output.AuditLog) -> tuple[DeviceRecord, ...]:
         # #49: the Seeds only. The crawl (#50) and Backups (#51, the Backup Passphrase to
         # backup_store's locking worker) come next; `check.notices` and the Credential
@@ -134,9 +136,14 @@ def _after_folder_checks(
                 timeouts=request.timeouts,
             )
 
-        return discovery.visit_seeds(request.seeds.value, visit)
+        return discovery.visit_seeds(request.seeds.value, lambda ip: collected.add(visit(ip)))
 
-    return run_trail.run_with_audit_trail(request, sets, folder, scan, crawl)
+    return run_topology.then_save(
+        folder,
+        collected,
+        scan,
+        lambda: run_trail.run_with_audit_trail(request, sets, folder, scan, crawl),
+    )
 
 
 def _secrets(
