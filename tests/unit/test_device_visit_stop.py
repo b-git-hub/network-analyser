@@ -149,6 +149,19 @@ def test_the_second_ctrl_c_leaves_an_identified_device_partial_with_no_backup(
     assert visit.device.open_links == 0  # closed once, by the stop
 
 
+def test_the_second_ctrl_c_during_collection_keeps_the_backup_and_leaves_it_partial(
+    visit: Visit,
+) -> None:
+    visit.device.when_sent["show interfaces"] = visit.stop.close_now
+
+    record = visit()
+
+    assert record.outcome is DeviceOutcome.PARTIAL
+    assert record.partial_reason == device_gateway.CLOSED_BY_OPERATOR
+    assert len(visit.backups) == 1  # the config was whole before the stop (story 84)
+    assert visit.device.open_links == 0
+
+
 def test_the_second_ctrl_c_before_identification_leaves_the_device_unvisited(
     visit: Visit,
 ) -> None:

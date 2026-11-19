@@ -17,6 +17,7 @@ from typing import Final
 
 from network_analyser import platforms
 from network_analyser.device_gateway.link import Shell
+from network_analyser.device_gateway.stop import CLOSED_BY_OPERATOR
 from network_analyser.device_gateway.text import clean_output
 from network_analyser.records import Platform
 from network_analyser.records.events import AuditEvent, CommandResult, CommandSent
@@ -67,6 +68,7 @@ DROP_REASONS: Final = {
     CommandTimedOutError: "a command timed out, so the session was dropped",
     NoReplyError: "a command got no complete reply, so the session was dropped",
     DeviceTimedOutError: "the per-device timeout ran out, so the session was dropped",
+    ClosedByOperatorError: CLOSED_BY_OPERATOR,
 }
 """The fixed reason a device record gives for each kind of drop."""
 
