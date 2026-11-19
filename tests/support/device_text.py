@@ -227,3 +227,50 @@ NXOS_LLDP_DETAIL_JSON = """\
   }
 }
 """
+# Running configs (#51). `CANARY-cfg-...` marks text that may reach only a Backup: never a
+# record, an Audit log event, the console or a plaintext file.
+CONFIG_CANARIES = ("CANARY-cfg-5b2e-enable", "CANARY-cfg-8d4f-nxos")
+
+IOS_XE_RUNNING_CONFIG = """\
+Building configuration...
+
+Current configuration : 330 bytes
+!
+! Last configuration change at 10:15:30 UTC Wed Nov 18 2026
+!
+version 17.9
+service timestamps debug datetime msec
+!
+hostname sw-a
+!
+enable secret 9 CANARY-cfg-5b2e-enable
+!
+interface GigabitEthernet1/0/1
+ description to sw-b
+ ip address 192.0.2.1 255.255.255.0
+!
+banner motd ^C
+Authorised access only.
+^C
+!
+end
+"""
+
+NXOS_RUNNING_CONFIG = """\
+
+!Command: show running-config
+!Running configuration last done at: Wed Nov 18 10:15:30 2026
+!Time: Wed Nov 18 10:16:00 2026
+
+version 9.3(8) Bios:version
+hostname nx-a
+username admin password 5 CANARY-cfg-8d4f-nxos  role network-admin
+feature lldp
+
+interface Ethernet1/1
+  description to sw-a
+"""
+
+COMMAND_AUTHORISATION_FAILED = "Command authorization failed.\n"
+IOS_XE_INVALID_INPUT = "                 ^\n% Invalid input detected at '^' marker.\n"
+NXOS_PERMISSION_DENIED = "% Permission denied for the role\n"

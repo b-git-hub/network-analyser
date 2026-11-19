@@ -26,7 +26,8 @@ from datetime import UTC, datetime
 from ipaddress import IPv4Address
 
 from network_analyser import backup_store, device_gateway, discovery, run_output
-from network_analyser.cli import ready, run_file, run_secrets, run_start, run_trail
+from network_analyser._version import __version__
+from network_analyser.cli import ready, run_file, run_secrets, run_start, run_topology, run_trail
 from network_analyser.cli.console import scanned_console
 from network_analyser.cli.crash_dump_guard import guard_crash_dumps
 from network_analyser.cli.exit_codes import ExitCode
@@ -47,6 +48,7 @@ from network_analyser.cli.trust_folder import check_trust_folder
 from network_analyser.cli.trust_keys import load_trust_store
 from network_analyser.credentials import CredentialSets, SecretScan
 from network_analyser.records import RunRequest, Source, Sourced
+from network_analyser.records.backup import BackupResults
 from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord
 from network_analyser.records.identity import Alias
@@ -105,9 +107,10 @@ def _after_folder_checks(
     if isinstance(request, ExitCode):
         return request
     trust = load_trust_store(data, strict=bool(args.strict_host_keys), known_hosts=args.known_hosts)
-    sets = _secrets(request, data, ask, scan)
-    if isinstance(sets, ExitCode):
-        return sets
+    secrets = _secrets(request, data, ask, scan)
+    if isinstance(secrets, ExitCode):
+        return secrets
+    passphrase, sets = secrets
     started = datetime.now(UTC)
     planned = check.parent / run_output.run_folder_name(started, request.label.value)
     if scan.holds_secret(str(planned)):
@@ -121,10 +124,23 @@ def _after_folder_checks(
     folder = create_and_register(data, check, started, request.label.value, scan)
     print(f"Run folder created: {console_text(str(folder.path))}")
 
-    def crawl(audit: run_output.AuditLog) -> CrawlResult:
-        # #50: the crawl. Backups (#51, the Backup Passphrase to backup_store's locking
-        # worker) come next; `check.notices` and the Credential Sets' views go to the Run
-        # report (#66).
+    collected = run_topology.Collector()  # kept as they come, for topology.json (#52)
+
+    def crawl(audit: run_output.AuditLog) -> tuple[CrawlResult, BackupResults]:
+        # #50: the crawl. `check.notices` and the Credential Sets' views go to the Run
+        # report (#66). #51: each running config goes from the gateway straight to the
+        # locking worker, which locks whatever was taken even on Ctrl+C. #52: every record
+        # is kept as it comes back, for topology.json.
+        locker = backup_store.BackupLocker(
+            folder.io_path,
+            shown=folder.path,
+            passphrase=passphrase,
+            capacity=request.parallel.value,
+            emit=audit.record,
+            scan=scan,
+            tool_version=__version__,
+        )
+
         def visit(
             ip: IPv4Address, *, id_gate: bool, identity: device_gateway.Identity
         ) -> DeviceRecord | Alias:
@@ -135,28 +151,42 @@ def _after_folder_checks(
                 sets=sets,
                 emit=audit.record,
                 failure_budget=request.failure_budget.value,
+                backup_sink=locker.take,
                 timeouts=request.timeouts,
                 id_gate=id_gate,
                 identity=identity,
             )
 
-        return discovery.crawl(
-            request.seeds.value,
-            visit,
-            scope=request.scope.value,
-            parallel=request.parallel.value,
-            emit=audit.record,
-        )
+        try:
+            result = discovery.crawl(
+                request.seeds.value,
+                lambda ip, *, id_gate, identity: collected.add(
+                    visit(ip, id_gate=id_gate, identity=identity)
+                ),
+                scope=request.scope.value,
+                parallel=request.parallel.value,
+                emit=audit.record,
+                skipped=collected.add,
+            )
+        finally:
+            backups = locker.finish()
+        return result, backups
 
-    return run_trail.run_with_audit_trail(request, sets, folder, scan, crawl)
+    return run_topology.then_save(
+        folder,
+        collected,
+        scan,
+        lambda: run_trail.run_with_audit_trail(request, sets, folder, scan, crawl),
+    )
 
 
 def _secrets(
     request: RunRequest, data: run_output.DataFolder, ask: Prompter, scan: SecretScan
-) -> CredentialSets | ExitCode:
+) -> tuple[backup_store.BackupPassphrase, CredentialSets] | ExitCode:
     """The crash-dump check, the Backup Passphrase, then the Credential Sets (ADR 0004).
 
-    Each secret joins the scan as soon as it is accepted or typed.
+    Each secret joins the scan as soon as it is accepted or typed. The passphrase stays in
+    its `BackupPassphrase` until it reaches the locking worker (#51).
     """
     if not guard_crash_dumps(ask):
         return ExitCode.REFUSED
@@ -170,7 +200,7 @@ def _secrets(
     if run_secrets.label_is_a_secret(request.label.value, passphrase, sets):
         print(_LABEL_IS_A_SECRET, file=sys.stderr)
         return ExitCode.REFUSED
-    return sets
+    return passphrase, sets
 
 
 def _load_run_file(path: str | None) -> run_file.RunFile | ExitCode | None:

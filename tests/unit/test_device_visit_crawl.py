@@ -16,6 +16,7 @@ import pytest
 from network_analyser import device_gateway, scope, trust_store
 from network_analyser.credentials import CredentialSet, CredentialSets, Secret
 from network_analyser.records import HostKey, ScopeRecord
+from network_analyser.records.collected import Neighbour, Reading
 from network_analyser.records.device import DeviceRecord, UnvisitedReason
 from network_analyser.records.events import (
     AliasFound,
@@ -29,7 +30,6 @@ from network_analyser.records.events import (
     ParseFailed,
 )
 from network_analyser.records.identity import Alias, AliasEvidence
-from network_analyser.records.neighbour import NeighbourProtocol
 from network_analyser.records.run_request import Timeouts
 from network_analyser.records.unknown import Unknown
 from network_analyser.trust_store import TrustStore
@@ -73,9 +73,13 @@ class Visit:
         self.known_hosts = tmp_path / "trust" / "known_hosts"
         self.register = Register()
         self.waits = 0
+        self.backups = 0
         self.during_wait: Callable[[], None] = lambda: None
         self.timeouts = Timeouts()
         self.store: TrustStore | None = None
+
+    def take_backup(self, _capture: object, _config: str, /) -> None:
+        self.backups += 1
 
     def wait(self) -> None:
         self.waits += 1
@@ -92,6 +96,7 @@ class Visit:
             emit=self.events.append,
             failure_budget=3,
             timeouts=self.timeouts,
+            backup_sink=self.take_backup,
             dial=self.network.dial,
             id_gate=id_gate,
             identity=self.register,
@@ -105,6 +110,13 @@ class Visit:
 @pytest.fixture
 def visit(tmp_path: Path) -> Visit:
     return Visit(tmp_path)
+
+
+def _table(record: DeviceRecord, name: str) -> tuple[Neighbour, ...] | Unknown:
+    """The CDP or LLDP table the record holds (`Collected.cdp` / `Collected.lldp`)."""
+    assert record.collected is not None
+    reading = record.collected.cdp if name == "cdp" else record.collected.lldp
+    return reading.value if isinstance(reading, Reading) else reading
 
 
 def _record(result: DeviceRecord | Alias) -> DeviceRecord:
@@ -123,11 +135,17 @@ def test_cdp_then_lldp_neighbours_are_read_after_identification(visit: Visit) ->
     record = _record(visit())
 
     assert record.outcome is DeviceOutcome.VISITED
-    assert device.lines[-2:] == NEIGHBOUR_LINES
-    assert isinstance(record.cdp_neighbours, tuple)
-    assert [n.device_id for n in record.cdp_neighbours] == ["sw-b.example.test", "SEP00AABBCCDDEE"]
-    assert isinstance(record.lldp_neighbours, tuple)
-    assert [n.protocol for n in record.lldp_neighbours] == [NeighbourProtocol.LLDP] * 2
+    assert device.lines[-3:-1] == NEIGHBOUR_LINES
+    cdp = _table(record, "cdp")
+    assert isinstance(cdp, tuple)
+    assert [n.name for n in cdp] == ["sw-b.example.test", "SEP00AABBCCDDEE"]
+    lldp = _table(record, "lldp")
+    assert isinstance(lldp, tuple)
+    assert [n.chassis_id for n in lldp] == ["5254.0012.3401", "5254.0012.3402"]
+    assert record.collected is not None
+    assert isinstance(record.collected.cdp, Reading)
+    assert record.collected.cdp.commands == ("show cdp neighbors detail",)
+    assert isinstance(record.collected.interfaces, Unknown)  # collected by #59 and #60
     assert visit.of(ParseFailed) == []
 
 
@@ -140,10 +158,11 @@ def test_an_nxos_device_is_asked_for_the_json_tables(visit: Visit) -> None:
 
     record = _record(visit())
 
-    assert device.lines[-2:] == [f"{line} | json" for line in NEIGHBOUR_LINES]
-    assert isinstance(record.cdp_neighbours, tuple)
-    assert len(record.cdp_neighbours) == 2
-    assert record.lldp_neighbours == ()
+    assert device.lines[-3:-1] == [f"{line} | json" for line in NEIGHBOUR_LINES]
+    cdp = _table(record, "cdp")
+    assert isinstance(cdp, tuple)
+    assert len(cdp) == 2
+    assert _table(record, "lldp") == ()
 
 
 def test_a_table_the_device_refuses_is_unknown_and_audited_without_output(visit: Visit) -> None:
@@ -153,7 +172,7 @@ def test_a_table_the_device_refuses_is_unknown_and_audited_without_output(visit:
     record = _record(visit())
 
     assert record.outcome is DeviceOutcome.VISITED
-    assert record.cdp_neighbours == Unknown("CDP is not enabled on the device")
+    assert _table(record, "cdp") == Unknown("CDP is not enabled on the device")
     (failed,) = visit.of(ParseFailed)
     assert failed.command == "show cdp neighbors detail"
     assert "%" not in failed.reason
@@ -171,6 +190,8 @@ def test_a_command_timeout_leaves_the_device_partial_and_is_not_retried(visit: V
     assert record.landing_privilege is not None
     assert device.lines.count("show cdp neighbors detail") == 1
     assert "show lldp neighbors detail" not in device.lines
+    assert _table(record, "lldp") == Unknown("LLDP not read: the session ended first")
+    assert visit.backups == 0
 
 
 def test_the_per_device_timeout_stops_the_examination(visit: Visit) -> None:

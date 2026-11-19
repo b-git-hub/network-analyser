@@ -14,6 +14,9 @@ TERMINAL_WIDTH: Final = "terminal width 511"
 SHOW_VERSION: Final = "show version"
 SHOW_PRIVILEGE: Final = "show privilege"
 """Reports the landing privilege level (provisional: lab checks A5 and C6)."""
+SHOW_RUNNING_CONFIG: Final = "show running-config view full"
+"""The Backup (#51, story 96): always `view full`, so a CLI view user gets the whole config,
+never the parts its view happens to cover. Plain `show running-config` is never sent."""
 SHOW_CDP_NEIGHBORS_DETAIL: Final = "show cdp neighbors detail"
 SHOW_LLDP_NEIGHBORS_DETAIL: Final = "show lldp neighbors detail"
 """The CDP and LLDP Neighbours the crawl follows (#50)."""
@@ -24,6 +27,7 @@ ALLOW_LIST: Final = AllowList(
         Exact(TERMINAL_WIDTH),
         Exact(SHOW_VERSION),
         Exact(SHOW_PRIVILEGE),
+        Exact(SHOW_RUNNING_CONFIG),
         Exact(SHOW_CDP_NEIGHBORS_DETAIL),
         Exact(SHOW_LLDP_NEIGHBORS_DETAIL),
     )

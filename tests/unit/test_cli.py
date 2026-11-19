@@ -36,7 +36,6 @@ EVERY_COMMAND = [
     pytest.param(["render", "runs/2026-01-01T000000Z"], id="render"),
     pytest.param(["show-backup", "backups/sw-a.cfg.age"], id="show-backup"),
     pytest.param(["show-backup"], id="show-backup listing"),
-    pytest.param(["role-snippet", "ios-xe"], id="role-snippet"),
     pytest.param(["change-passphrase"], id="change-passphrase"),
 ]
 
@@ -53,9 +52,6 @@ def test_a_command_not_built_yet_says_so_and_exits_4(
 
 
 EVERY_FLAG = [
-    pytest.param(
-        ["role-snippet", "nx-os", "--username", "netanalyser", "--tacacs"], id="role-snippet"
-    ),
     pytest.param(
         ["change-passphrase", "--run-folder", "old/a", "--run-folder", "old/b"],
         id="change-passphrase",

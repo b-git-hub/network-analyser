@@ -1,7 +1,7 @@
-"""`Unknown`: a value the tool tried to learn and could not (CODING_STANDARDS.md, "Data").
+"""`Unknown(reason)`: a value the tool tried to learn and could not (story 126; #11).
 
-Its own file so every record file can use it without importing another (ticket #50 moved it
-here from `records/device.py`, which still re-exports it).
+Its own module so every record can use it without importing the device record. It is also
+importable from `records.device`, where ticket #49 first defined it.
 """
 
 from dataclasses import dataclass

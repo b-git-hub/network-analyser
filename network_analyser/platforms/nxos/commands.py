@@ -18,6 +18,8 @@ USERNAME_PATTERN: Final = r"[A-Za-z0-9][A-Za-z0-9._-]{0,31}"
 
 SHOW_USER_ACCOUNT: Final = Template("show user-account {username}", {"username": USERNAME_PATTERN})
 """Reports the login's own roles (provisional: lab checks A5 and C10)."""
+SHOW_RUNNING_CONFIG: Final = "show running-config"
+"""The Backup (#51): the running config as NX-OS shows it."""
 SHOW_CDP_NEIGHBORS_DETAIL: Final = "show cdp neighbors detail | json"
 SHOW_LLDP_NEIGHBORS_DETAIL: Final = "show lldp neighbors detail | json"
 """The CDP and LLDP Neighbours the crawl follows (#50; the `| json` forms are provisional)."""
@@ -28,6 +30,7 @@ ALLOW_LIST: Final = AllowList(
         Exact(TERMINAL_WIDTH),
         Exact(SHOW_VERSION),
         SHOW_USER_ACCOUNT,
+        Exact(SHOW_RUNNING_CONFIG),
         Exact(SHOW_CDP_NEIGHBORS_DETAIL),
         Exact(SHOW_LLDP_NEIGHBORS_DETAIL),
     )

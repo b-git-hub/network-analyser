@@ -66,6 +66,13 @@ def _audit() -> list[dict[str, object]]:
     return [json.loads(line) for line in text.splitlines()]
 
 
+def _topology() -> dict[str, list[dict[str, object]]]:
+    (folder,) = sorted(data_folder().runs.iterdir())
+    document = json.loads((folder / "topology.json").read_text(encoding="utf-8"))
+    assert isinstance(document, dict)
+    return document
+
+
 def test_the_run_crawls_to_a_neighbour_and_lists_what_lies_beyond_the_scope(run: Runner) -> None:
     got = run(*FLAGS, typed=first_run())
 
@@ -73,13 +80,21 @@ def test_the_run_crawls_to_a_neighbour_and_lists_what_lies_beyond_the_scope(run:
     assert "Run summary: 2 devices tried: 2 visited, 0 partial, 0 unvisited." in got.out
     assert "192.0.2.2        visited    IOS/IOS-XE  sw-b" in got.out
     assert "Known but never logged into: 1." in got.out
-    assert "198.51.100.9     unvisited  outside Scope  (advertised by 192.0.2.1)" in got.out
+    assert "198.51.100.9     unvisited  outside Scope" in got.out
     lines = _audit()
     (not_visited,) = [line for line in lines if line["event"] == "neighbour_not_visited"]
     assert not_visited["addresses"] == ["198.51.100.9"]
     assert not_visited["reason"] == "outside Scope"
     assert lines[-1]["event"] == "run_ended"
     assert lines[-1]["devices_unvisited"] == 1
+    topology = _topology()
+    (far,) = topology["unvisited"]
+    assert far["reason"] == "outside Scope"
+    assert far["advertised_ips"] == ["198.51.100.9"]
+    assert sorted(str(d["management_ip"]) for d in topology["devices"]) == [
+        "192.0.2.1",
+        "192.0.2.2",
+    ]
 
 
 def test_one_device_at_two_addresses_is_listed_once_with_its_alias(run: Runner) -> None:
@@ -89,8 +104,10 @@ def test_one_device_at_two_addresses_is_listed_once_with_its_alias(run: Runner) 
     got = run(*FLAGS, typed=first_run())
 
     assert "Run summary: 1 device tried: 1 visited" in got.out
-    assert "also at 192.0.2.2 (same host key)" in got.out
+    assert "also at 192.0.2.2" in got.out
     assert [line["event"] for line in _audit()].count("alias_found") == 1
+    (device,) = _topology()["devices"]
+    assert device["alias_ips"] == ["192.0.2.2"]
 
 
 def test_a_trust_store_that_cannot_be_written_stops_the_run(

@@ -25,3 +25,18 @@ def safe_name_problem(text: str, max_length: int) -> str | None:
     if text.endswith("."):
         return "may not end with ."
     return None
+
+
+_UNSAFE: Final = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def sanitised(text: str, max_length: int) -> str | None:
+    """Return device text made into a safe name, or None when nothing safe is left (#51).
+
+    Every character outside the allow-list becomes `_`, the result is cut to `max_length`,
+    and trailing dots go. A name that is only dots and underscores is no name.
+    """
+    name = _UNSAFE.sub("_", text)[:max_length].rstrip(".")
+    if not name.strip("._"):
+        return None
+    return name

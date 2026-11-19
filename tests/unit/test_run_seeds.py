@@ -52,7 +52,10 @@ def test_a_run_visits_its_seed_audits_every_step_and_ends_clean(run: Runner) -> 
     )
     assert "New host keys trusted on first use: 1." in got.out
     events = [line["event"] for line in _audit()]
-    assert events == [
+    # The locking worker writes its event as soon as the Backup is on disk, so it may come
+    # before or after the device's last line; always before the Run's end.
+    assert events.index("backup_written") > events.index("device_identified")
+    assert [e for e in events if e != "backup_written"] == [
         "run_started",
         "connection_attempted",
         "host_key_checked",
@@ -62,6 +65,7 @@ def test_a_run_visits_its_seed_audits_every_step_and_ends_clean(run: Runner) -> 
         "command_sent",
         "command_sent",
         "device_identified",
+        "command_sent",
         "command_sent",
         "command_sent",
         "device_finished",
@@ -75,6 +79,7 @@ def test_a_run_visits_its_seed_audits_every_step_and_ends_clean(run: Runner) -> 
         "show privilege",
         "show cdp neighbors detail",
         "show lldp neighbors detail",
+        "show running-config view full",
     ]
     text = json.dumps(_audit())
     assert DEVICE_CANARY not in text

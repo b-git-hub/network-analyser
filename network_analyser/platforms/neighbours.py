@@ -12,14 +12,25 @@ understood, is unknown, never "no Neighbours"; the output itself is never kept.
 import json
 import re
 from collections.abc import Iterable, Iterator, Mapping
+from enum import Enum, unique
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from typing import Final
 
-from network_analyser.records.neighbour import NeighbourProtocol, NeighbourRecord
+from network_analyser.records.collected import Neighbour
+from network_analyser.records.interface_names import interface_name
 from network_analyser.records.unknown import Unknown
 
 type Address = IPv4Address | IPv6Address
-type Table = tuple[NeighbourRecord, ...] | Unknown
+type Table = tuple[Neighbour, ...] | Unknown
+
+
+@unique
+class NeighbourProtocol(Enum):
+    """The discovery protocol a table comes from: `Collected.cdp` or `Collected.lldp`."""
+
+    CDP = "CDP"
+    LLDP = "LLDP"
+
 
 TEXT_LIMIT: Final = 255
 """The most characters kept of any one value (an RFC 4253 identification line's limit)."""
@@ -27,6 +38,10 @@ TEXT_LIMIT: Final = 255
 _NOT_ENABLED: Final = re.compile(r"^%.*\bnot enabled\b", re.MULTILINE | re.IGNORECASE)
 _DEVICE_ERROR: Final = re.compile(r"^\s*%|Invalid input detected|Invalid command", re.MULTILINE)
 _NOT_ADVERTISED: Final = "not advertised"
+_NO_PORT: Final = "the Neighbour's port was not advertised"
+_MAX_VLAN: Final = 4094
+LOCAL_PORT_NOT_SHOWN: Final = "not-shown"
+"""The local port name kept when a table entry did not show it (an unknown name)."""
 
 
 def table_problem(protocol: NeighbourProtocol, text: str) -> Unknown | None:
@@ -49,6 +64,7 @@ _CDP_PORTS: Final = re.compile(
     r"^Interface\s*:\s*(.*?)\s*,\s*Port ID \(outgoing port\)\s*:\s*(.*)$", re.MULTILINE
 )
 _CDP_VERSION: Final = re.compile(r"^Version\s*:\s*\n\s*(\S.*)$", re.MULTILINE)
+_CDP_NATIVE_VLAN: Final = re.compile(r"^Native VLAN\s*:\s*(\d{1,4})\s*$", re.MULTILINE)
 _CDP_OTHER_HEADER: Final = re.compile(r"^(?:Entry|Interface) address\(es\)\s*:", re.IGNORECASE)
 _CDP_MGMT_HEADER: Final = re.compile(r"^(?:Management|Mgmt) address\(es\)\s*:", re.IGNORECASE)
 _CDP_ADDRESS: Final = re.compile(r"^\s+IP(?:v4|v6)? address\s*:\s*(\S+)", re.IGNORECASE)
@@ -59,7 +75,6 @@ _LLDP_CHASSIS: Final = re.compile(r"^Chassis id:\s*(\S+)", re.MULTILINE)
 _LLDP_PORT: Final = re.compile(r"^Port id:\s*(.*)$", re.MULTILINE)
 _LLDP_NAME: Final = re.compile(r"^System Name:\s*(.*)$", re.MULTILINE)
 _LLDP_DESCRIPTION: Final = re.compile(r"^System Description:[ \t]*\n?[ \t]*(\S.*)$", re.MULTILINE)
-_LLDP_CAPABILITIES: Final = re.compile(r"^Enabled Capabilities:\s*(.*)$", re.MULTILINE)
 _LLDP_MGMT_HEADER: Final = re.compile(r"^Management Addresses\s*:\s*$", re.IGNORECASE)
 _LLDP_ADDRESS: Final = re.compile(r"^\s+IP(?:V6)?\s*:\s*(\S+)", re.IGNORECASE)
 
@@ -85,39 +100,31 @@ def _blocks(start: re.Pattern[str], text: str) -> Iterator[str]:
         yield text[begin:end]
 
 
-def _ios_cdp_entry(block: str) -> NeighbourRecord:
+def _ios_cdp_entry(block: str) -> Neighbour:
     platform = _CDP_PLATFORM.search(block)
     ports = _CDP_PORTS.search(block)
     version = _CDP_VERSION.search(block)
-    management = _section_addresses(block, _CDP_MGMT_HEADER, _CDP_ADDRESS)
-    return NeighbourRecord(
-        protocol=NeighbourProtocol.CDP,
-        local_port=_port(ports.group(1) if ports else None, "local port"),
-        remote_port=_port(ports.group(2) if ports else None, "remote port"),
-        management_addresses=management,
-        other_addresses=_without(
-            _section_addresses(block, _CDP_OTHER_HEADER, _CDP_ADDRESS), management
+    native = _CDP_NATIVE_VLAN.search(block)
+    return _neighbour(
+        local=ports.group(1) if ports else None,
+        remote=ports.group(2) if ports else None,
+        addresses=(
+            *_section_addresses(block, _CDP_MGMT_HEADER, _CDP_ADDRESS),
+            *_section_addresses(block, _CDP_OTHER_HEADER, _CDP_ADDRESS),
         ),
-        device_id=_one(_CDP_DEVICE_ID.search(block)),
-        platform=label(platform.group(1)) if platform else None,
-        description=label(version.group(1)) if version else None,
-        capabilities=_words(platform.group(2).split()) if platform else (),
-        chassis_id=None,
+        name=_one(_CDP_DEVICE_ID.search(block)),
+        platform=(platform.group(1) if platform else None, version.group(1) if version else None),
+        native_vlan=native.group(1) if native else None,
     )
 
 
-def _ios_lldp_entry(block: str) -> NeighbourRecord:
-    capabilities = _one(_LLDP_CAPABILITIES.search(block))
-    return NeighbourRecord(
-        protocol=NeighbourProtocol.LLDP,
-        local_port=_port(_one(_LLDP_LOCAL.search(block)), "local port"),
-        remote_port=_port(_one(_LLDP_PORT.search(block)), "remote port"),
-        management_addresses=_section_addresses(block, _LLDP_MGMT_HEADER, _LLDP_ADDRESS),
-        other_addresses=(),
-        device_id=_one(_LLDP_NAME.search(block)),
-        platform=None,
-        description=_one(_LLDP_DESCRIPTION.search(block)),
-        capabilities=_words(capabilities.split(",")) if capabilities else (),
+def _ios_lldp_entry(block: str) -> Neighbour:
+    return _neighbour(
+        local=_one(_LLDP_LOCAL.search(block)),
+        remote=_one(_LLDP_PORT.search(block)),
+        addresses=_section_addresses(block, _LLDP_MGMT_HEADER, _LLDP_ADDRESS),
+        name=_one(_LLDP_NAME.search(block)),
+        platform=(_one(_LLDP_DESCRIPTION.search(block)),),
         chassis_id=_one(_LLDP_CHASSIS.search(block)),
     )
 
@@ -183,38 +190,60 @@ def _json_rows(
     return rows
 
 
-def _nxos_cdp_entry(row: Mapping[str, object]) -> NeighbourRecord:
-    management = _addresses([*_strings(row, "v4mgmtaddr"), *_strings(row, "v6mgmtaddr")])
-    other = _addresses([*_strings(row, "v4addr"), *_strings(row, "v6addr")])
-    return NeighbourRecord(
-        protocol=NeighbourProtocol.CDP,
-        local_port=_port(_first(row, "intf_id"), "local port"),
-        remote_port=_port(_first(row, "port_id"), "remote port"),
-        management_addresses=management,
-        other_addresses=_without(other, management),
-        device_id=_label_or_none(_first(row, "device_id")),
-        platform=_label_or_none(_first(row, "platform_id")),
-        description=_label_or_none(_first(row, "version")),
-        capabilities=_words(_strings(row, "capability")),
-        chassis_id=None,
+def _nxos_cdp_entry(row: Mapping[str, object]) -> Neighbour:
+    return _neighbour(
+        local=_first(row, "intf_id"),
+        remote=_first(row, "port_id"),
+        addresses=_addresses(
+            [
+                *_strings(row, "v4mgmtaddr"),
+                *_strings(row, "v6mgmtaddr"),
+                *_strings(row, "v4addr"),
+                *_strings(row, "v6addr"),
+            ]
+        ),
+        name=_label_or_none(_first(row, "device_id")),
+        platform=(_first(row, "platform_id"), _first(row, "version")),
+        native_vlan=_first(row, "nativevlan"),
     )
 
 
-def _nxos_lldp_entry(row: Mapping[str, object]) -> NeighbourRecord:
-    capabilities = _first(row, "enabled_capability")
-    return NeighbourRecord(
-        protocol=NeighbourProtocol.LLDP,
-        local_port=_port(_first(row, "l_port_id"), "local port"),
-        remote_port=_port(_first(row, "port_id"), "remote port"),
-        management_addresses=_addresses(
-            [*_strings(row, "mgmt_addr"), *_strings(row, "mgmt_addr_ipv6")]
-        ),
-        other_addresses=(),
-        device_id=_label_or_none(_first(row, "sys_name")),
-        platform=None,
-        description=_label_or_none(_first(row, "sys_desc")),
-        capabilities=_words(capabilities.split(",")) if capabilities else (),
+def _nxos_lldp_entry(row: Mapping[str, object]) -> Neighbour:
+    return _neighbour(
+        local=_first(row, "l_port_id"),
+        remote=_first(row, "port_id"),
+        addresses=_addresses([*_strings(row, "mgmt_addr"), *_strings(row, "mgmt_addr_ipv6")]),
+        name=_label_or_none(_first(row, "sys_name")),
+        platform=(_first(row, "sys_desc"),),
         chassis_id=_label_or_none(_first(row, "chassis_id")),
+    )
+
+
+def _neighbour(  # noqa: PLR0913 (one argument per advertised field)
+    *,
+    local: str | None,
+    remote: str | None,
+    addresses: Iterable[Address],
+    name: str | None,
+    platform: tuple[str | None, ...],
+    chassis_id: str | None = None,
+    native_vlan: str | None = None,
+) -> Neighbour:
+    """Build one entry: IPv4 addresses in the order advertised (management first), then IPv6."""
+    ordered = tuple(dict.fromkeys(addresses))
+    shown = [t for t in (_label_or_none(p) for p in platform) if t]
+    local_port = _label_or_none(local)
+    remote_port = _label_or_none(remote)
+    vlan = int(native_vlan) if native_vlan and native_vlan.isdigit() else None
+    return Neighbour(
+        local_port=interface_name(local_port or LOCAL_PORT_NOT_SHOWN),
+        name=name or Unknown("no name was advertised"),
+        remote_port=interface_name(remote_port) if remote_port else Unknown(_NO_PORT),
+        addresses=tuple(a for a in ordered if isinstance(a, IPv4Address)),
+        platform="; ".join(shown) if shown else Unknown("no Platform string was advertised"),
+        ipv6_addresses=tuple(a for a in ordered if isinstance(a, IPv6Address)),
+        chassis_id=chassis_id,
+        native_vlan=vlan if vlan is not None and 1 <= vlan <= _MAX_VLAN else None,
     )
 
 
@@ -252,15 +281,6 @@ def _one(match: re.Match[str] | None) -> str | None:
     return _label_or_none(match.group(1)) if match else None
 
 
-def _port(value: str | None, what: str) -> str | Unknown:
-    text = _label_or_none(value)
-    return text or Unknown(f"{what} not advertised")
-
-
-def _words(values: Iterable[str]) -> tuple[str, ...]:
-    return tuple(w for w in (label(v) for v in values) if w and _NOT_ADVERTISED not in w.lower())
-
-
 def _addresses(values: Iterable[str]) -> tuple[Address, ...]:
     found: list[Address] = []
     for value in values:
@@ -269,7 +289,3 @@ def _addresses(values: Iterable[str]) -> tuple[Address, ...]:
         except ValueError:
             continue  # not an address: dropped, never guessed at
     return tuple(dict.fromkeys(found))
-
-
-def _without(addresses: tuple[Address, ...], seen: tuple[Address, ...]) -> tuple[Address, ...]:
-    return tuple(a for a in addresses if a not in seen)

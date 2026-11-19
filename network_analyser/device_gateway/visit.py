@@ -16,9 +16,12 @@ The order is the safety (ADR 0002, ADR 0003, stories 38-52, 57-59, 63-64, 73):
 6. In the same session: the prompt, `terminal length 0`, `terminal width 511`, then
    `show version` decides the Platform. An unsupported one is left at once.
 7. The landing privilege; then the chassis serial check (a serial already seen this Run is
-   the same device, left before anything else is collected); then the CDP and LLDP tables.
+   the same device, left before anything else is collected); then the CDP and LLDP tables;
+   then the running config (#51).
 8. Leave. Nothing is sent to end the session. No command runs past the per-device timeout,
-   and a command that times out leaves the device partial; it is never retried.
+   and a command that times out leaves the device partial; it is never retried. A whole
+   config goes to the Backup sink once the session is closed, and to nothing else; one that
+   is not a whole config leaves the device partial.
 
 Every step is an Audit log event; no event holds device output.
 """
@@ -26,8 +29,9 @@ Every step is an Audit log event; no event holds device output.
 import dataclasses
 import time
 from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
 from ipaddress import IPv4Address
-from typing import Final
+from typing import Final, Protocol
 
 from network_analyser import platforms
 from network_analyser.credentials import CredentialSets
@@ -43,7 +47,7 @@ from network_analyser.device_gateway.gate import (
 from network_analyser.device_gateway.identity import Identity
 from network_analyser.device_gateway.link import Dial, DialFailed, Link, LoginResult
 from network_analyser.device_gateway.text import printable
-from network_analyser.platforms import Hint, Unsupported
+from network_analyser.platforms import Hint, NeighbourProtocol, Unsupported
 from network_analyser.records import (
     CredentialSetView,
     HostKeyCheck,
@@ -53,6 +57,8 @@ from network_analyser.records import (
     ScopeRecord,
 )
 from network_analyser.records import events as ev
+from network_analyser.records.backup import BackupCapture
+from network_analyser.records.collected import NOT_COLLECTED, Collected, Neighbour, Reading
 from network_analyser.records.device import (
     DeviceRecord,
     LandingPrivilege,
@@ -61,7 +67,6 @@ from network_analyser.records.device import (
     VersionFacts,
 )
 from network_analyser.records.identity import Alias, AliasEvidence
-from network_analyser.records.neighbour import NeighbourProtocol, NeighbourRecord
 from network_analyser.records.run_request import Timeouts
 from network_analyser.trust_store import TrustStore
 
@@ -82,7 +87,15 @@ _HOST_KEY_STOPS: Final = {
 }
 _TRUST_STORE_ERRORS: Final[Mapping[type[BaseException], str]] = {OSError: TRUST_STORE_UNWRITABLE}
 
-type Neighbours = tuple[NeighbourRecord, ...] | Unknown
+type Neighbours = Reading[tuple[Neighbour, ...]] | Unknown
+
+
+class BackupSink(Protocol):
+    """Takes a captured running config: `backup_store`'s locking queue (spec-37 call 4)."""
+
+    def __call__(self, capture: BackupCapture, config: str, /) -> None:
+        """Take `config`, the device's running config exactly as sent, to be locked."""
+        ...
 
 
 def visit(  # noqa: PLR0913 (the device and everything the rules need, all by name)
@@ -93,6 +106,7 @@ def visit(  # noqa: PLR0913 (the device and everything the rules need, all by na
     sets: CredentialSets,
     emit: Emit,
     failure_budget: int,
+    backup_sink: BackupSink,
     timeouts: Timeouts = Timeouts(),  # noqa: B008 (a frozen record)
     dial: Dial | None = None,
     id_gate: bool = False,
@@ -108,6 +122,7 @@ def visit(  # noqa: PLR0913 (the device and everything the rules need, all by na
         sets: the Run's Credential Sets, tried in order, one password per connection.
         emit: takes each Audit log event, in order.
         failure_budget: failed logins a set may spend before it is retired.
+        backup_sink: takes the running config of a Visited Device, and nothing else does.
         timeouts: how long each step may take.
         dial: opens SSH connections; the real one (`ssh.dial`) unless a test fakes it.
         id_gate: True for a Neighbour with no Platform hint: log in only when the SSH
@@ -128,6 +143,7 @@ def visit(  # noqa: PLR0913 (the device and everything the rules need, all by na
         sets=sets,
         emit=emit,
         failure_budget=failure_budget,
+        backup_sink=backup_sink,
         timeouts=timeouts,
         dial=dial or ssh.dial,
         id_gate=id_gate,
@@ -155,6 +171,7 @@ class _Visitor:
         sets: CredentialSets,
         emit: Emit,
         failure_budget: int,
+        backup_sink: BackupSink,
         timeouts: Timeouts,
         dial: Dial,
         id_gate: bool,
@@ -167,6 +184,7 @@ class _Visitor:
         self.sets = sets
         self.emit = emit
         self.failure_budget = failure_budget
+        self.backup_sink = backup_sink
         self.timeouts = timeouts
         self.dial = dial
         self.id_gate = id_gate
@@ -346,28 +364,66 @@ class _Visitor:
             self.emit(shell)
             return self.partial(view, NO_SHELL)
         try:
-            session.check_prompt()
-            for command in platforms.SESSION_SETUP:
-                session.send(None, command)
-            shown = session.send(None, platforms.SHOW_VERSION)
-            found = platforms.identify(shown)
-            if isinstance(found, Unsupported):
-                return self.unvisited(UnvisitedReason.UNSUPPORTED_IDENTIFIED, view)
-            session.identified(found)
-            self.facts = self.read_version(found, shown)
-            self.privilege = Unknown("not read: the session was dropped")
-            self.privilege = self.read_privilege(session, found, view.username)
-            holder = self.serials_holder()
-            if holder is not None:
-                return Alias(self.ip, holder, AliasEvidence.SERIAL)
-            self.read_neighbours(session, found)
+            found = self.identify(session, view)
+            if isinstance(found, DeviceRecord | Alias):
+                return found
+            platform, facts = found
+            self.read_neighbours(session, platform)
+            backup = self.capture_backup(session, platform, facts)
         except SessionDroppedError as dropped:
             return self.partial(view, DROP_REASONS[type(dropped)], session)
         except CommandRefusedError:
             return self.partial(view, REFUSED_COMMAND, session)
         finally:
             session.close()
+        if isinstance(backup, str):
+            return self.partial(view, backup, session)
+        self.backup_sink(*backup)  # the session is closed first: the sink may wait its turn
         return self.record(ev.DeviceOutcome.VISITED, view, session.platform)
+
+    def identify(
+        self, session: DeviceSession, view: CredentialSetView
+    ) -> tuple[Platform, VersionFacts] | DeviceRecord | Alias:
+        """Identify the Platform and the device; say why to leave, if it must.
+
+        Raises:
+            SessionDroppedError: a command failed or a configuration-mode prompt appeared.
+            CommandRefusedError: a command was not on the allow-list (a bug in the tool).
+        """
+        session.check_prompt()
+        for command in platforms.SESSION_SETUP:
+            session.send(None, command)
+        shown = session.send(None, platforms.SHOW_VERSION)
+        found = platforms.identify(shown)
+        if isinstance(found, Unsupported):
+            return self.unvisited(UnvisitedReason.UNSUPPORTED_IDENTIFIED, view)
+        session.identified(found)
+        facts = self.read_version(found, shown)
+        self.facts = facts
+        self.privilege = Unknown("not read: the session was dropped")
+        self.privilege = self.read_privilege(session, found, view.username)
+        holder = self.serials_holder()
+        return (found, facts) if holder is None else Alias(self.ip, holder, AliasEvidence.SERIAL)
+
+    def capture_backup(
+        self, session: DeviceSession, platform: Platform, facts: VersionFacts
+    ) -> tuple[BackupCapture, str] | str:
+        """Read the running config; return it with its identity, or why it is no Backup.
+
+        The config goes only to the Backup sink (spec-37 call 4), never into a record or
+        an event. The prompt line was removed with the reply's last line break, so that
+        line break is put back: the Backup is the config exactly as the device sent it.
+        """
+        command = platforms.backup_command(platform)
+        config = session.send(platform, command, timeout=self.timeouts.backup)
+        captured_at = datetime.now(UTC)
+        problem = platforms.backup_problem(platform, config)
+        if problem is not None:
+            return problem
+        capture = BackupCapture(
+            self.ip, platform, facts.hostname, facts.serials, command, captured_at
+        )
+        return capture, f"{config}\n"
 
     def read_version(self, platform: Platform, shown: str) -> VersionFacts:
         facts = platforms.read_version(platform, shown)
@@ -407,7 +463,9 @@ class _Visitor:
             found = platforms.read_neighbours(platform, protocol, session.send(platform, command))
             if isinstance(found, Unknown):
                 self.parse_failed(command, platforms.NEIGHBOUR_PARSER, found)
-            self.neighbours[protocol] = found
+                self.neighbours[protocol] = found
+            else:
+                self.neighbours[protocol] = Reading((command,), found)
 
     def identified(self, platform: Platform, privilege: LandingPrivilege | Unknown) -> None:
         shown = privilege.shown if isinstance(privilege, LandingPrivilege) else "unknown"
@@ -440,7 +498,6 @@ class _Visitor:
     def record(
         self, outcome: ev.DeviceOutcome, view: CredentialSetView, platform: Platform | None
     ) -> DeviceRecord:
-        reached = platform is not None
         return DeviceRecord(
             self.ip,
             outcome,
@@ -450,12 +507,19 @@ class _Visitor:
             platform=platform,
             landing_privilege=self.privilege,
             version=self.facts,
-            cdp_neighbours=self._table(NeighbourProtocol.CDP, reached=reached),
-            lldp_neighbours=self._table(NeighbourProtocol.LLDP, reached=reached),
+            collected=self.collected() if platform is not None else None,
         )
 
-    def _table(self, protocol: NeighbourProtocol, *, reached: bool) -> Neighbours | None:
-        """The table read; unknown when the session ended before it; None if never reached."""
-        if protocol in self.neighbours:
-            return self.neighbours[protocol]
-        return Unknown(f"{protocol.value} not read: the session ended first") if reached else None
+    def collected(self) -> Collected:
+        """The CDP and LLDP tables (#50); the rest waits for the collection tickets (#59, #60)."""
+        return dataclasses.replace(
+            Collected.nothing(NOT_COLLECTED),
+            cdp=self._table(NeighbourProtocol.CDP),
+            lldp=self._table(NeighbourProtocol.LLDP),
+        )
+
+    def _table(self, protocol: NeighbourProtocol) -> Neighbours:
+        """The table read, or unknown when the session ended before it."""
+        return self.neighbours.get(protocol) or Unknown(
+            f"{protocol.value} not read: the session ended first"
+        )

@@ -16,14 +16,14 @@ from network_analyser import device_gateway, discovery, scope, trust_store
 from network_analyser.credentials import CredentialSet, CredentialSets, Secret
 from network_analyser.device_gateway.identity import Identity
 from network_analyser.records import ScopeRecord
-from network_analyser.records.crawl import CrawlResult, UnvisitedDevice
+from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord, UnvisitedReason
 from network_analyser.records.events import (
     AuditEvent,
     DeviceOutcome,
     NeighbourNotVisited,
 )
-from network_analyser.records.identity import Alias, AliasEvidence
+from network_analyser.records.identity import Alias
 from network_analyser.records.run_request import Timeouts
 from network_analyser.trust_store import TrustStore
 from tests.support import device_text
@@ -67,6 +67,16 @@ def entry(  # noqa: PLR0913 (one keyword per CDP field a test varies)
     return "\n".join([*lines, "", ""])
 
 
+class Backups:
+    """Stands in for the locking worker: counts the configs it is handed."""
+
+    def __init__(self) -> None:
+        self.taken = 0
+
+    def append_capture(self, _capture: object, _config: str, /) -> None:
+        self.taken += 1
+
+
 class Lab:
     """Fake devices, each with its own host key and serial, and the crawl over them."""
 
@@ -76,6 +86,7 @@ class Lab:
         self.store: TrustStore = trust_store.load(tmp_path / "trust" / "known_hosts")
         self.sets = CredentialSets([CredentialSet("netops-ro", Secret(DEVICE_CANARY), None)])
         self.count = 0
+        self.backups = Backups()
         fence = scope.parse(["192.0.2.0/24"], ["192.0.2.200-192.0.2.210"])
         assert isinstance(fence, ScopeRecord)
         self.scope = fence
@@ -102,6 +113,7 @@ class Lab:
             emit=self.events.append,
             failure_budget=3,
             timeouts=Timeouts(),
+            backup_sink=self.backups.append_capture,
             dial=self.network.dial,
             id_gate=id_gate,
             identity=identity,
@@ -127,8 +139,8 @@ def _ips(result: CrawlResult) -> list[str]:
     return sorted(str(d.ip) for d in result.devices)
 
 
-def _unvisited(result: CrawlResult, reason: UnvisitedReason) -> list[UnvisitedDevice]:
-    return [u for u in result.unvisited if u.reason is reason]
+def _unvisited(result: CrawlResult, reason: UnvisitedReason) -> list[DeviceRecord]:
+    return [u for u in result.unvisited if u.unvisited_reason is reason]
 
 
 # -- Spreading through the network (stories 60-61) -----------------------------------------
@@ -190,14 +202,20 @@ def test_neighbours_beyond_the_fence_are_recorded_and_never_dialled(lab: Lab) ->
     result = lab.crawl()
 
     assert lab.network.dialled == [SEED]
-    assert [u.addresses for u in _unvisited(result, UnvisitedReason.OUTSIDE_SCOPE)] == [
-        (IPv4Address("198.51.100.7"),),
-        (IPv4Address("127.0.0.1"),),
+    assert [u.ip for u in _unvisited(result, UnvisitedReason.OUTSIDE_SCOPE)] == [
+        IPv4Address("198.51.100.7"),
+        IPv4Address("127.0.0.1"),
     ]
     (excluded,) = _unvisited(result, UnvisitedReason.EXCLUDED)
-    assert excluded.sightings[0].reported_by == SEED
-    assert len(_unvisited(result, UnvisitedReason.IPV6_ONLY)) == 1
-    reasons = [e.reason for e in lab.events if isinstance(e, NeighbourNotVisited)]
+    assert excluded == DeviceRecord(
+        IPv4Address("192.0.2.205"),
+        DeviceOutcome.UNVISITED,
+        unvisited_reason=UnvisitedReason.EXCLUDED,
+    )
+    assert _unvisited(result, UnvisitedReason.IPV6_ONLY) == []  # no IPv4 address to record
+    not_visited = [e for e in lab.events if isinstance(e, NeighbourNotVisited)]
+    assert all(e.reported_by == SEED for e in not_visited)
+    reasons = [e.reason for e in not_visited]
     assert sorted(reasons) == sorted(
         [
             "outside Scope",
@@ -229,7 +247,7 @@ def test_the_same_unvisited_device_seen_twice_is_one_record(lab: Lab) -> None:
     result = lab.crawl()
 
     (far,) = _unvisited(result, UnvisitedReason.OUTSIDE_SCOPE)
-    assert sorted(str(s.reported_by) for s in far.sightings) == ["192.0.2.1", "192.0.2.2"]
+    assert far.ip == IPv4Address("198.51.100.7")
 
 
 # -- Platform hints (stories 62-64) --------------------------------------------------------
@@ -336,9 +354,7 @@ def test_one_device_reached_at_two_ips_is_one_record_with_an_alias(lab: Lab) -> 
     result = lab.crawl()
 
     (record,) = [d for d in result.devices if d.ip == SEED]
-    assert [(a.ip, a.evidence) for a in record.aliases] == [
-        (IPv4Address("192.0.2.30"), AliasEvidence.HOST_KEY)
-    ]
+    assert record.aliases == (IPv4Address("192.0.2.30"),)
     assert len(result.devices) == 2
     assert seed.passwords_received == [DEVICE_CANARY]
 
@@ -417,5 +433,9 @@ def test_a_trust_store_that_cannot_be_written_stops_new_logins(lab: Lab, tmp_pat
     assert lab.network.dialled == [SEED]
     assert result.devices[0].unvisited_reason is UnvisitedReason.RUN_STOPPED
     assert result.unvisited == (
-        UnvisitedDevice(UnvisitedReason.RUN_STOPPED, (IPv4Address("192.0.2.2"),), ()),
+        DeviceRecord(
+            IPv4Address("192.0.2.2"),
+            DeviceOutcome.UNVISITED,
+            unvisited_reason=UnvisitedReason.RUN_STOPPED,
+        ),
     )

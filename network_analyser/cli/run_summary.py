@@ -11,7 +11,7 @@ it is printed (story 81); no device output is ever shown.
 from network_analyser.cli.parser import PROG
 from network_analyser.cli.text import escape_controls
 from network_analyser.records import HostKeyVerdict
-from network_analyser.records.crawl import CrawlResult, UnvisitedDevice
+from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord, LandingPrivilege, UnvisitedReason
 from network_analyser.records.events import DeviceOutcome
 
@@ -65,15 +65,13 @@ def _lines(record: DeviceRecord) -> list[str]:
     """The device's line, then one line per other IP it was found at (story 73)."""
     return [
         f"  {_line(record)}",
-        *(f"  {'':<15}  also at {a.ip} ({a.evidence.value})" for a in record.aliases),
+        *(f"  {'':<15}  also at {alias}" for alias in record.aliases),
     ]
 
 
-def _unvisited_line(device: UnvisitedDevice) -> str:
-    first = str(device.addresses[0]) if device.addresses else "no address"
-    seen_by = sorted({str(s.reported_by) for s in device.sightings})
-    seen = f"  (advertised by {', '.join(seen_by)})" if seen_by else ""
-    return f"{first:<15}  unvisited  {device.reason.value}{seen}"
+def _unvisited_line(record: DeviceRecord) -> str:
+    reason = record.unvisited_reason.value if record.unvisited_reason else "no reason recorded"
+    return f"{record.ip!s:<15}  unvisited  {reason}"
 
 
 def _line(record: DeviceRecord) -> str:

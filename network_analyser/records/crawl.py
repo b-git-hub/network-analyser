@@ -1,45 +1,17 @@
-"""What a crawl hands back: every device it dialled, and every one it only heard of (#50).
+"""What a crawl hands back: every device it dialled, and every address it chose not to (#50).
 
 `discovery.crawl` returns a `CrawlResult`. A device the tool dialled is a `DeviceRecord`
-(Visited, partial or Unvisited), with any other IPs it was found at folded into its
-`aliases`. A device the tool learned of but never dialled (outside the Scope, excluded,
-IPv6 only, advertised as an unsupported Platform, or queued when the Run stopped) is an
-`UnvisitedDevice`, with each Neighbour advertisement that told of it.
+(Visited, partial or Unvisited), with any other IPs it was found at in its `aliases`. An
+advertised IPv4 address the crawl chose not to dial (outside the Scope, excluded, advertised
+as an unsupported Platform, or queued when the Run stopped) is an Unvisited `DeviceRecord`
+with that reason and nothing else: `topology.build` merges it with the advertisements of
+that address (docs/topology-json.md). An IPv6-only Neighbour has no IPv4 address to record,
+so it reaches the Topology through its advertisements alone.
 """
 
 from dataclasses import dataclass
-from ipaddress import IPv4Address, IPv6Address
 
-from network_analyser.records.device import DeviceRecord, UnvisitedReason
-from network_analyser.records.neighbour import NeighbourRecord
-
-
-@dataclass(frozen=True, slots=True)
-class Sighting:
-    """One Visited Device's advertisement of a Neighbour.
-
-    Attributes:
-        reported_by: the Visited Device whose CDP or LLDP table showed it.
-        neighbour: what the table said.
-    """
-
-    reported_by: IPv4Address
-    neighbour: NeighbourRecord
-
-
-@dataclass(frozen=True, slots=True)
-class UnvisitedDevice:
-    """An Unvisited Device the tool never opened a connection to.
-
-    Attributes:
-        reason: one of the fixed Unvisited reasons.
-        addresses: every address it was advertised with, management ones first.
-        sightings: each advertisement of it; empty for a Seed never dialled.
-    """
-
-    reason: UnvisitedReason
-    addresses: tuple[IPv4Address | IPv6Address, ...]
-    sightings: tuple[Sighting, ...]
+from network_analyser.records.device import DeviceRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,10 +20,10 @@ class CrawlResult:
 
     Attributes:
         devices: every device dialled, in the order its visit finished, aliases folded in.
-        unvisited: every device known only from advertisements, or never dialled.
+        unvisited: one Unvisited record per advertised address never dialled, with its reason.
         stopped: why the crawl stopped early, as fixed text; None when it ran to the end.
     """
 
     devices: tuple[DeviceRecord, ...]
-    unvisited: tuple[UnvisitedDevice, ...] = ()
+    unvisited: tuple[DeviceRecord, ...] = ()
     stopped: str | None = None

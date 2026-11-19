@@ -1,11 +1,12 @@
 """Security test 5, canary no-secrets (spec #37, Testing Decisions; decided on #28, #30).
 
 A canary Credential Set password and Backup Passphrase never appear in `repr`/`str`, the
-console output or `audit.log`, and nothing from the `netmiko`/`paramiko` loggers reaches any
-file or the console. Plain pytest, no device. Later tickets extend it to `topology.json`
-(#52) and `run-report.html` (#66).
+console output, `audit.log` or `topology.json` (#52), and nothing from the `netmiko`/`paramiko`
+loggers reaches any file or the console. Plain pytest, no device. A later ticket extends it to
+`run-report.html` (#66).
 """
 
+import dataclasses
 import io
 import json
 import logging
@@ -20,6 +21,7 @@ from network_analyser import backup_store, run_output
 from network_analyser.cli import main
 from network_analyser.cli.console import ScannedStream
 from network_analyser.cli.parser import build_parser
+from network_analyser.cli.run_topology import save_topology
 from network_analyser.credentials import CredentialSet, CredentialSets, Secret, SecretScan
 from network_analyser.records.events import LoginAttempted, LoginResult
 from tests.support import fake_age
@@ -31,6 +33,7 @@ from tests.support.run_driver import (
     data_folder,
     first_run,
 )
+from tests.support.topology_records import neighbour, port, visited
 
 pytestmark = pytest.mark.security
 
@@ -70,6 +73,7 @@ def test_a_whole_run_shows_no_secret_on_the_console_or_in_any_file(
         assert canary not in got.out + got.err
     (folder,) = data_folder().runs.iterdir()
     assert (folder / "audit.log").is_file()
+    assert (folder / "topology.json").is_file()
     written = [p for p in data_folder().root.rglob("*") if p.is_file()]
     for canary in CANARIES:
         assert [p for p in written if canary.encode() in p.read_bytes()] == []
@@ -104,6 +108,32 @@ def test_a_secret_that_slips_into_an_audit_event_is_blocked(tmp_path: Path) -> N
     assert json.loads(text)["username"] == "[blocked]"
     for canary in CANARIES:
         assert canary not in text
+
+
+def test_a_secret_that_slips_into_device_records_never_reaches_topology_json(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    quoted = 'CANARY-pw-"q\\uote'  # JSON escapes would hide it from a scan of the text
+    scan = _scan()
+    scan.watch(Secret(quoted))
+    described = dataclasses.replace(port("Gi1/0/1"), description=f"to {BACKUP_CANARY}")
+    record = visited(
+        "192.0.2.1",
+        "S1",
+        DEVICE_CANARY,
+        interfaces=[described],
+        cdp=[neighbour("Gi1/0/1", quoted, "Gi0/1", "192.0.2.9", platform=DEVICE_CANARY)],
+    )
+    folder = run_output.RunFolder(path=tmp_path, io_path=tmp_path)
+
+    assert save_topology(folder, (record,), scan)
+
+    capsys.readouterr()
+    text = (tmp_path / "topology.json").read_text(encoding="utf-8")
+    assert "[blocked]" in text
+    for canary in (*CANARIES, quoted, json.dumps(quoted)[1:-1]):
+        assert canary not in text
+    assert scan.hits == 4
 
 
 def test_nothing_the_ssh_libraries_log_reaches_a_file_or_the_console(

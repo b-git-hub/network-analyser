@@ -1,7 +1,7 @@
 """A Neighbour's Platform hint, before any login (ticket #50; stories 62-63; decided on #10).
 
-The hint comes from the CDP Platform and Version, or the LLDP System Description, matched
-against the patterns compiled in here, and from the capabilities advertised:
+The hint comes from the CDP Platform and Version, or the LLDP System Description (the
+Neighbour's `platform` string), matched against the patterns compiled in here:
 
 - a supported Platform: the crawl logs in;
 - a known unsupported one (Palo Alto, ASA/FTD, IOS-XR, Meraki, phones, lightweight access
@@ -19,7 +19,7 @@ from typing import Final
 
 from network_analyser.platforms.identify import Unsupported
 from network_analyser.records import Platform
-from network_analyser.records.neighbour import NeighbourRecord
+from network_analyser.records.collected import Neighbour
 
 _UNSUPPORTED_TEXT: Final = (
     ("PAN-OS", re.compile(r"Palo Alto Networks|\bPAN-OS\b|\bPA-\d{3,4}\b")),
@@ -46,25 +46,11 @@ _SUPPORTED_TEXT: Final = (
     (Platform.IOS_XE, re.compile(r"Cisco IOS XE Software|IOS-XE Software|Cisco IOS Software")),
 )
 
-# Capabilities: CDP words and LLDP enabled-capability codes (IEEE 802.1AB).
-_PHONE: Final = frozenset({"phone", "t"})
-_ACCESS_POINT: Final = frozenset({"w"})
-_HOST: Final = frozenset({"host", "s"})
-_NETWORK: Final = frozenset({"router", "switch", "r", "b", "trans-bridge", "source-route-bridge"})
 
-
-def neighbour_hint(neighbour: NeighbourRecord) -> Platform | Unsupported | None:
+def neighbour_hint(neighbour: Neighbour) -> Platform | Unsupported | None:
     """Return the Platform a Neighbour advertises, a known unsupported one, or None."""
-    text = " ".join(t for t in (neighbour.platform, neighbour.description) if t)
+    text = neighbour.platform if isinstance(neighbour.platform, str) else ""
     for name, pattern in _UNSUPPORTED_TEXT:
         if pattern.search(text):
             return Unsupported(name)
-    capabilities = {c.lower() for c in neighbour.capabilities}
-    if capabilities & _PHONE:
-        return Unsupported("phone")
-    if not capabilities & _NETWORK:
-        if capabilities & _ACCESS_POINT:
-            return Unsupported("access point")
-        if capabilities & _HOST:
-            return Unsupported("host")
     return next((p for p, pattern in _SUPPORTED_TEXT if pattern.search(text)), None)

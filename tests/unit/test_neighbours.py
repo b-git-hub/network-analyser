@@ -1,6 +1,7 @@
 """Reading CDP and LLDP Neighbours, and their Platform hints (ticket #50; stories 60-65, 74).
 
 Driven through `platforms`' public interface with synthetic text (tests/support/device_text).
+The entries are `records.collected.Neighbour`s, the record the Topology reads (#52).
 """
 
 from ipaddress import IPv4Address, IPv6Address
@@ -8,9 +9,10 @@ from ipaddress import IPv4Address, IPv6Address
 import pytest
 
 from network_analyser import platforms
-from network_analyser.platforms import Unsupported
+from network_analyser.platforms import NeighbourProtocol, Unsupported
 from network_analyser.records import Platform
-from network_analyser.records.neighbour import NeighbourProtocol, NeighbourRecord
+from network_analyser.records.collected import Neighbour
+from network_analyser.records.interface_names import interface_name
 from network_analyser.records.unknown import Unknown
 from tests.support import device_text
 
@@ -18,7 +20,7 @@ CDP = NeighbourProtocol.CDP
 LLDP = NeighbourProtocol.LLDP
 
 
-def _read(platform: Platform, protocol: NeighbourProtocol, text: str) -> list[NeighbourRecord]:
+def _read(platform: Platform, protocol: NeighbourProtocol, text: str) -> list[Neighbour]:
     found = platforms.read_neighbours(platform, protocol, text)
     assert not isinstance(found, Unknown), found
     return list(found)
@@ -41,70 +43,64 @@ def test_each_platform_asks_for_cdp_then_lldp_neighbour_detail_on_its_allow_list
 def test_ios_xe_cdp_detail_gives_ports_management_address_first_and_the_platform() -> None:
     switch, phone = _read(Platform.IOS_XE, CDP, device_text.IOS_XE_CDP_DETAIL)
 
-    assert switch == NeighbourRecord(
-        protocol=CDP,
-        local_port="GigabitEthernet1/0/1",
-        remote_port="GigabitEthernet1/0/24",
-        management_addresses=(IPv4Address("192.0.2.2"),),
-        other_addresses=(IPv4Address("198.51.100.2"), IPv6Address("2001:db8::2")),
-        device_id="sw-b.example.test",
-        platform="cisco C9300-48P",
-        description=(
-            "Cisco IOS Software [Cupertino], Catalyst L3 Switch Software (CAT9K_IOSXE), "
-            "Version 17.9.4a"
+    assert switch == Neighbour(
+        local_port=interface_name("GigabitEthernet1/0/1"),
+        name="sw-b.example.test",
+        remote_port=interface_name("GigabitEthernet1/0/24"),
+        addresses=(IPv4Address("192.0.2.2"), IPv4Address("198.51.100.2")),
+        platform=(
+            "cisco C9300-48P; Cisco IOS Software [Cupertino], Catalyst L3 Switch Software "
+            "(CAT9K_IOSXE), Version 17.9.4a"
         ),
-        capabilities=("Switch", "IGMP"),
+        ipv6_addresses=(IPv6Address("2001:db8::2"),),
         chassis_id=None,
+        native_vlan=1,
     )
-    assert switch.addresses[0] == IPv4Address("192.0.2.2")
-    assert phone.management_addresses == ()
-    assert phone.other_addresses == (IPv4Address("192.0.2.50"),)
-    assert phone.remote_port == "Port 1"
-    assert phone.capabilities == ("Host", "Phone", "Two-port", "Mac", "Relay")
+    assert phone.addresses == (IPv4Address("192.0.2.50"),)
+    assert phone.remote_port == interface_name("Port 1")
+    assert phone.native_vlan is None
 
 
 def test_ios_xe_lldp_detail_gives_chassis_id_ports_and_the_system_description() -> None:
     nexus, host = _read(Platform.IOS_XE, LLDP, device_text.IOS_XE_LLDP_DETAIL)
 
-    assert nexus == NeighbourRecord(
-        protocol=LLDP,
-        local_port="Gi1/0/2",
-        remote_port="Eth1/1",
-        management_addresses=(IPv4Address("192.0.2.12"), IPv6Address("2001:db8::12")),
-        other_addresses=(),
-        device_id="nx-a",
-        platform=None,
-        description="Cisco Nexus Operating System (NX-OS) Software 9.3(8)",
-        capabilities=("B", "R"),
+    assert nexus == Neighbour(
+        local_port=interface_name("Gi1/0/2"),
+        name="nx-a",
+        remote_port=interface_name("Eth1/1"),
+        addresses=(IPv4Address("192.0.2.12"),),
+        platform="Cisco Nexus Operating System (NX-OS) Software 9.3(8)",
+        ipv6_addresses=(IPv6Address("2001:db8::12"),),
         chassis_id="5254.0012.3401",
     )
     assert host.addresses == ()
-    assert host.device_id is None
-    assert host.description is None
-    assert host.capabilities == ()
-    assert host.remote_port == "ens3"
+    assert isinstance(host.name, Unknown)
+    assert isinstance(host.platform, Unknown)
+    assert host.remote_port == interface_name("ens3")
 
 
 def test_nxos_cdp_json_gives_management_address_first_and_ipv6_only_neighbours() -> None:
     catalyst, nexus = _read(Platform.NX_OS, CDP, device_text.NXOS_CDP_DETAIL_JSON)
 
-    assert catalyst.local_port == "Ethernet1/1"
-    assert catalyst.remote_port == "GigabitEthernet1/0/2"
+    assert catalyst.local_port == interface_name("Ethernet1/1")
+    assert catalyst.remote_port == interface_name("GigabitEthernet1/0/2")
     assert catalyst.addresses == (IPv4Address("192.0.2.1"), IPv4Address("198.51.100.1"))
-    assert catalyst.device_id == "sw-a(TEST0000A01)"
-    assert catalyst.platform == "cisco C9300-48P"
-    assert catalyst.capabilities == ("router", "switch", "IGMP_cnd_filtering")
-    assert nexus.addresses == (IPv6Address("2001:db8::22"),)
+    assert catalyst.name == "sw-a(TEST0000A01)"
+    assert catalyst.native_vlan == 1
+    assert isinstance(catalyst.platform, str)
+    assert catalyst.platform.startswith("cisco C9300-48P; Cisco IOS Software")
+    assert nexus.addresses == ()
+    assert nexus.ipv6_addresses == (IPv6Address("2001:db8::22"),)
 
 
 def test_nxos_lldp_json_with_a_single_row_gives_one_neighbour() -> None:
     (catalyst,) = _read(Platform.NX_OS, LLDP, device_text.NXOS_LLDP_DETAIL_JSON)
 
-    assert catalyst.local_port == "Eth1/1"
-    assert catalyst.remote_port == "Gi1/0/2"
-    assert catalyst.management_addresses == (IPv4Address("192.0.2.1"),)
+    assert catalyst.local_port == interface_name("Eth1/1")
+    assert catalyst.remote_port == interface_name("Gi1/0/2")
+    assert catalyst.addresses == (IPv4Address("192.0.2.1"),)
+    assert catalyst.ipv6_addresses == ()
     assert catalyst.chassis_id == "5254.0012.3403"
-    assert catalyst.capabilities == ("B", "R")
 
 
 @pytest.mark.parametrize(
@@ -144,9 +140,9 @@ def test_device_text_is_made_printable_and_capped() -> None:
 
     switch = _read(Platform.IOS_XE, CDP, text)[0]
 
-    assert switch.device_id is not None
-    assert "\x1b" not in switch.device_id
-    assert len(switch.device_id) <= 255
+    assert isinstance(switch.name, str)
+    assert "\x1b" not in switch.name
+    assert len(switch.name) <= 255
 
 
 def test_odd_addresses_are_kept_for_the_scope_to_refuse_and_junk_is_dropped() -> None:
@@ -156,83 +152,57 @@ def test_odd_addresses_are_kept_for_the_scope_to_refuse_and_junk_is_dropped() ->
 
     switch = _read(Platform.IOS_XE, CDP, text)[0]
 
-    assert switch.addresses == (IPv4Address("127.0.0.1"), IPv6Address("2001:db8::2"))
+    assert switch.addresses == (IPv4Address("127.0.0.1"),)
 
 
 # -- Platform hints (stories 62-63) ---------------------------------------------------------
 
 
-def _neighbour(
-    *,
-    platform: str | None = None,
-    description: str | None = None,
-    capabilities: tuple[str, ...] = (),
-) -> NeighbourRecord:
-    return NeighbourRecord(
-        protocol=CDP,
-        local_port="Gi1/0/1",
-        remote_port="Gi1/0/2",
-        management_addresses=(IPv4Address("192.0.2.2"),),
-        other_addresses=(),
-        device_id="sw-b",
-        platform=platform,
-        description=description,
-        capabilities=capabilities,
-        chassis_id=None,
+def _neighbour(platform: str | None = None) -> Neighbour:
+    return Neighbour(
+        local_port=interface_name("Gi1/0/1"),
+        name="sw-b",
+        remote_port=interface_name("Gi1/0/2"),
+        addresses=(IPv4Address("192.0.2.2"),),
+        platform=Unknown("no Platform string was advertised") if platform is None else platform,
     )
 
 
 @pytest.mark.parametrize(
-    ("neighbour", "hint"),
+    ("platform", "hint"),
     [
-        (_neighbour(description="Cisco IOS Software, C3750E Software"), Platform.IOS_XE),
-        (_neighbour(description="Cisco IOS XE Software, Version 17.09.04a"), Platform.IOS_XE),
-        (_neighbour(description="Cisco Nexus Operating System (NX-OS) Software"), Platform.NX_OS),
-        (_neighbour(platform="N9K-C9300v"), Platform.NX_OS),
-        (_neighbour(platform="cisco Nexus9000 C9300v Chassis"), Platform.NX_OS),
-        (_neighbour(), None),
-        (_neighbour(platform="cisco C9300-48P", capabilities=("Switch",)), None),
-        (_neighbour(description="Some Other Operating System"), None),
+        ("cisco WS-C3750E; Cisco IOS Software, C3750E Software", Platform.IOS_XE),
+        ("Cisco IOS XE Software, Version 17.09.04a", Platform.IOS_XE),
+        ("Cisco Nexus Operating System (NX-OS) Software", Platform.NX_OS),
+        ("N9K-C9300v", Platform.NX_OS),
+        ("cisco Nexus9000 C9300v Chassis", Platform.NX_OS),
+        (None, None),
+        ("cisco C9300-48P", None),
+        ("Some Other Operating System", None),
+        (
+            "Cisco IOS Software [Dublin], Linux Software (X86_64BI_LINUX_L2-ADVK9-M)",
+            Platform.IOS_XE,
+        ),
     ],
 )
-def test_a_supported_hint_or_none(neighbour: NeighbourRecord, hint: Platform | None) -> None:
-    assert platforms.neighbour_hint(neighbour) == hint
+def test_a_supported_hint_or_none(platform: str | None, hint: Platform | None) -> None:
+    assert platforms.neighbour_hint(_neighbour(platform)) == hint
 
 
 @pytest.mark.parametrize(
-    ("neighbour", "name"),
+    ("platform", "name"),
     [
-        (_neighbour(platform="PA-3220", description="Palo Alto Networks PA-3200 series"), "PAN-OS"),
-        (_neighbour(description="Cisco Adaptive Security Appliance Software 9.16"), "ASA"),
-        (_neighbour(description="Cisco Firepower Threat Defense, Version 7.2"), "FTD"),
-        (_neighbour(description="Cisco IOS XR Software, Version 7.5.2"), "IOS-XR"),
-        (_neighbour(platform="Meraki MS225-48LP Cloud Managed Switch"), "Meraki"),
-        (_neighbour(platform="Cisco IP Phone 8865", capabilities=("Host", "Phone")), "phone"),
-        (_neighbour(capabilities=("T",)), "phone"),
-        (
-            _neighbour(
-                platform="cisco AIR-AP2802I-E-K9",
-                description="Cisco AP Software, ap3g3-k9w8 Version: 17.9.4a",
-            ),
-            "access point",
-        ),
-        (
-            _neighbour(description="Cisco IOS Software, C3600 Software (AP3G2-K9W8-M)"),
-            "access point",
-        ),
-        (_neighbour(description="Ubuntu 22.04.3 LTS Linux 5.15.0-91-generic"), "host"),
-        (_neighbour(platform="VMware ESX", capabilities=("Switch",)), "host"),
-        (_neighbour(capabilities=("Host",)), "host"),
-        (_neighbour(capabilities=("S",)), "host"),
+        ("PA-3220; Palo Alto Networks PA-3200 series", "PAN-OS"),
+        ("Cisco Adaptive Security Appliance Software 9.16", "ASA"),
+        ("Cisco Firepower Threat Defense, Version 7.2", "FTD"),
+        ("Cisco IOS XR Software, Version 7.5.2", "IOS-XR"),
+        ("Meraki MS225-48LP Cloud Managed Switch", "Meraki"),
+        ("Cisco IP Phone 8865; sip8845_65.14-1-1MN-36", "phone"),
+        ("cisco AIR-AP2802I-E-K9; Cisco AP Software, ap3g3-k9w8 Version: 17.9.4a", "access point"),
+        ("Cisco IOS Software, C3600 Software (AP3G2-K9W8-M)", "access point"),
+        ("Ubuntu 22.04.3 LTS Linux 5.15.0-91-generic", "host"),
+        ("VMware ESX", "host"),
     ],
 )
-def test_a_known_unsupported_platform_is_named(neighbour: NeighbourRecord, name: str) -> None:
-    assert platforms.neighbour_hint(neighbour) == Unsupported(name)
-
-
-def test_iol_on_linux_is_still_ios() -> None:
-    neighbour = _neighbour(
-        description="Cisco IOS Software [Dublin], Linux Software (X86_64BI_LINUX_L2-ADVK9-M)"
-    )
-
-    assert platforms.neighbour_hint(neighbour) is Platform.IOS_XE
+def test_a_known_unsupported_platform_is_named(platform: str, name: str) -> None:
+    assert platforms.neighbour_hint(_neighbour(platform)) == Unsupported(name)

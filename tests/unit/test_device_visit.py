@@ -19,6 +19,7 @@ from network_analyser.records import (
     Platform,
     ScopeRecord,
 )
+from network_analyser.records.backup import BackupCapture
 from network_analyser.records.device import (
     DeviceRecord,
     LandingPrivilege,
@@ -69,6 +70,10 @@ class Visit:
         self.known_hosts = tmp_path / "trust" / "known_hosts"
         self.strict = False
         self.sets = CredentialSets([CredentialSet("netops-ro", Secret(DEVICE_CANARY), None)])
+        self.backups: list[str] = []  # the configs handed to the Backup sink (#51)
+
+    def backup_sink(self, _capture: BackupCapture, config: str) -> None:
+        self.backups.append(config)
 
     def trust(self) -> TrustStore:
         return trust_store.load(self.known_hosts, strict=self.strict)
@@ -81,6 +86,7 @@ class Visit:
             sets=self.sets,
             emit=self.events.append,
             failure_budget=3,
+            backup_sink=self.backup_sink,
             dial=self.network.dial,
             wait_before_retry=self.network.wait_before_retry,
         )
@@ -124,7 +130,9 @@ def test_a_seed_is_logged_into_identified_and_left(visit: Visit) -> None:
         "show privilege",
         "show cdp neighbors detail",
         "show lldp neighbors detail",
+        "show running-config view full",
     ]
+    assert visit.backups == [device_text.IOS_XE_RUNNING_CONFIG]
     assert device.passwords_received == [DEVICE_CANARY]
     assert device.open_links == 0
 
@@ -139,7 +147,12 @@ def test_an_nxos_seed_reports_its_roles(visit: Visit) -> None:
 
     assert record.platform is Platform.NX_OS
     assert record.landing_privilege == LandingPrivilege("roles NA-READ", too_low=False)
-    assert visit.commands()[-3] == "show user-account netops-ro"
+    assert visit.commands()[-4:] == [
+        "show user-account netops-ro",
+        "show cdp neighbors detail | json",
+        "show lldp neighbors detail | json",
+        "show running-config",
+    ]
 
 
 def test_every_step_is_audited_in_order_without_device_output(visit: Visit) -> None:
@@ -159,14 +172,16 @@ def test_every_step_is_audited_in_order_without_device_output(visit: Visit) -> N
         DeviceIdentified,
         CommandSent,
         CommandSent,
+        CommandSent,
         DeviceFinished,
     ]
     assert visit.events[0] == ConnectionAttempted(SEED, 22, ConnectionResult.CONNECTED, retry=False)
     assert visit.events[2] == LoginAttempted(SEED, 1, "netops-ro", LoginResult.SUCCEEDED)
-    assert visit.events[-4] == DeviceIdentified(SEED, Platform.IOS_XE, "level 15")
+    assert visit.events[-5] == DeviceIdentified(SEED, Platform.IOS_XE, "level 15")
     assert visit.events[-1] == DeviceFinished(SEED, DeviceOutcome.VISITED, None)
     assert all(DEVICE_CANARY not in repr(e) for e in visit.events)
     assert all("uptime" not in repr(e) for e in visit.events)
+    assert all("hostname sw-a" not in repr(e) for e in visit.events)
 
 
 def test_a_new_key_is_trusted_once_a_password_was_sent_and_known_next_time(
