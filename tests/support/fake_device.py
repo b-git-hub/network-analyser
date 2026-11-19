@@ -75,6 +75,8 @@ class FakeDevice:
     """After this line, the device shows a configuration-mode prompt."""
     hangs_on: frozenset[str] = frozenset()
     shell_fails: bool = False
+    when_sent: dict[str, Callable[[], None]] = field(default_factory=dict)
+    """Called as the line is run, before the reply: a test presses Ctrl+C this way (#56)."""
 
     passwords_received: list[str] = field(default_factory=list)
     lines: list[str] = field(default_factory=list)
@@ -97,6 +99,8 @@ class _FakeShell:
         assert timeout > 0
         device.lines.append(line)
         device.timeouts.append(timeout)
+        if line in device.when_sent:
+            device.when_sent[line]()
         if line in device.hangs_on:
             return Reply(None, CommandResult.TIMEOUT)
         if line == device.config_prompt_after:
@@ -149,6 +153,8 @@ class FakeNetwork:
     dialled: list[IPv4Address] = field(default_factory=list)
     waits: int = 0
     """How often the gateway waited before a connection retry (it never really waits)."""
+    on_wait: Callable[[], None] | None = None
+    """Called during each wait before a retry: a test presses Ctrl+C this way (#56)."""
 
     def add(self, ip: str, device: FakeDevice | None = None) -> FakeDevice:
         added = device or FakeDevice()
@@ -187,6 +193,8 @@ class FakeNetwork:
         monkeypatch.setattr(ssh, "dial", self.dial)
         monkeypatch.setattr(link, "wait_before_retry", self.wait_before_retry)
 
-    def wait_before_retry(self) -> None:
+    def wait_before_retry(self, _stop: object = None) -> None:
         """Count a wait before a connection retry, at once."""
         self.waits += 1
+        if self.on_wait is not None:
+            self.on_wait()

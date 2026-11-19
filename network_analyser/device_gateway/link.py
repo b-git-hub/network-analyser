@@ -14,12 +14,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, unique
 from ipaddress import IPv4Address
-from typing import Final, Protocol
+from typing import TYPE_CHECKING, Final, Protocol
 
 from network_analyser.credentials import Secret
 from network_analyser.records import HostKey, ScopeRecord
 from network_analyser.records.events import CommandResult, ConnectionResult, ErrorRaised
 from network_analyser.records.run_request import Timeouts
+
+if TYPE_CHECKING:
+    from network_analyser.device_gateway.stop import RunStop
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,9 +116,15 @@ CONNECT_RETRY_DELAY_S: Final = 30
 """How long to wait before the one retry of a failed connection (story 51)."""
 
 
-def wait_before_retry() -> None:
-    """Wait before the one connection retry. A seam: tests replace it, so none waits."""
-    time.sleep(CONNECT_RETRY_DELAY_S)
+def wait_before_retry(stop: "RunStop | None" = None) -> None:
+    """Wait before the one connection retry. A seam: tests replace it, so none waits.
+
+    The wait ends early when the Run starts stopping (Ctrl+C), and the retry is not made.
+    """
+    if stop is None:
+        time.sleep(CONNECT_RETRY_DELAY_S)
+    else:
+        stop.pause(CONNECT_RETRY_DELAY_S)
 
 
 class Dial(Protocol):
