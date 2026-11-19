@@ -9,11 +9,13 @@ from typing import Any
 import pytest
 
 from network_analyser import diagram, topology
+from network_analyser.records.collected import SwitchportMode
 from network_analyser.records.device import UnvisitedReason
 from tests.support.topology_records import neighbour, port, unvisited, visited
 
 A = "192.0.2.1"
 B = "192.0.2.2"
+ROUTED = SwitchportMode.ROUTED
 
 
 def _document() -> Any:  # noqa: ANN401 (JSON data, changed by key in each test)
@@ -113,6 +115,45 @@ def test_an_id_that_is_not_a_plain_id_is_refused(bad_id: object) -> None:
 def test_a_list_where_a_record_belongs_is_refused() -> None:
     document = _document()
     document["links"][0]["ends"] = "sw-a"
+
+    with pytest.raises(diagram.TopologyFileError):
+        diagram.read_topology(_text(document))
+
+
+def _routed_pair() -> Any:  # noqa: ANN401 (JSON data)
+    a = visited(A, "S1", interfaces=[port("Gi1/0/1", mode=ROUTED, ips=["192.0.2.9/30"])])
+    b = visited(B, "S2", "sw-b", interfaces=[port("Gi1/0/1", mode=ROUTED, ips=["192.0.2.10/30"])])
+    return json.loads(json.dumps(topology.to_document(topology.build([a, b]))))
+
+
+def test_l3_adjacencies_subnets_and_skipped_checks_are_read_for_the_routing_view() -> None:
+    content = _content(_routed_pair())
+
+    (adjacency,) = content["adjacencies"]
+    assert adjacency["kind"] == "shared subnet"
+    assert adjacency["prefix"] == "192.0.2.8/30"
+    assert [end["device"] for end in adjacency["ends"]] == ["dev-S1", "dev-S2"]
+    assert adjacency["ends"][0]["interfaces"][0]["short"] == "Gi1/0/1"
+    assert content["subnets"] == ()
+    assert {row["data"] for row in content["skipped"]} >= {"vlans"}
+    assert set(content["devices"][0]["vlan_database"]) == {"unknown"}
+
+
+def test_a_file_from_before_l3_data_reads_its_routing_parts_as_unknown() -> None:
+    document = _document()
+    del document["adjacencies"]
+    del document["subnets"]
+
+    content = _content(document)
+
+    assert set(content["adjacencies"]) == {"unknown"}
+    assert set(content["subnets"]) == {"unknown"}
+
+
+@pytest.mark.parametrize("part", ["adjacencies", "subnets"])
+def test_an_l3_item_needs_a_plain_id(part: str) -> None:
+    document = _document()
+    document[part] = [{"id": "<b>"}]
 
     with pytest.raises(diagram.TopologyFileError):
         diagram.read_topology(_text(document))

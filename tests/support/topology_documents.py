@@ -95,6 +95,44 @@ def bundle(  # noqa: PLR0913 (both sides, by name)
     }
 
 
+def adjacency(  # noqa: PLR0913 (both ends, by name)
+    ident: str,
+    a: str,
+    b: str,
+    kind: str = "shared subnet",
+    prefix: str | None = "192.0.2.8/30",
+    *,
+    vrf: str = "default",
+    ports: tuple[str, str] = ("Gi1/0/1", "Gi1/0/1"),
+) -> Any:  # noqa: ANN401
+    return {
+        "id": ident,
+        "ends": [
+            {"device": a, "interfaces": [name(ports[0])]},
+            {"device": b, "interfaces": [name(ports[1])]},
+        ],
+        "vrf": vrf,
+        "kind": kind,
+        "prefix": prefix if kind == "shared subnet" else None,
+        "evidence": [{"device": a, "command": "show ip interface", "source": "interface"}],
+        "conflicts": [],
+    }
+
+
+def subnet(ident: str, prefix: str, *attached: tuple[str, str, str], vrf: str = "default") -> Any:  # noqa: ANN401
+    return {
+        "id": ident,
+        "vrf": vrf,
+        "prefix": prefix,
+        "attachments": [
+            {"device": d, "interface": name(port), "address": address}
+            for d, port, address in attached
+        ],
+        "evidence": [],
+        "conflicts": [],
+    }
+
+
 def document(  # noqa: PLR0913 (each part of the Topology, by name)
     devices: list[Any],
     links: list[Any] = [],  # noqa: B006 (never changed)
@@ -103,8 +141,12 @@ def document(  # noqa: PLR0913 (each part of the Topology, by name)
     segments: list[Any] = [],  # noqa: B006
     bundles: list[Any] = [],  # noqa: B006
     findings: list[Any] = [],  # noqa: B006
+    adjacencies: list[Any] | None = None,
+    subnets: list[Any] | None = None,
+    skipped: list[Any] = [],  # noqa: B006
 ) -> Any:  # noqa: ANN401
-    return {
+    """Return a document; without `adjacencies` and `subnets` it is one from before #62."""
+    made: dict[str, Any] = {
         "format_version": 1,
         "devices": devices,
         "unvisited": unvisited,
@@ -112,9 +154,14 @@ def document(  # noqa: PLR0913 (each part of the Topology, by name)
         "segments": segments,
         "bundles": bundles,
         "findings": findings,
-        "skipped": [],
+        "skipped": skipped,
         "unknown_interface_names": [],
     }
+    if adjacencies is not None:
+        made["adjacencies"] = adjacencies
+    if subnets is not None:
+        made["subnets"] = subnets
+    return made
 
 
 def read(data: object) -> diagram.TopologyFile:

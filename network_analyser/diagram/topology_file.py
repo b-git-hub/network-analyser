@@ -103,6 +103,7 @@ _DEVICE: dict[str, _Schema] = {
     "management_ip": LEAF,
     "alias_ips": [LEAF],
     "interfaces": [_INTERFACE],
+    "vlan_database": LEAF,
     "vpc": _VPC,
 }
 _UNVISITED: dict[str, _Schema] = {
@@ -140,6 +141,24 @@ _FINDING: dict[str, _Schema] = {
     "items": [ID],
     "evidence": [_EVIDENCE],
 }
+_ADJACENCY: dict[str, _Schema] = {
+    "id": ID,
+    "ends": [{"device": ID, "interfaces": [_NAME]}],
+    "vrf": LEAF,
+    "kind": LEAF,
+    "prefix": LEAF,
+    "evidence": [_EVIDENCE],
+    "conflicts": [LEAF],
+}
+_SUBNET: dict[str, _Schema] = {
+    "id": ID,
+    "vrf": LEAF,
+    "prefix": LEAF,
+    "attachments": [{"device": ID, "interface": _NAME, "address": LEAF}],
+    "evidence": [_EVIDENCE],
+    "conflicts": [LEAF],
+}
+_SKIPPED: dict[str, _Schema] = {"device": ID, "data": LEAF, "reason": LEAF}
 _TOP: dict[str, _Schema] = {
     "devices": [_DEVICE],
     "unvisited": [_UNVISITED],
@@ -147,6 +166,9 @@ _TOP: dict[str, _Schema] = {
     "segments": [_SEGMENT],
     "bundles": [_BUNDLE],
     "findings": [_FINDING],
+    "adjacencies": [_ADJACENCY],
+    "subnets": [_SUBNET],
+    "skipped": [_SKIPPED],
 }
 
 

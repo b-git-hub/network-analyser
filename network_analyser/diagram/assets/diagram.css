@@ -1,4 +1,4 @@
-/* diagram.html: Map tab, Physical view (#63). Our own CSS, inlined; nothing is loaded. */
+/* diagram.html: Map tab (Physical, Routing, VLAN views) and Findings tab (#63, #64). Our own CSS, inlined; nothing is loaded. */
 :root{
   --bg:#f3f5f8; --surface:#ffffff; --canvas:#fbfcfd; --fg:#18212c; --muted:#5a6676; --line:#d6dce4;
   --accent:#0b6e99; --accent-bg:#e3f1f8; --link:#3b4757;
@@ -84,5 +84,72 @@ header.top h1{font-size:15px;margin:0;font-weight:650}
 .pill{display:inline-block;font:600 10.5px/1 var(--font);padding:3px 6px;border-radius:999px;border:1px solid currentColor;margin:2px 4px 2px 0;white-space:nowrap}
 .pill.ok{color:var(--ok)} .pill.unv{color:var(--unk)} .pill.acc{color:var(--accent)} .pill.bad{color:var(--bad)} .pill.conflict{color:var(--conflict)}
 .find{border-radius:6px;padding:6px 8px;margin:4px 0;font-size:12.5px;background:var(--bad-bg)}
-@media (max-width:760px){ .key{margin-left:0} .detail{max-height:45%} }
+[hidden]{display:none!important}
+.pages{display:flex;gap:4px}
+.body{flex:1;display:flex;min-height:0}
+.main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+.field{display:inline-flex;align-items:center;gap:6px;color:var(--fg);font-weight:600}
+.field select{padding:2px 4px;border:1px solid var(--line);border-radius:4px;background:var(--surface)}
+.key .c-on b{color:var(--accent)} .key .c-break b{color:var(--bad)}
+.mk{display:inline-block;min-width:1.1em;text-align:center;font-weight:700}
+.mk.bad{color:var(--bad)} .mk.noisy{color:var(--warn)} .mk.unknown{color:var(--unk)} .mk.conflict{color:var(--conflict)}
+
+/* markers on lines (story 150) */
+.badge circle{stroke-width:1.5;fill:var(--surface)}
+.badge text{font:700 11px var(--font);pointer-events:none}
+.badge.bad circle{stroke:var(--bad)} .badge.bad text{fill:var(--bad)}
+.badge.noisy circle{stroke:var(--warn)} .badge.noisy text{fill:var(--warn)}
+.badge.unknown circle{stroke:var(--unk)} .badge.unknown text{fill:var(--unk)}
+.badge.conflict circle{stroke:var(--conflict)} .badge.conflict text{fill:var(--conflict)}
+.edge.mk-bad .ln{stroke:var(--bad)}
+.edge.mk-noisy .ln{stroke:var(--warn);opacity:.8}
+.edge.mk-conflict .ln{stroke:var(--conflict)}
+.node.has-bad rect{stroke:var(--bad);stroke-width:2.4}
+.node.faded{opacity:.28}
+.node.centre rect{stroke-width:2.4}
+.edge.focus .ln{stroke:var(--accent);stroke-width:3}
+
+/* Routing view */
+.edge.l3 .ln{stroke:var(--accent);stroke-width:1.8}
+.edge.l3.proto .ln{stroke-dasharray:6 4}
+.edge.l3m .ln{stroke:var(--accent);stroke-width:1.2;opacity:.7}
+.node.subnet rect{fill:var(--accent-bg);stroke:var(--accent);stroke-width:1.2}
+.node.subnet .t{font:600 10.5px var(--mono);fill:var(--fg)}
+.node.subnet.sel rect{stroke-width:3}
+.pill.l3{color:var(--accent)} .pill.noisy{color:var(--warn)} .pill.unknown{color:var(--unk)}
+
+/* VLAN view (story 148) */
+.edge.vlan-on .ln{stroke:var(--accent);stroke-width:4}
+.edge.vlan-break .ln{stroke:var(--bad);stroke-width:4}
+.edge.vlan-unk .ln{stroke:var(--accent);stroke-width:2;stroke-dasharray:4 4}
+.edge.vlan-off{opacity:.18}
+
+/* finding boxes in the details */
+.find.bad,.find.conflict,.find.other{background:var(--bad-bg)}
+.find.noisy{background:var(--ghost)}
+.find.unknown{background:var(--ghost);color:var(--fg)}
+.find .mk{margin-right:2px}
+.find.bad .mk{color:var(--bad)} .find.noisy .mk{color:var(--warn)} .find.unknown .mk{color:var(--unk)} .find.conflict .mk{color:var(--conflict)}
+
+/* Findings tab (story 151) */
+.side{flex:none;width:340px;max-width:42%;overflow:auto;border-right:1px solid var(--line);background:var(--surface);padding:6px 0 24px}
+.side details{border-bottom:1px solid var(--line)}
+.side summary{cursor:pointer;padding:8px 14px;font-weight:650;display:flex;align-items:center;gap:8px;list-style:none}
+.side summary::-webkit-details-marker{display:none}
+.side summary::before{content:"▸";color:var(--muted);font-size:11px}
+.side details[open]>summary::before{content:"▾"}
+.side .n{margin-left:auto;color:var(--muted);font-weight:600;font-variant-numeric:tabular-nums}
+.side .sub{padding:0 14px 6px;color:var(--muted);font-size:12px}
+.side .rgh{padding:6px 14px 2px;font-size:11px;font-weight:650;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.fi{display:grid;grid-template-columns:12px 1fr;gap:0 8px;width:100%;text-align:left;border:0;background:none;padding:5px 14px;cursor:pointer}
+.fi:hover{background:var(--accent-bg)}
+.fi[aria-current="true"]{background:var(--accent-bg);box-shadow:inset 3px 0 0 var(--accent)}
+.fi:focus-visible,.tab:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.fi .ft{font-weight:600;overflow-wrap:anywhere}
+.fi .k{grid-column:2;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dot{width:9px;height:9px;border-radius:50%;margin-top:5px;background:var(--unk)}
+.dot.bad,.dot.other{background:var(--bad)} .dot.noisy{background:var(--warn)} .dot.conflict{background:var(--conflict)} .dot.acc{background:var(--accent)} .dot.unv{background:var(--ghost);border:1px dashed var(--unk)}
+.filter{margin:4px 14px 8px;width:calc(100% - 28px);box-sizing:border-box;padding:4px 6px;border:1px solid var(--line);border-radius:4px;background:var(--canvas)}
+.crumb{position:absolute;left:12px;top:10px;z-index:5;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:3px 8px;font-weight:600;font-size:12px}
+@media (max-width:760px){ .key{margin-left:0} .detail{max-height:45%} .body{flex-direction:column} .side{width:auto;max-width:none;max-height:40%;border-right:0;border-bottom:1px solid var(--line)} }
 @media (prefers-reduced-motion:reduce){ *{transition:none!important;animation:none!important} }

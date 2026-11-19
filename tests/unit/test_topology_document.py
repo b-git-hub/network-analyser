@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from network_analyser import topology
-from network_analyser.records.collected import ALL_VLANS, SwitchportMode
+from network_analyser.records.collected import ALL_VLANS, Reading, SwitchportMode, Vlan
 from network_analyser.records.unknown import Unknown
 from tests.support.topology_records import neighbour, port, visited
 
@@ -94,3 +94,29 @@ def test_vlan_sets_are_written_as_ranges() -> None:
     assert interfaces[1]["allowed_vlans"] == [[1, 4094]]
     assert interfaces[2]["mode"] == "access"
     assert interfaces[2]["access_vlan"] == {"unknown": "show interfaces switchport: denied"}
+
+
+def _with_vlans(vlans: Reading[tuple[Vlan, ...]] | Unknown) -> Any:  # noqa: ANN401 (JSON data)
+    from dataclasses import replace  # noqa: PLC0415 (only here)
+
+    record = visited(A, "S1")
+    assert record.collected is not None
+    record = replace(record, collected=replace(record.collected, vlans=vlans))
+    document: Any = topology.to_document(topology.build([record]))
+    return document["devices"][0]["vlan_database"]
+
+
+def test_the_vlan_database_is_written_as_ranges_for_the_diagram_s_vlan_view() -> None:
+    database = (Vlan(1, "default", active=True), Vlan(10, "users", active=True))
+    shut = (Vlan(11, "spare", active=False),)
+
+    written = _with_vlans(Reading(("show vlan brief",), database + shut))
+
+    assert written == [[1, 1], [10, 11]]  # present counts, active or not (#61)
+
+
+def test_a_vlan_database_not_collected_or_incomplete_is_unknown() -> None:
+    partial = Reading(("show vlan brief",), (Vlan(1, "default", active=True),), (Unknown("x"),))
+
+    assert _with_vlans(Unknown("show vlan brief: denied")) == {"unknown": "show vlan brief: denied"}
+    assert _with_vlans(partial) == {"unknown": "the VLAN database is incomplete"}

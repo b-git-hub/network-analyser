@@ -29,7 +29,7 @@ from network_analyser.records.topology import (
 )
 from network_analyser.records.unknown import Unknown
 from network_analyser.topology import ids
-from network_analyser.topology.devices import Known
+from network_analyser.topology.devices import Known, vlan_database
 
 DATA: Final = "vlan_mismatch"
 """`skipped.data` for a VLAN check that could not run. Not a `Collected` field."""
@@ -507,7 +507,7 @@ def _load(world: _World, port: _Port, other: _Port) -> _End:
 
 def _visited_end(device: Known, port: _Port) -> _End:
     label = _port_label(port.interface)
-    database = _database(device)
+    database = vlan_database(device)
     vlan_command = _command(device.collected.vlans)
     if isinstance(port.interface, Unknown):
         return _blank(device.id, label, port.interface, database, (vlan_command, None))
@@ -622,15 +622,6 @@ def _names_far(entry: Neighbour, far: UnvisitedDevice, far_port: InterfaceName |
         and not isinstance(entry.remote_port, Unknown)
         and entry.remote_port.short == far_port.short
     )
-
-
-def _database(device: Known) -> frozenset[int] | Unknown:
-    reading = device.collected.vlans
-    if not isinstance(reading, Reading):
-        return reading
-    if reading.gaps:
-        return Unknown("the VLAN database is incomplete")
-    return frozenset(vlan.number for vlan in reading.value)
 
 
 def _command(reading: Reading[object] | Unknown | None) -> str | None:

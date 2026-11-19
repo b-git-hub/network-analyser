@@ -11,6 +11,7 @@ from tests.support.topology_documents import (
     document,
     link,
     read,
+    subnet,
     unvisited_device,
 )
 
@@ -182,3 +183,52 @@ def test_unvisited_devices_sit_in_their_own_area_below_grouped_by_reason() -> No
     groups = [label.text for label in layout.labels if not label.heading]
     assert groups == ["outside Scope (2)", "reason not recorded (1)", "unreachable (1)"]
     assert [label.heading for label in layout.labels].count(True) == 1
+
+
+def _with_subnets(*subnets: object) -> object:
+    data = _star(3)
+    data["subnets"] = list(subnets)  # type: ignore[index]  # a JSON object
+    return data
+
+
+def _attached(*devices: str) -> list[tuple[str, str, str]]:
+    return [(d, "Vlan99", f"192.0.2.{i + 10}/24") for i, d in enumerate(devices)]
+
+
+def test_a_subnet_sits_under_the_devices_on_it_and_moves_no_device() -> None:
+    leaves = ["dev-acc00", "dev-acc01", "dev-acc02"]
+    data = _with_subnets(subnet("subnet-1", "192.0.2.0/24", *_attached(*leaves)))
+    without = diagram.place(read(_star(3)))
+
+    layout = diagram.place(read(data))
+
+    assert layout.positions == without.positions  # every view keeps each device (story 144)
+    spot = layout.subnets["subnet-1"]
+    xs = [layout.positions[d].x for d in leaves]
+    assert spot.x == sum(xs) / len(xs)
+    assert spot.y > max(layout.positions[d].y for d in leaves)
+    assert all((spot.x, spot.y) != (p.x, p.y) for p in layout.positions.values())
+
+
+def test_two_subnets_on_the_same_devices_do_not_sit_on_each_other() -> None:
+    leaves = ["dev-acc00", "dev-acc01", "dev-acc02"]
+    data = _with_subnets(
+        subnet("subnet-2", "198.51.100.0/24", *_attached(*leaves)),
+        subnet("subnet-1", "192.0.2.0/24", *_attached(*leaves)),
+    )
+
+    layout = diagram.place(read(data))
+
+    first, second = layout.subnets["subnet-1"], layout.subnets["subnet-2"]
+    assert (first.x, first.y) != (second.x, second.y)
+    assert first.x < second.x  # placed in id order, whatever order the file lists them
+
+
+def test_a_subnet_on_no_drawn_device_is_not_placed() -> None:
+    data = _with_subnets(subnet("subnet-1", "192.0.2.0/24", *_attached("dev-GONE")))
+
+    assert "subnet-1" not in diagram.place(read(data)).subnets
+
+
+def test_a_file_without_subnets_places_none() -> None:
+    assert diagram.place(read(_star(2))).subnets == {}

@@ -13,7 +13,14 @@ from pathlib import Path
 import pytest
 
 from network_analyser.cli import ExitCode, main
-from tests.support.topology_documents import device, document, link, unvisited_device
+from tests.support.topology_documents import (
+    adjacency,
+    device,
+    document,
+    link,
+    subnet,
+    unvisited_device,
+)
 
 pytestmark = pytest.mark.security
 
@@ -96,6 +103,11 @@ def test_a_rendered_diagram_cannot_reach_the_network(tmp_path: Path) -> None:
             "devices": ["dev-S1"],
         }
     ]
+    data["adjacencies"] = [adjacency("adj-0123456789ab", "dev-S1", "dev-S2", vrf=HOSTILE[2])]
+    data["subnets"] = [
+        subnet("subnet-0123456789ab", HOSTILE[3], ("dev-S1", "Vlan9", HOSTILE[5]), vrf=HOSTILE[7])
+    ]
+    data["skipped"] = [{"device": "dev-S1", "data": "vlan_mismatch", "reason": HOSTILE[4]}]
     (tmp_path / "topology.json").write_text(json.dumps(data), encoding="utf-8")
 
     assert main(["render", str(tmp_path)], elevated=lambda: False) == ExitCode.CLEAN
