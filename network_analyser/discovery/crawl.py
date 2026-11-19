@@ -15,6 +15,12 @@
   device is examined once, whichever of its IPs is reached first (story 73).
 - If a visit stops the Run (the Trust Store cannot be written), no new visit starts; the
   queued devices are `not attempted (Run stopped)`.
+- Ctrl+C (#56, stories 82-83) presses the Run's `RunStop`. After the first press no new
+  visit starts and the queued devices are `not attempted (Run stopped)`, while sessions
+  already open finish. Each press is audited with the sessions still running; after the
+  second the crawl closes every open connection at once. The crawl waits for visits in
+  short slices, so it sees a press at once (on Windows too) and calls `tick` with the
+  number queued, for the live progress.
 - A Neighbour's Platform hint goes to its visit, where it decides with the SSH
   identification string which Platform-limited Credential Sets fit (#54, story 32). Once
   every set is retired, no new visit starts and the queued devices are `not attempted
@@ -41,16 +47,26 @@ from network_analyser.records import HostKey, Placement, Platform, ScopeRecord
 from network_analyser.records.collected import Neighbour, Reading
 from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord, UnvisitedReason
-from network_analyser.records.events import AuditEvent, DeviceOutcome, NeighbourNotVisited
+from network_analyser.records.events import (
+    AuditEvent,
+    CtrlCPressed,
+    DeviceOutcome,
+    NeighbourNotVisited,
+)
 from network_analyser.records.identity import Alias
 
 MAX_ADDRESSES: Final = 3
 """The most addresses tried for one Neighbour (story 65)."""
 ALL_SETS_RETIRED: Final = "every Credential Set is retired"
 """Why the crawl stopped when no Credential Set is left to log in with (story 37)."""
+STOPPED_BY_CTRL_C: Final = "stopped by the operator (Ctrl+C)"
+"""Why the crawl stopped when the operator pressed Ctrl+C (story 82)."""
+POLL_S: Final = 0.2
+"""How long the crawl waits for a visit before it looks at Ctrl+C and the progress again."""
 
 type Emit = Callable[[AuditEvent], None]
 type Skipped = Callable[[DeviceRecord], object]
+type Tick = Callable[[int], object]
 
 
 class Visit(Protocol):
@@ -113,6 +129,8 @@ def crawl(  # noqa: PLR0913 (the Seeds, the visit and the Run's settings, all by
     emit: Emit,
     skipped: Skipped | None = None,
     all_retired: Callable[[], bool] | None = None,
+    stop: device_gateway.RunStop | None = None,
+    tick: Tick | None = None,
 ) -> CrawlResult:
     """Crawl from `seeds` through CDP and LLDP; return every device found.
 
@@ -125,6 +143,10 @@ def crawl(  # noqa: PLR0913 (the Seeds, the visit and the Run's settings, all by
         skipped: takes each Unvisited record of an address never dialled, as it is decided.
         all_retired: says whether every Credential Set is retired
             (`CredentialSets.all_retired`, bound by `cli`); None never stops for that.
+        stop: the Run's Ctrl+C state, the same one `visit` is bound to (#56); None for
+            a crawl only a visit can stop.
+        tick: called on the crawl's thread at least every `POLL_S` seconds with how many
+            devices are queued, for the live progress (#56).
     """
     return _Crawl(
         visit,
@@ -132,25 +154,32 @@ def crawl(  # noqa: PLR0913 (the Seeds, the visit and the Run's settings, all by
         emit,
         skipped or (lambda _record: None),
         all_retired or (lambda: False),
+        stop or device_gateway.RunStop(),
+        tick or (lambda _queued: None),
     ).run(seeds, parallel)
 
 
 class _Crawl:
     """The queue, what has been seen, and what has been found. Used by the main thread."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913, PLR0917 (see `crawl`)
         self,
         visit: Visit,
         scope: ScopeRecord,
         emit: Emit,
         skipped: Skipped,
         all_retired: Callable[[], bool],
+        stop: device_gateway.RunStop,
+        tick: Tick,
     ) -> None:
         self.visit = visit
         self.scope = scope
         self.emit = emit
         self.skipped = skipped
         self.all_retired = all_retired
+        self.stop = stop
+        self.tick = tick
+        self.closed = False
         self.identity = IdentityRegister()
         self.queue: deque[_Target] = deque()
         self.seen: set[IPv4Address] = set()
@@ -166,17 +195,21 @@ class _Crawl:
         with ThreadPoolExecutor(max_workers=parallel, thread_name_prefix="visit") as pool:
             running: dict[Future[DeviceRecord | Alias], _Target] = {}
             while True:
-                while self.queue and self.stopped is None and len(running) < parallel:
+                while self.queue and not self.stopping() and len(running) < parallel:
                     target = self.queue.popleft()
                     running[pool.submit(self.visit_target, target)] = target
                 if not running:
                     break
-                done, _ = wait(running, return_when=FIRST_COMPLETED)
+                # Short waits: on Windows a wait with no timeout never sees Ctrl+C.
+                done, _ = wait(running, timeout=POLL_S, return_when=FIRST_COMPLETED)
+                self.watch_stop(len(running))
                 for future in done:
                     del running[future]
                     self.found(future.result())
                 if self.stopped is None and self.all_retired():
                     self.stopped = ALL_SETS_RETIRED
+                self.tick(len(self.queue))
+        self.watch_stop(0)
         why = (
             UnvisitedReason.SETS_RETIRED
             if self.stopped == ALL_SETS_RETIRED
@@ -190,6 +223,19 @@ class _Crawl:
             unvisited=tuple(self.not_dialled.values()),
             stopped=self.stopped,
         )
+
+    def stopping(self) -> bool:
+        return self.stopped is not None or self.stop.requested
+
+    def watch_stop(self, sessions_running: int) -> None:
+        """Audit each new Ctrl+C, close every session after the second, note why it stopped."""
+        for press in self.stop.presses_to_audit():
+            self.emit(CtrlCPressed(press=press, sessions_running=sessions_running))
+        if self.stop.closing and not self.closed:
+            self.closed = True
+            self.stop.close_now()
+        if self.stop.requested and self.stopped is None:
+            self.stopped = self.stop.reason or STOPPED_BY_CTRL_C
 
     def visit_target(self, target: _Target) -> DeviceRecord | Alias:
         """Visit one device, moving to its next address only after a connection failure."""
@@ -213,7 +259,9 @@ class _Crawl:
             self.aliases.append(result)
             return
         self.devices.append(result)
-        if result.unvisited_reason is UnvisitedReason.RUN_STOPPED:
+        stopped_by_its_visit = result.unvisited_reason is UnvisitedReason.RUN_STOPPED
+        if stopped_by_its_visit and not self.stop.requested and self.stopped is None:
+            # A visit bound to another `RunStop` (or none) can only stop the Run this way.
             self.stopped = device_gateway.TRUST_STORE_UNWRITABLE
         collected = result.collected
         if collected is None:

@@ -87,6 +87,8 @@ class FakeDevice:
     """Called inside each password attempt, before the device answers (to hold it open)."""
     login_lost: bool = False
     """The connection drops after the password is sent, before the device answers."""
+    when_sent: dict[str, Callable[[], None]] = field(default_factory=dict)
+    """Called as the line is run, before the reply: a test presses Ctrl+C this way (#56)."""
 
 
 class _FakeShell:
@@ -101,6 +103,8 @@ class _FakeShell:
         assert timeout > 0
         device.lines.append(line)
         device.timeouts.append(timeout)
+        if line in device.when_sent:
+            device.when_sent[line]()
         if line in device.hangs_on:
             return Reply(None, CommandResult.TIMEOUT)
         if line == device.config_prompt_after:
@@ -157,6 +161,8 @@ class FakeNetwork:
     dialled: list[IPv4Address] = field(default_factory=list)
     waits: int = 0
     """How often the gateway waited before a connection retry (it never really waits)."""
+    on_wait: Callable[[], None] | None = None
+    """Called during each wait before a retry: a test presses Ctrl+C this way (#56)."""
 
     def add(self, ip: str, device: FakeDevice | None = None) -> FakeDevice:
         added = device or FakeDevice()
@@ -195,6 +201,8 @@ class FakeNetwork:
         monkeypatch.setattr(ssh, "dial", self.dial)
         monkeypatch.setattr(link, "wait_before_retry", self.wait_before_retry)
 
-    def wait_before_retry(self) -> None:
+    def wait_before_retry(self, _stop: object = None) -> None:
         """Count a wait before a connection retry, at once."""
         self.waits += 1
+        if self.on_wait is not None:
+            self.on_wait()

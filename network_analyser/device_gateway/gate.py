@@ -16,7 +16,8 @@ from ipaddress import IPv4Address
 from typing import Final
 
 from network_analyser import platforms
-from network_analyser.device_gateway.link import Shell
+from network_analyser.device_gateway.link import Reply, Shell
+from network_analyser.device_gateway.stop import CLOSED_BY_OPERATOR
 from network_analyser.device_gateway.text import clean_output
 from network_analyser.records import Platform
 from network_analyser.records.events import AuditEvent, CommandResult, CommandSent
@@ -56,6 +57,10 @@ class DeviceTimedOutError(SessionDroppedError):
     """The per-device timeout ran out (story 50)."""
 
 
+class ClosedByOperatorError(SessionDroppedError):
+    """The operator pressed Ctrl+C a second time: every session closes at once (story 83)."""
+
+
 CONFIG_MODE: Final = "a configuration-mode prompt appeared, so the session was dropped"
 DROP_REASONS: Final = {
     ConfigModeError: CONFIG_MODE,
@@ -63,25 +68,46 @@ DROP_REASONS: Final = {
     CommandTimedOutError: "a command timed out, so the session was dropped",
     NoReplyError: "a command got no complete reply, so the session was dropped",
     DeviceTimedOutError: "the per-device timeout ran out, so the session was dropped",
+    ClosedByOperatorError: CLOSED_BY_OPERATOR,
 }
 """The fixed reason a device record gives for each kind of drop."""
+
+
+def _text_of(reply: Reply) -> str:
+    """The reply's raw text; raises the `SessionDroppedError` for a bad reply."""
+    if reply.too_large:
+        raise OutputTooLargeError
+    if reply.result is CommandResult.TIMEOUT:
+        raise CommandTimedOutError
+    if reply.result is not CommandResult.OK or reply.text is None:
+        raise NoReplyError
+    return reply.text
 
 
 class DeviceSession:
     """One logged-in CLI session, behind the allow-list gate. Used by one thread."""
 
     def __init__(
-        self, ip: IPv4Address, emit: Emit, timeouts: Timeouts, *, deadline: float | None = None
+        self,
+        ip: IPv4Address,
+        emit: Emit,
+        timeouts: Timeouts,
+        *,
+        deadline: float | None = None,
+        closing: Callable[[], bool] = lambda: False,
     ) -> None:
         """Make the gate for the device at `ip`; `attach` the shell once it is open.
 
         `deadline` is when the per-device timeout runs out, on `time.monotonic()`'s clock;
         no command starts after it, and none may run past it. None for no deadline.
+        `closing` says whether the operator has closed every session (the second Ctrl+C):
+        then no command starts, and the reply of one under way is not used.
         """
         self._ip = ip
         self._emit = emit
         self._timeouts = timeouts
         self._deadline = deadline
+        self._closing = closing
         self._platform: Platform | None = None
         self._shell: Shell | None = None
 
@@ -125,6 +151,8 @@ class DeviceSession:
         ):
             msg = "the command is not on the Platform's allow-list, so it was not sent"
             raise CommandRefusedError(msg)
+        if self._closing():
+            raise ClosedByOperatorError
         started = time.monotonic()
         timeout = timeout or self._timeouts.command
         if self._deadline is not None:
@@ -138,13 +166,9 @@ class DeviceSession:
         size = 0 if reply.text is None else len(reply.text)
         result = CommandResult.ERROR if reply.too_large else reply.result
         self._emit(CommandSent(self._ip, command, took, size, result))
-        if reply.too_large:
-            raise OutputTooLargeError
-        if reply.result is CommandResult.TIMEOUT:
-            raise CommandTimedOutError
-        if reply.result is not CommandResult.OK or reply.text is None:
-            raise NoReplyError
-        body, _, prompt = clean_output(reply.text).rstrip("\n").rpartition("\n")
+        if self._closing():
+            raise ClosedByOperatorError
+        body, _, prompt = clean_output(_text_of(reply)).rstrip("\n").rpartition("\n")
         if platforms.is_config_prompt(prompt):
             raise ConfigModeError
         return body
@@ -158,6 +182,8 @@ class DeviceSession:
         if self._shell is None:
             raise NoReplyError
         prompt = self._shell.prompt()
+        if self._closing():
+            raise ClosedByOperatorError
         if not isinstance(prompt, str):
             self._emit(prompt)
             raise NoReplyError

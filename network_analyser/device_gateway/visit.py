@@ -29,6 +29,11 @@ The order is the safety (ADR 0002, ADR 0003, stories 38-52, 57-59, 63-64, 73):
    config goes to the Backup sink once the session is closed, and to nothing else; one that
    is not a whole config leaves the device partial.
 
+Ctrl+C (#56, `RunStop`): after the first press no new connection is opened (no connection
+retry, no next Credential Set), so the device is `not attempted (Run stopped)`, while a
+session already open finishes. The second press closes the session at once: a device
+already identified is left partial, any other is `not attempted (Run stopped)`.
+
 Every step is an Audit log event; no event holds device output.
 """
 
@@ -45,6 +50,7 @@ from network_analyser.device_gateway import link as link_seam
 from network_analyser.device_gateway import ssh
 from network_analyser.device_gateway.gate import (
     DROP_REASONS,
+    ClosedByOperatorError,
     CommandRefusedError,
     DeviceSession,
     Emit,
@@ -52,6 +58,7 @@ from network_analyser.device_gateway.gate import (
 )
 from network_analyser.device_gateway.identity import Identity
 from network_analyser.device_gateway.link import Dial, DialFailed, Link, LoginResult
+from network_analyser.device_gateway.stop import RunStop
 from network_analyser.device_gateway.text import printable
 from network_analyser.platforms import Hint, NeighbourProtocol, Unsupported
 from network_analyser.records import (
@@ -125,6 +132,7 @@ def visit(  # noqa: PLR0913 (the device and everything the rules need, all by na
     neighbour_hint: Platform | None = None,
     identity: Identity | None = None,
     wait_before_retry: Callable[[], None] | None = None,
+    stop: RunStop | None = None,
 ) -> DeviceRecord | Alias:
     """Log into the device at `ip`, identify it, read its Neighbours and leave.
 
@@ -148,6 +156,8 @@ def visit(  # noqa: PLR0913 (the device and everything the rules need, all by na
             None checks no aliases.
         wait_before_retry: waits before the one connection retry; `link.wait_before_retry`
             unless a test replaces it.
+        stop: the Run's Ctrl+C state (#56), shared with the crawl; None for a visit
+            nothing can stop. A Trust Store that cannot be written halts it.
 
     Returns:
         The device record, or an `Alias` when `ip` is a device already examined this Run.
@@ -165,7 +175,8 @@ def visit(  # noqa: PLR0913 (the device and everything the rules need, all by na
         id_gate=id_gate,
         neighbour_hint=neighbour_hint,
         identity=identity,
-        wait=wait_before_retry or link_seam.wait_before_retry,
+        wait=wait_before_retry,
+        stop=stop or RunStop(),
     )
     result = visitor.run()
     if isinstance(result, Alias):
@@ -194,7 +205,8 @@ class _Visitor:
         id_gate: bool,
         neighbour_hint: Platform | None,
         identity: Identity | None,
-        wait: Callable[[], None],
+        wait: Callable[[], None] | None,
+        stop: RunStop,
     ) -> None:
         self.ip = ip
         self.scope = scope
@@ -208,7 +220,8 @@ class _Visitor:
         self.id_gate = id_gate
         self.neighbour_hint = neighbour_hint
         self.identity = identity
-        self.wait = wait
+        self.wait = wait or (lambda: link_seam.wait_before_retry(stop))
+        self.stop = stop
         self.deadline = time.monotonic() + timeouts.device
         self.tried: set[int] = set()
         self.ssh_id: str | None = None
@@ -228,6 +241,8 @@ class _Visitor:
                 UnvisitedReason.EXCLUDED if excluded else UnvisitedReason.OUTSIDE_SCOPE
             )
         while True:
+            if self.stop.requested:  # #56: no new connection, no next set, once stopping
+                return self.unvisited(UnvisitedReason.RUN_STOPPED)
             lease: LoginLease | None = None
             if self.ssh_id is not None:  # presented before: choose the set before dialling
                 chosen = self.next_lease()
@@ -263,7 +278,7 @@ class _Visitor:
             with taken:
                 return self.log_in_and_examine(link, taken)
         finally:
-            link.close()
+            self.stop.release(link)
 
     def log_in_and_examine(self, link: Link, lease: LoginLease) -> DeviceRecord | Alias | None:
         if lease.view.number not in {v.number for v in self.untried()}:
@@ -284,6 +299,8 @@ class _Visitor:
         link = self.dial_once(pinned, retry=False)
         if isinstance(link, DialFailed) and not link.algorithms_too_old:
             self.wait()  # story 51: a connection failure is retried once, after a wait
+            if self.stop.requested:
+                return self.unvisited(UnvisitedReason.RUN_STOPPED)
             link = self.dial_once(pinned, retry=True)
         if isinstance(link, DialFailed) and link.algorithms_too_old and pinned:
             # Story 44: it would not offer the key type trusted for it. Look once more,
@@ -291,7 +308,7 @@ class _Visitor:
             link = self.dial_once((), retry=False)
             if not isinstance(link, DialFailed):
                 self.read_presented(link)
-                link.close()
+                self.stop.release(link)
                 return self.unvisited(UnvisitedReason.HOST_KEY_CHANGED)
         if isinstance(link, DialFailed):
             return self.unvisited(
@@ -299,15 +316,15 @@ class _Visitor:
                 if link.algorithms_too_old
                 else UnvisitedReason.UNREACHABLE
             )
-        stop = self.read_presented(link)
-        if stop is not None:
-            link.close()
-            return self.unvisited(stop)
+        refused = self.read_presented(link)
+        if refused is not None:
+            self.stop.release(link)
+            return self.unvisited(refused)
         holder = (
             None if self.identity is None else self.identity.claim_host_key(self.ip, link.host_key)
         )
         if holder is not None and holder != self.ip:
-            link.close()  # story 73: the same device, already examined: no password
+            self.stop.release(link)  # story 73: the same device, already examined: no password
             return Alias(self.ip, holder, AliasEvidence.HOST_KEY)
         return link
 
@@ -319,8 +336,11 @@ class _Visitor:
             result.connection if isinstance(result, DialFailed) else ev.ConnectionResult.CONNECTED
         )
         self.emit(ev.ConnectionAttempted(self.ip, SSH_PORT, connection, retry=retry))
-        if isinstance(result, DialFailed) and result.error is not None:
-            self.emit(result.error)
+        if isinstance(result, DialFailed):
+            if result.error is not None:
+                self.emit(result.error)
+        else:
+            self.stop.track(result)  # closed at once by the second Ctrl+C
         return result
 
     def read_presented(self, link: Link) -> UnvisitedReason | None:
@@ -395,9 +415,13 @@ class _Visitor:
             failures = self.sets.failures(view.number)
             self.emit(ev.CredentialSetRetired(view.number, view.username, failures))
         if result is LoginResult.LOST:
-            return self.unvisited(UnvisitedReason.UNREACHABLE)
+            stopped = self.stop.closing  # the second Ctrl+C closed the connection
+            return self.unvisited(
+                UnvisitedReason.RUN_STOPPED if stopped else UnvisitedReason.UNREACHABLE
+            )
         succeeded = result is LoginResult.SUCCEEDED
         if not self.trust_new_key():
+            self.stop.halt(TRUST_STORE_UNWRITABLE)
             return self.unvisited(UnvisitedReason.RUN_STOPPED, view if succeeded else None)
         return view if succeeded else None
 
@@ -425,13 +449,16 @@ class _Visitor:
 
     def examine(self, link: Link, view: CredentialSetView) -> DeviceRecord | Alias:
         """Identify the Platform, read the facts the crawl needs, then leave."""
-        session = DeviceSession(self.ip, self.emit, self.timeouts, deadline=self.deadline)
-        shell = link.open_shell(session.permits)
-        if not isinstance(shell, ev.ErrorRaised):
-            session.attach(shell)
-        else:
-            self.emit(shell)
-            return self.partial(view, NO_SHELL)
+        session = DeviceSession(
+            self.ip,
+            self.emit,
+            self.timeouts,
+            deadline=self.deadline,
+            closing=lambda: self.stop.closing,
+        )
+        no_shell = self.open_shell(link, session, view)
+        if no_shell is not None:
+            return no_shell
         try:
             found = self.identify(session, view)
             if isinstance(found, DeviceRecord | Alias):
@@ -441,14 +468,40 @@ class _Visitor:
             backup = self.capture_backup(session, platform, facts)
             dropped_by = self.collect(session, platform, facts)
         except SessionDroppedError as dropped:
-            return self.partial(view, DROP_REASONS[type(dropped)], session)
+            return self.dropped(view, session, type(dropped))
         except CommandRefusedError:
             return self.partial(view, REFUSED_COMMAND, session)
         finally:
             session.close()
         if not isinstance(backup, str):
             self.backup_sink(*backup)  # the session is closed first: the sink may wait its turn
-        reason = backup if isinstance(backup, str) else dropped_by
+        return self.left(view, session, backup if isinstance(backup, str) else dropped_by)
+
+    def open_shell(
+        self, link: Link, session: DeviceSession, view: CredentialSetView
+    ) -> DeviceRecord | None:
+        """Attach the session's shell; the device's record if no shell opened."""
+        shell = link.open_shell(session.permits)
+        if not isinstance(shell, ev.ErrorRaised):
+            session.attach(shell)
+            return None
+        self.emit(shell)
+        if self.stop.closing:
+            return self.unvisited(UnvisitedReason.RUN_STOPPED, view)
+        return self.partial(view, NO_SHELL)
+
+    def dropped(
+        self, view: CredentialSetView, session: DeviceSession, kind: type[SessionDroppedError]
+    ) -> DeviceRecord:
+        """The record of a device whose session was dropped part-way, by a `kind` error."""
+        if kind is ClosedByOperatorError and session.platform is None:
+            return self.unvisited(UnvisitedReason.RUN_STOPPED, view)  # story 83: not identified
+        return self.partial(view, DROP_REASONS[kind], session)
+
+    def left(
+        self, view: CredentialSetView, session: DeviceSession, reason: str | None
+    ) -> DeviceRecord:
+        """The record of a device whose session ended normally: partial if `reason`."""
         if reason is not None:
             return self.partial(view, reason, session)
         return self.record(ev.DeviceOutcome.VISITED, view, session.platform)

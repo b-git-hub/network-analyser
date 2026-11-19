@@ -2,16 +2,24 @@
 
 Owns the crawl queue, Neighbour address choice, Platform-hint gating, the worker pool,
 de-duplication (host-key aliases and chassis serials), the Unvisited reasons and stopping.
-`crawl(seeds, visit, ...)` returns every device found (#50); the Sweep (#55) and Ctrl+C
-stopping (#56) come later.
+`crawl(seeds, visit, ...)` returns every device found (#50) and stops on Ctrl+C through
+the Run's `RunStop` (#56); the Sweep (#55) comes later.
 """
 
 from network_analyser.discovery.crawl import (
     ALL_SETS_RETIRED,
     MAX_ADDRESSES,
+    STOPPED_BY_CTRL_C,
     IdentityRegister,
     Visit,
     crawl,
 )
 
-__all__ = ["ALL_SETS_RETIRED", "MAX_ADDRESSES", "IdentityRegister", "Visit", "crawl"]
+__all__ = [
+    "ALL_SETS_RETIRED",
+    "MAX_ADDRESSES",
+    "STOPPED_BY_CTRL_C",
+    "IdentityRegister",
+    "Visit",
+    "crawl",
+]

@@ -20,6 +20,8 @@ from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord, UnvisitedReason
 from network_analyser.records.events import (
     AuditEvent,
+    ConnectionResult,
+    CtrlCPressed,
     DeviceOutcome,
     NeighbourNotVisited,
 )
@@ -88,6 +90,8 @@ class Lab:
         self.count = 0
         self.budget = 3
         self.backups = Backups()
+        self.stop = device_gateway.RunStop()
+        self.ticks: list[int] = []
         fence = scope.parse(["192.0.2.0/24"], ["192.0.2.200-192.0.2.210"])
         assert isinstance(fence, ScopeRecord)
         self.scope = fence
@@ -127,17 +131,25 @@ class Lab:
             neighbour_hint=neighbour_hint,
             identity=identity,
             wait_before_retry=self.network.wait_before_retry,
+            stop=self.stop,
         )
 
-    def crawl(self, *seeds: str, parallel: int = 10) -> CrawlResult:
+    def crawl(
+        self, *seeds: str, parallel: int = 10, visit: discovery.Visit | None = None
+    ) -> CrawlResult:
         return discovery.crawl(
             [IPv4Address(s) for s in seeds or (str(SEED),)],
-            self.visit,
+            visit or self.visit,
             scope=self.scope,
             parallel=parallel,
             emit=self.events.append,
             all_retired=self.sets.all_retired,
+            stop=self.stop,
+            tick=self.tick,
         )
+
+    def tick(self, queued: int) -> None:
+        self.ticks.append(queued)
 
 
 @pytest.fixture
@@ -503,3 +515,118 @@ def test_a_neighbours_platform_hint_is_handed_to_its_visit(lab: Lab) -> None:
         IPv4Address("192.0.2.2"): Platform.NX_OS,
         IPv4Address("192.0.2.3"): None,
     }
+
+
+# -- Ctrl+C (#56; stories 82-83) -----------------------------------------------------------
+
+
+def test_the_first_ctrl_c_starts_no_new_visit_and_records_the_queue_as_stopped(
+    lab: Lab,
+) -> None:
+    seed = lab.device(
+        str(SEED),
+        entry("sw-b", management=("192.0.2.2",)),
+        entry("sw-c", management=("192.0.2.3",)),
+    )
+    seed.when_sent["show running-config view full"] = lab.stop.press
+    lab.device("192.0.2.2")
+    lab.device("192.0.2.3")
+
+    result = lab.crawl()
+
+    assert result.stopped == discovery.STOPPED_BY_CTRL_C
+    assert lab.network.dialled == [SEED]
+    assert result.devices[0].outcome is DeviceOutcome.VISITED  # its session finished
+    stopped = _unvisited(result, UnvisitedReason.RUN_STOPPED)
+    assert sorted(str(u.ip) for u in stopped) == ["192.0.2.2", "192.0.2.3"]
+    reasons = [e.reason for e in lab.events if isinstance(e, NeighbourNotVisited)]
+    assert reasons == ["not attempted (Run stopped)"] * 2
+    assert [(e.press, e.sessions_running) for e in lab.events if isinstance(e, CtrlCPressed)] == [
+        (1, 1)
+    ]
+
+
+def test_seeds_still_queued_at_the_first_ctrl_c_are_recorded_as_stopped(lab: Lab) -> None:
+    lab.device(str(SEED)).when_sent["terminal length 0"] = lab.stop.press
+    lab.device("192.0.2.2")
+
+    result = lab.crawl(str(SEED), "192.0.2.2", parallel=1)
+
+    assert lab.network.dialled == [SEED]
+    assert [str(u.ip) for u in _unvisited(result, UnvisitedReason.RUN_STOPPED)] == ["192.0.2.2"]
+
+
+def test_a_visit_stopped_by_ctrl_c_is_not_taken_for_a_trust_store_failure(lab: Lab) -> None:
+    lab.device(str(SEED), connection=ConnectionResult.TIMED_OUT)
+    lab.network.on_wait = lab.stop.press  # pressed while it waits to retry the connection
+
+    result = lab.crawl(parallel=1)
+
+    assert result.devices[0].unvisited_reason is UnvisitedReason.RUN_STOPPED
+    assert result.stopped == discovery.STOPPED_BY_CTRL_C
+
+
+def test_the_crawl_ticks_with_how_many_devices_are_queued(lab: Lab) -> None:
+    lab.device(str(SEED))
+    lab.device("192.0.2.2")
+
+    lab.crawl(str(SEED), "192.0.2.2", parallel=1)
+
+    assert lab.ticks
+    assert lab.ticks[0] == 1  # one Seed waits while the first is visited
+    assert lab.ticks[-1] == 0
+
+
+def test_the_crawl_wakes_while_visits_block_and_the_second_press_closes_them(lab: Lab) -> None:
+    # A visit that never finishes on its own: only the second press lets it go. The crawl
+    # must keep waking (to see the presses) while it waits, or this runs for 5 s.
+    closed: list[IPv4Address] = []
+
+    class Link:
+        def __init__(self, ip: IPv4Address) -> None:
+            self.ip = ip
+
+        def close(self) -> None:
+            closed.append(self.ip)
+
+    def blocking(
+        ip: IPv4Address, *, id_gate: bool, neighbour_hint: Platform | None, identity: Identity
+    ) -> DeviceRecord | Alias:
+        del id_gate, neighbour_hint, identity
+        lab.stop.track(Link(ip))
+        deadline = time.monotonic() + 5
+        while not lab.stop.closing and time.monotonic() < deadline:
+            time.sleep(0.01)
+        return DeviceRecord(
+            ip, DeviceOutcome.UNVISITED, unvisited_reason=UnvisitedReason.RUN_STOPPED
+        )
+
+    def press_twice(queued: int) -> None:
+        del queued
+        if lab.stop.presses < 2:
+            lab.stop.press()
+
+    lab.tick = press_twice  # type: ignore[method-assign]
+    started = time.monotonic()
+
+    result = lab.crawl(str(SEED), "192.0.2.2", "192.0.2.3", parallel=2, visit=blocking)
+
+    assert time.monotonic() - started < 4
+    assert result.stopped == discovery.STOPPED_BY_CTRL_C
+    pressed = [(e.press, e.sessions_running) for e in lab.events if isinstance(e, CtrlCPressed)]
+    assert pressed == [(1, 2), (2, 2)]
+    assert sorted(closed) == [SEED, IPv4Address("192.0.2.2")]
+    assert [str(u.ip) for u in _unvisited(result, UnvisitedReason.RUN_STOPPED)] == ["192.0.2.3"]
+
+
+def test_a_trust_store_that_cannot_be_written_also_stops_visits_under_way(
+    lab: Lab, tmp_path: Path
+) -> None:
+    lab.device(str(SEED))
+    (tmp_path / "trust").write_text("", encoding="utf-8")
+
+    result = lab.crawl(str(SEED), parallel=1)
+
+    assert lab.stop.requested
+    assert result.stopped == device_gateway.TRUST_STORE_UNWRITABLE
+    assert not [e for e in lab.events if isinstance(e, CtrlCPressed)]

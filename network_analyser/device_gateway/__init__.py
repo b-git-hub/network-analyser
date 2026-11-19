@@ -12,6 +12,8 @@ session logs off. It hands back plain device records, never a live session (ADR 
 - `trust_key(ip, fingerprint, ...)`: read a device's host key and save it only if it
   matches the fingerprint the operator checked (`trust-key`, story 45). No password.
 - `DeviceSession.send(platform, command)`: the allow-list gate itself (security test 1).
+- `RunStop`: Ctrl+C as every visit sees it (#56): no new connection after the first press,
+  every session closed at once after the second.
 """
 
 from network_analyser.device_gateway.gate import (
@@ -21,6 +23,7 @@ from network_analyser.device_gateway.gate import (
     SessionDroppedError,
 )
 from network_analyser.device_gateway.identity import Identity
+from network_analyser.device_gateway.stop import CLOSED_BY_OPERATOR, RunStop
 from network_analyser.device_gateway.trust_key import NOT_A_TARGET, TrustKeyResult, trust_key
 from network_analyser.device_gateway.visit import (
     SSH_PORT,
@@ -30,6 +33,7 @@ from network_analyser.device_gateway.visit import (
 )
 
 __all__ = [
+    "CLOSED_BY_OPERATOR",
     "CONFIG_MODE",
     "NOT_A_TARGET",
     "SSH_PORT",
@@ -38,6 +42,7 @@ __all__ = [
     "CommandRefusedError",
     "DeviceSession",
     "Identity",
+    "RunStop",
     "SessionDroppedError",
     "TrustKeyResult",
     "trust_key",
