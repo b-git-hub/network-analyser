@@ -42,3 +42,18 @@ Calls made by #65's implementer where the ticket left something open. Each is th
 12. **File shape.** Uncompressed XML (draw.io Desktop reads it without inflating), `host="Network Analyser"`, no timestamp, so the same `topology.json` gives the same file. Shape data properties have XML-safe names (`hostname`, `platform`, `model`, `software_version`, `management_ip`, `serial`, `l3_interfaces`, `topology_id`, and for Unvisited Devices `reason`, `advertised_*`). There is no username property: the Topology holds none.
 13. **Not verified in draw.io Desktop.** No Windows draw.io was available to the implementer. Lab row W5 should confirm it opens offline with both pages, the hidden layer, the double-line Bundle (`shape=link;width=6`), and that the dash patterns read as dashed vs dotted.
 14. **Security test 4's draw.io scan** skips the `<object>` tag (draw.io's data wrapper, not an HTML embed) but still fails on a URL, `xmlns`, `link=`, a doctype or entity, `<iframe>`, `<link>`, `src=`/`href=`, `url(` and `@import`.
+
+## Sweep (#55), 2026-11-19
+
+Where the ticket left a choice, the conservative one was taken:
+
+- The probe sends no bytes. It reads the server identification string and closes before key exchange. A host that waits for a client string before sending its own is recorded as having no banner and is not logged into.
+- The 2 second budget covers the connect and the banner read together, not `--connect-timeout`.
+- Login from a Sweep uses the existing anchored patterns: `SSH-2.0-Cisco-*` for IOS/IOS-XE, and the provisional `SSH-2.0-OpenSSH_* FIPS` for NX-OS (lab checklist A2). `CISCO_WLC` is not a Seed.
+- The size check uses `ScopeRecord.address_count` (exclusions already removed; network and broadcast edges still counted). More than 65,536 is refused with exit 2 before any prompt continues. More than 4,096 warns, and exactly 4,096 or 65,536 does not refuse. Edges are not probed: `contains()` still skips them.
+- `--sweep-inflight` above 100 is refused by the parser. `sweep()` also clamps to 100, and treats a non-positive value as 1.
+- Operator Seeds are still logged into when their banner does not match (story 64). Only extra Seeds require a match. Other SSH hosts stay on the Sweep result and are never dialled for a password.
+- Each probe is an audit event `probe_attempted` (address, port, TCP result, whether a banner was read). The identification string is not in the audit log; it is kept, printable, on `CrawlResult.sweep` for the report.
+- No `--no-sweep` flag. A run file `sweep = true` cannot be turned off from the command line. That remains an operator decision (from #41).
+- The Sweep runs only after the operator confirms, inside the audit trail. It does not watch a stop token; that belongs to #56.
+- `socket` may be imported from `device_gateway/probe.py` as well as `ssh.py`, because the probe must not use Paramiko (Paramiko's handshake is the key exchange).

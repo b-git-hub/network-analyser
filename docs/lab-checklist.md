@@ -101,7 +101,7 @@ From [Identifying the Platform on first login](https://github.com/b-git-hub/netw
 | ID | Check | Result | Date (UTC) |
 |---|---|---|---|
 | A1 | The exact SSH identification string each node type presents: IOL-L2, Catalyst 8000V and NX-OS 9000v (for example from `ssh -v`, the "remote software version" line). | | |
-| A2 | The NX-OS Sweep pattern: does the NX-OS string match the provisional `OpenSSH_* FIPS`, and do both IOS-XE strings match `Cisco-*`? If not, give the pattern that does. | | |
+| A2 | The NX-OS Sweep pattern: does the NX-OS string match the provisional `OpenSSH_* FIPS`, and do both IOS-XE strings match `Cisco-*`? If not, give the pattern that does. Ticket #55 logs a Sweep host in only when the string matches `SSH-2.0-Cisco-*` or this provisional NX-OS pattern (`SSH-2.0-OpenSSH_* FIPS`). Confirm or correct it before relying on a Sweep. | | |
 | A3 | The error text when a command for the wrong Platform is sent (for example `show port-channel summary` on IOS-XE, `show etherchannel summary` on NX-OS). | | |
 | A4 | Does NX-OS show its copyright header on every login? | | |
 | A5 | Can the `netanalyser` account, under its Device Role, run every identification command (`terminal length 0`, `show version`) on each Platform? | | |
@@ -116,6 +116,7 @@ From [Identifying the Platform on first login](https://github.com/b-git-hub/netw
 | A14 | Key-type pinning ([#49](https://github.com/b-git-hub/network-analyser/issues/49), story 44): a second Run against the same nodes logs in again (each is asked only for the key type stored on the first Run). `trust-key` finds the key of each node, including one that holds only an RSA key. | | |
 | A15 | Platform-limited sets ([#49](https://github.com/b-git-hub/network-analyser/issues/49), provisional until [#54](https://github.com/b-git-hub/network-analyser/issues/54)): a set limited to NX-OS is tried only where the SSH identification string matches the provisional NX-OS pattern (A2), and one limited to IOS/IOS-XE only where it starts `SSH-2.0-Cisco-`. With only an NX-OS-limited set, the IOS-XE nodes are `authentication failed (every eligible set tried)` with no login attempt in `audit.log`. | | |
 | A16 | Optional, config-mode drop ([#49](https://github.com/b-git-hub/network-analyser/issues/49), story 55): on one IOS-XE node, add a test user whose line lands in configuration mode (`autocommand configure terminal` with `autocommand-options nohangup`). A Run with that set is left partial, "a configuration-mode prompt appeared", and `audit.log` shows no `command_sent` line for it. Remove the user afterwards. | | |
+| A17 | Opt-in Sweep ([#55](https://github.com/b-git-hub/network-analyser/issues/55)): `run --sweep` against the lab. Each IOS-XE node and each NX-OS node is logged into. Any other host that answers on TCP 22 is listed and never offered a password. The tool sends no ICMP. The identification strings match A1 and A2; the NX-OS pattern is still provisional until A2 is filled in. | | |
 
 ### B. Commands and the allow-list
 
