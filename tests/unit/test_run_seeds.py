@@ -55,7 +55,8 @@ def test_a_run_visits_its_seed_audits_every_step_and_ends_clean(run: Runner) -> 
     # The locking worker writes its event as soon as the Backup is on disk, so it may come
     # before or after the device's last line; always before the Run's end.
     assert events.index("backup_written") > events.index("device_identified")
-    assert [e for e in events if e != "backup_written"] == [
+    steps = [e for e in events if e != "backup_written"]
+    assert steps[:10] == [
         "run_started",
         "connection_attempted",
         "host_key_checked",
@@ -66,11 +67,11 @@ def test_a_run_visits_its_seed_audits_every_step_and_ends_clean(run: Runner) -> 
         "command_sent",
         "device_identified",
         "command_sent",
-        "device_finished",
-        "run_ended",
     ]
+    assert set(steps[10:-2]) == {"command_sent"}  # the collection commands (#59)
+    assert steps[-2:] == ["device_finished", "run_ended"]
     commands = [line["command"] for line in _audit() if line["event"] == "command_sent"]
-    assert commands == [
+    assert commands[:5] == [
         "terminal length 0",
         "terminal width 511",
         "show version",

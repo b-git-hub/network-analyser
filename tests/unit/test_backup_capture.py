@@ -72,7 +72,7 @@ def test_an_ios_xe_config_goes_to_the_sink_exactly_as_the_device_sent_it(
     record = capture()
 
     assert record.outcome is DeviceOutcome.VISITED
-    assert device.lines[-1] == "show running-config view full"
+    assert device.lines[4] == "show running-config view full"  # then collection (#59)
     ((identity, config),) = capture.backups
     assert config == device_text.IOS_XE_RUNNING_CONFIG
     assert identity.ip == SEED
@@ -104,8 +104,11 @@ def test_the_config_reaches_nothing_but_the_sink(capture: Capture) -> None:
     seen = repr(record) + repr(capture.events) + repr([i for i, _ in capture.backups])
     for canary in device_text.CONFIG_CANARIES:
         assert canary not in seen
-    sent = [e for e in capture.events if isinstance(e, CommandSent)][-1]
-    assert sent.command == "show running-config view full"
+    (sent,) = [
+        e
+        for e in capture.events
+        if isinstance(e, CommandSent) and e.command == "show running-config view full"
+    ]
     assert sent.bytes_received > 0
 
 
@@ -114,8 +117,9 @@ def test_the_backup_gets_the_backup_timeout_not_the_command_timeout(capture: Cap
 
     capture()
 
-    assert device.timeouts[-1] == TIMEOUTS.backup
-    assert set(device.timeouts[:-1]) == {TIMEOUTS.command}
+    backup = device.lines.index("show running-config view full")
+    assert device.timeouts[backup] == TIMEOUTS.backup
+    assert set(device.timeouts[:backup] + device.timeouts[backup + 1 :]) == {TIMEOUTS.command}
 
 
 @pytest.mark.parametrize(

@@ -137,6 +137,28 @@ nodes:
            commands exec include show version
            commands exec include show privilege
            commands exec include show running-config view full
+           commands exec include show cdp neighbors detail
+           commands exec include show lldp neighbors detail
+           commands exec include show interfaces
+           commands exec include show interfaces switchport
+           commands exec include show interfaces trunk
+           commands exec include show ip interface
+           commands exec include show etherchannel summary
+           commands exec include show vlan brief
+           commands exec include show vrf
+           commands exec include show ip arp
+           commands exec include show ip arp vrf
+           commands exec include show mac address-table
+           commands exec include show ip ospf neighbor
+           commands exec include show ip eigrp neighbors
+           commands exec include show ip eigrp vrf
+           commands exec include show ip bgp summary
+           commands exec include show ip bgp vpnv4 vrf
+           commands exec include show ip route static
+           commands exec include show ip route vrf
+           commands exec include show standby brief
+           commands exec include show vrrp brief
+           commands exec include show glbp brief
           !
           username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
           !
@@ -278,6 +300,28 @@ nodes:
            commands exec include show version
            commands exec include show privilege
            commands exec include show running-config view full
+           commands exec include show cdp neighbors detail
+           commands exec include show lldp neighbors detail
+           commands exec include show interfaces
+           commands exec include show interfaces switchport
+           commands exec include show interfaces trunk
+           commands exec include show ip interface
+           commands exec include show etherchannel summary
+           commands exec include show vlan brief
+           commands exec include show vrf
+           commands exec include show ip arp
+           commands exec include show ip arp vrf
+           commands exec include show mac address-table
+           commands exec include show ip ospf neighbor
+           commands exec include show ip eigrp neighbors
+           commands exec include show ip eigrp vrf
+           commands exec include show ip bgp summary
+           commands exec include show ip bgp vpnv4 vrf
+           commands exec include show ip route static
+           commands exec include show ip route vrf
+           commands exec include show standby brief
+           commands exec include show vrrp brief
+           commands exec include show glbp brief
           !
           username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
           !
@@ -469,6 +513,28 @@ nodes:
            commands exec include show version
            commands exec include show privilege
            commands exec include show running-config view full
+           commands exec include show cdp neighbors detail
+           commands exec include show lldp neighbors detail
+           commands exec include show interfaces
+           commands exec include show interfaces switchport
+           commands exec include show interfaces trunk
+           commands exec include show ip interface
+           commands exec include show etherchannel summary
+           commands exec include show vlan brief
+           commands exec include show vrf
+           commands exec include show ip arp
+           commands exec include show ip arp vrf
+           commands exec include show mac address-table
+           commands exec include show ip ospf neighbor
+           commands exec include show ip eigrp neighbors
+           commands exec include show ip eigrp vrf
+           commands exec include show ip bgp summary
+           commands exec include show ip bgp vpnv4 vrf
+           commands exec include show ip route static
+           commands exec include show ip route vrf
+           commands exec include show standby brief
+           commands exec include show vrrp brief
+           commands exec include show glbp brief
           !
           username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
           !

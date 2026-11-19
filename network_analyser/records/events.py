@@ -312,6 +312,9 @@ class CommandResult(Enum):
     OK = "ok"
     TIMEOUT = "timeout"
     ERROR = "error"
+    DENIED = "denied"
+    """The device answered with a refusal (or does not have the command): its data is
+    unknown, and the visit goes on (#59; story 126)."""
 
 
 @dataclass(frozen=True, slots=True)

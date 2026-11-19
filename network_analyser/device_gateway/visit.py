@@ -10,9 +10,11 @@ The order is the safety (ADR 0002, ADR 0003, stories 38-48, 57-59):
 4. One password attempt. A NEW key is written once a password was sent.
 5. In the same session: the prompt, `terminal length 0`, `terminal width 511`, then
    `show version` decides the Platform. An unsupported one is left at once.
-6. The landing privilege, then the running config (#51), then leave. Nothing is sent to
-   end the session. A whole config goes to the Backup sink once the session is closed,
-   and to nothing else; one that is not a whole config leaves the device partial.
+6. The landing privilege, then the running config (#51), then the Platform's collection
+   commands (#59), then leave. Nothing is sent to end the session. A whole config goes to
+   the Backup sink once the session is closed, and to nothing else; one that is not a
+   whole config leaves the device partial. A denied collection command leaves its data
+   unknown; a drop during collection keeps the Backup and the data already read.
 
 Every step is an Audit log event; no event holds device output.
 """
@@ -45,6 +47,7 @@ from network_analyser.records import (
 )
 from network_analyser.records import events as ev
 from network_analyser.records.backup import BackupCapture
+from network_analyser.records.collected import Collected
 from network_analyser.records.device import (
     DeviceRecord,
     LandingPrivilege,
@@ -286,7 +289,9 @@ class _Visitor:
             return self.partial(view, NO_SHELL)
         facts: VersionFacts | None = None
         privilege: LandingPrivilege | Unknown | None = None
-        backup: tuple[BackupCapture, str] | str
+        backup: tuple[BackupCapture, str] | str | None = None
+        collection: platforms.Collection | None = None
+        stop: str | None = None
         try:
             session.check_prompt()
             for command in platforms.SESSION_SETUP:
@@ -300,16 +305,26 @@ class _Visitor:
             privilege = Unknown("not read: the session was dropped")
             privilege = self.read_privilege(session, found, view.username)
             backup = self.capture_backup(session, found, facts)
+            asking = _Asking(session, found)
+            collection = platforms.collect(found, asking.send, shown)
+            stop = asking.dropped
         except SessionDroppedError as dropped:
             return self.partial(view, DROP_REASONS[type(dropped)], session, facts, privilege)
         except CommandRefusedError:
-            return self.partial(view, REFUSED_COMMAND, session, facts, privilege)
+            stop = REFUSED_COMMAND
         finally:
             session.close()
-        if isinstance(backup, str):
-            return self.partial(view, backup, session, facts, privilege)
-        self.backup_sink(*backup)  # the session is closed first: the sink may wait its turn
-        return self.record(ev.DeviceOutcome.VISITED, view, session.platform, facts, privilege)
+        for problem in collection.parse_problems if collection else ():
+            self.emit(ev.ParseFailed(self.ip, problem.command, problem.parser, problem.reason))
+        if isinstance(backup, tuple):
+            self.backup_sink(*backup)  # the session is closed first: the sink may wait its turn
+        reason = backup if isinstance(backup, str) else stop
+        collected = collection.collected if collection else None
+        if reason is not None:
+            return self.partial(view, reason, session, facts, privilege, collected)
+        return self.record(
+            ev.DeviceOutcome.VISITED, view, session.platform, facts, privilege, collected
+        )
 
     def capture_backup(
         self, session: DeviceSession, platform: Platform, facts: VersionFacts
@@ -383,18 +398,22 @@ class _Visitor:
         session: DeviceSession | None = None,
         facts: VersionFacts | None = None,
         privilege: LandingPrivilege | Unknown | None = None,
+        collected: Collected | None = None,
     ) -> DeviceRecord:
         platform = None if session is None else session.platform
-        record = self.record(ev.DeviceOutcome.PARTIAL, view, platform, facts, privilege)
+        record = self.record(
+            ev.DeviceOutcome.PARTIAL, view, platform, facts, privilege, collected
+        )
         return dataclasses.replace(record, partial_reason=reason)
 
-    def record(
+    def record(  # noqa: PLR0913 (everything the record holds)
         self,
         outcome: ev.DeviceOutcome,
         view: CredentialSetView,
         platform: Platform | None,
         facts: VersionFacts | None,
         privilege: LandingPrivilege | Unknown | None,
+        collected: Collected | None = None,
     ) -> DeviceRecord:
         return DeviceRecord(
             self.ip,
@@ -405,4 +424,31 @@ class _Visitor:
             platform=platform,
             landing_privilege=privilege,
             version=facts,
+            collected=collected,
         )
+
+
+NOT_SENT: Final = "not sent: the session was dropped"
+
+
+class _Asking:
+    """Sends the collection commands for one session; after a drop, sends nothing more.
+
+    A drop ends the session but not the visit: the data already read is kept, every later
+    command's data is unknown, and the device is left partial with the drop's reason (#59).
+    """
+
+    def __init__(self, session: DeviceSession, platform: Platform) -> None:
+        self._session = session
+        self._platform = platform
+        self.dropped: str | None = None
+
+    def send(self, command: str) -> str | Unknown:
+        """Send one command through the gate; `Unknown` once the session was dropped."""
+        if self.dropped is not None:
+            return Unknown(NOT_SENT)
+        try:
+            return self._session.send(self._platform, command)
+        except SessionDroppedError as error:
+            self.dropped = DROP_REASONS[type(error)]
+            return Unknown(self.dropped)

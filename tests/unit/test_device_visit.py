@@ -120,13 +120,13 @@ def test_a_seed_is_logged_into_identified_and_left(visit: Visit) -> None:
     )
     assert record.host_key is not None
     assert record.host_key.verdict is HostKeyVerdict.NEW
-    assert device.lines == [
+    assert device.lines[:5] == [
         "terminal length 0",
         "terminal width 511",
         "show version",
         "show privilege",
         "show running-config view full",
-    ]
+    ]  # then the collection commands (#59, tests/unit/test_device_visit_collection.py)
     assert visit.backups == [device_text.IOS_XE_RUNNING_CONFIG]
     assert device.passwords_received == [DEVICE_CANARY]
     assert device.open_links == 0
@@ -151,7 +151,7 @@ def test_every_step_is_audited_in_order_without_device_output(visit: Visit) -> N
     visit()
 
     kinds = [type(e) for e in visit.events]
-    assert kinds == [
+    assert kinds[:9] == [
         ConnectionAttempted,
         HostKeyChecked,
         LoginAttempted,
@@ -161,11 +161,12 @@ def test_every_step_is_audited_in_order_without_device_output(visit: Visit) -> N
         CommandSent,
         DeviceIdentified,
         CommandSent,
-        DeviceFinished,
     ]
+    assert set(kinds[9:-1]) == {CommandSent}  # the collection commands (#59)
+    assert kinds[-1] is DeviceFinished
     assert visit.events[0] == ConnectionAttempted(SEED, 22, ConnectionResult.CONNECTED, retry=False)
     assert visit.events[2] == LoginAttempted(SEED, 1, "netops-ro", LoginResult.SUCCEEDED)
-    assert visit.events[-3] == DeviceIdentified(SEED, Platform.IOS_XE, "level 15")
+    assert visit.events[7] == DeviceIdentified(SEED, Platform.IOS_XE, "level 15")
     assert visit.events[-1] == DeviceFinished(SEED, DeviceOutcome.VISITED, None)
     assert all(DEVICE_CANARY not in repr(e) for e in visit.events)
     assert all("uptime" not in repr(e) for e in visit.events)

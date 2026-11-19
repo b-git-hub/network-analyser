@@ -5,7 +5,8 @@ A command reaches a device only if it is on that Platform's compiled-in allow-li
 allows may go. The library's own writes pass the same gate (`DeviceSession.permits`, given
 to `Link.open_shell`), so Netmiko's session set-up cannot slip past it. Every command sent
 is in `audit.log` as its exact string, with its duration, size and result, but never its
-output (story 162).
+output (story 162). A reply that is the device refusing the command is recorded as
+`denied` (#59); it is returned like any other, and never drops the session.
 
 The session is dropped at once if a configuration-mode prompt appears (story 55).
 """
@@ -120,6 +121,9 @@ class DeviceSession:
             self._emit(reply.error)
         size = 0 if reply.text is None else len(reply.text)
         result = CommandResult.ERROR if reply.too_large else reply.result
+        body, _, prompt = clean_output(reply.text or "").rstrip("\n").rpartition("\n")
+        if result is CommandResult.OK and platforms.is_denied(body):
+            result = CommandResult.DENIED  # audited; the caller's data is unknown (#59)
         self._emit(CommandSent(self._ip, command, took, size, result))
         if reply.too_large:
             raise OutputTooLargeError
@@ -127,7 +131,6 @@ class DeviceSession:
             raise CommandTimedOutError
         if reply.result is not CommandResult.OK or reply.text is None:
             raise NoReplyError
-        body, _, prompt = clean_output(reply.text).rstrip("\n").rpartition("\n")
         if platforms.is_config_prompt(prompt):
             raise ConfigModeError
         return body
