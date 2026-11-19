@@ -12,7 +12,7 @@ import pytest
 
 from network_analyser import trust_store
 from network_analyser.cli import ExitCode
-from tests.support import fake_age
+from tests.support import device_text, fake_age
 from tests.support.fake_device import FakeDevice, synthetic_key
 from tests.support.run_driver import (
     BACKUP_CANARY,
@@ -56,7 +56,7 @@ def test_a_run_visits_its_seed_audits_every_step_and_ends_clean(run: Runner) -> 
     # before or after the device's last line; always before the Run's end.
     assert events.index("backup_written") > events.index("device_identified")
     steps = [e for e in events if e != "backup_written"]
-    assert steps[:10] == [
+    assert steps[:12] == [
         "run_started",
         "connection_attempted",
         "host_key_checked",
@@ -67,15 +67,20 @@ def test_a_run_visits_its_seed_audits_every_step_and_ends_clean(run: Runner) -> 
         "command_sent",
         "device_identified",
         "command_sent",
+        "command_sent",
+        "command_sent",
     ]
-    assert set(steps[10:-2]) == {"command_sent"}  # the collection commands (#59)
+    # Then the collection commands (#59); this fake device denies them all, each audited.
+    assert set(steps[12:-2]) == {"command_sent", "parse_failed"}
     assert steps[-2:] == ["device_finished", "run_ended"]
     commands = [line["command"] for line in _audit() if line["event"] == "command_sent"]
-    assert commands[:5] == [
+    assert commands[:7] == [
         "terminal length 0",
         "terminal width 511",
         "show version",
         "show privilege",
+        "show cdp neighbors detail",
+        "show lldp neighbors detail",
         "show running-config view full",
     ]
     text = json.dumps(_audit())
@@ -148,7 +153,10 @@ def test_a_landing_privilege_too_low_needs_attention(run: Runner) -> None:
 
 
 def test_a_second_seed_is_visited_too_and_one_out_of_reach_is_unreachable(run: Runner) -> None:
-    run.network.add("192.0.2.2", FakeDevice(prompt="sw-b#"))
+    second = run.network.add(
+        "192.0.2.2", FakeDevice(prompt="sw-b#", host_key=synthetic_key(filler=8))
+    )
+    second.replies["show version"] = device_text.IOL_SHOW_VERSION
 
     got = run(*FLAGS, "--seed", "192.0.2.2", "--seed", "192.0.2.3", typed=first_run())
 

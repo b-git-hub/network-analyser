@@ -14,13 +14,10 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Final
 
+from network_analyser.platforms import neighbours
 from network_analyser.platforms.allowlist import AllowList, Exact, Template
-from network_analyser.platforms.collection import (
-    Collection,
-    ParseProblem,
-    Send,
-    nothing_collected,
-)
+from network_analyser.platforms.collection import Collection, Problem, Send
+from network_analyser.platforms.hints import neighbour_hint
 from network_analyser.platforms.identify import (
     Hint,
     Unsupported,
@@ -33,14 +30,15 @@ from network_analyser.platforms.ios_xe import collect as ios_xe_collect
 from network_analyser.platforms.ios_xe import commands as ios_xe_commands
 from network_analyser.platforms.ios_xe import identify as ios_xe
 from network_analyser.platforms.ios_xe import role as ios_xe_role
+from network_analyser.platforms.neighbours import NeighbourProtocol
 from network_analyser.platforms.nxos import backup as nxos_backup
+from network_analyser.platforms.nxos import collect as nxos_collect
 from network_analyser.platforms.nxos import commands as nxos_commands
 from network_analyser.platforms.nxos import identify as nxos
 from network_analyser.platforms.nxos import role as nxos_role
-from network_analyser.platforms.replies import is_denied
 from network_analyser.platforms.roles import RoleError, username_problem
 from network_analyser.records import Platform
-from network_analyser.records.collected import NOT_COLLECTED
+from network_analyser.records.collected import Neighbour
 from network_analyser.records.device import LandingPrivilege, Unknown, VersionFacts
 
 ALLOW_LISTS: Final[Mapping[Platform, AllowList]] = MappingProxyType(
@@ -88,6 +86,44 @@ def read_privilege(platform: Platform, text: str) -> LandingPrivilege | Unknown:
     return reader(text)
 
 
+_NEIGHBOUR_COMMANDS: Final[Mapping[Platform, tuple[tuple[NeighbourProtocol, str], ...]]] = (
+    MappingProxyType(
+        {
+            Platform.IOS_XE: (
+                (NeighbourProtocol.CDP, ios_xe_commands.SHOW_CDP_NEIGHBORS_DETAIL),
+                (NeighbourProtocol.LLDP, ios_xe_commands.SHOW_LLDP_NEIGHBORS_DETAIL),
+            ),
+            Platform.NX_OS: (
+                (NeighbourProtocol.CDP, nxos_commands.SHOW_CDP_NEIGHBORS_DETAIL),
+                (NeighbourProtocol.LLDP, nxos_commands.SHOW_LLDP_NEIGHBORS_DETAIL),
+            ),
+        }
+    )
+)
+_NEIGHBOUR_READERS: Final = MappingProxyType(
+    {
+        (Platform.IOS_XE, NeighbourProtocol.CDP): neighbours.read_ios_cdp,
+        (Platform.IOS_XE, NeighbourProtocol.LLDP): neighbours.read_ios_lldp,
+        (Platform.NX_OS, NeighbourProtocol.CDP): neighbours.read_nxos_cdp,
+        (Platform.NX_OS, NeighbourProtocol.LLDP): neighbours.read_nxos_lldp,
+    }
+)
+NEIGHBOUR_PARSER: Final = "Network Analyser neighbour reader"
+"""The parser's name in a `parse_failed` Audit log event for a CDP or LLDP table."""
+
+
+def neighbour_commands(platform: Platform) -> tuple[tuple[NeighbourProtocol, str], ...]:
+    """Return the CDP then LLDP neighbour-detail command for `platform` (#50)."""
+    return _NEIGHBOUR_COMMANDS[platform]
+
+
+def read_neighbours(
+    platform: Platform, protocol: NeighbourProtocol, text: str
+) -> tuple[Neighbour, ...] | Unknown:
+    """Read a CDP or LLDP neighbour-detail table; unknown when refused or not understood."""
+    return _NEIGHBOUR_READERS[platform, protocol](text)
+
+
 def backup_command(platform: Platform) -> str:
     """Return the command whose reply is the Backup (#51; story 96)."""
     if platform is Platform.IOS_XE:
@@ -107,17 +143,16 @@ def backup_problem(platform: Platform, text: str) -> str | None:
     return check(text)
 
 
-def collect(platform: Platform, send: Send, show_version: str) -> Collection:
-    """Collect a Visited Device's data for the Topology through `send` (#59, #60).
+def collect(platform: Platform, send: Send, version: VersionFacts) -> Collection | None:
+    """Send `platform`'s collection commands through `send`; return what they told the tool.
 
-    `send` passes each command through the gateway's allow-list gate; `show_version` is
-    the reply identification already read. A command that is denied, fails or is not
-    understood leaves its data unknown and is never fatal; each reply not understood is
-    also a `ParseProblem` for the Audit log.
+    Every part of the result is a reading or unknown (#52); a denied or unreadable command
+    leaves its own data unknown and is listed as a problem, never ending the visit. None
+    when this version of the tool collects nothing from `platform`.
     """
-    if platform is Platform.IOS_XE:
-        return ios_xe_collect.collect(send, show_version)
-    return nothing_collected(NOT_COLLECTED)  # NX-OS: ticket #60
+    if platform is Platform.NX_OS:
+        return nxos_collect.collect(send, version)
+    return ios_xe_collect.collect(send, version)
 
 
 def role_snippet(platform: Platform, username: str | None, *, tacacs: bool) -> str:
@@ -139,13 +174,15 @@ def role_username_problem(username: str) -> str | None:
 
 __all__ = [
     "ALLOW_LISTS",
+    "NEIGHBOUR_PARSER",
     "SESSION_SETUP",
     "SHOW_VERSION",
     "AllowList",
     "Collection",
     "Exact",
     "Hint",
-    "ParseProblem",
+    "NeighbourProtocol",
+    "Problem",
     "RoleError",
     "Send",
     "Template",
@@ -155,9 +192,11 @@ __all__ = [
     "collect",
     "identify",
     "is_config_prompt",
-    "is_denied",
+    "neighbour_commands",
+    "neighbour_hint",
     "permits",
     "privilege_command",
+    "read_neighbours",
     "read_privilege",
     "read_version",
     "role_snippet",

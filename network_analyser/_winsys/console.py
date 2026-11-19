@@ -52,7 +52,26 @@ if sys.platform == "win32":
             return None
         return _WindowsConsole()
 
+    def stdout_is_console() -> bool:
+        """Say whether standard output is a console window, not a file, pipe or NUL (#57).
+
+        `show-backup` prints a decrypted config only to a console, so a redirect can never
+        put the plaintext on disk.
+        """
+        if sys.stdout is None:
+            return False
+        try:
+            handle = msvcrt.get_osfhandle(sys.stdout.fileno())
+        except OSError, ValueError:
+            return False
+        mode = wintypes.DWORD()
+        return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+
 else:
+
+    def stdout_is_console() -> bool:
+        """Say whether standard output is a terminal, not a file or pipe (#57)."""
+        return sys.stdout is not None and sys.stdout.isatty()
 
     def open_console() -> Console | None:
         """Say there is no console to mask: v1 runs only on Windows.

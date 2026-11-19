@@ -429,14 +429,16 @@ Vlan ID: - not advertised
 Total entries displayed: 2
 """
 
-CDP_NOT_ENABLED = "% CDP is not enabled\n"
-LLDP_NOT_ENABLED = "% LLDP is not enabled\n"
 BGP_NOT_ACTIVE = "% BGP not active\n"
 NOT_UNDERSTOOD = "% Something unexpected happened\n"
 
-REPLIES = {
+NEIGHBOUR_REPLIES = {
     "show cdp neighbors detail": SHOW_CDP_NEIGHBORS_DETAIL,
     "show lldp neighbors detail": SHOW_LLDP_NEIGHBORS_DETAIL,
+}
+"""`sw-a`'s CDP and LLDP tables, which the crawl reads before the Backup (#50)."""
+
+REPLIES = {
     "show interfaces": SHOW_INTERFACES,
     "show interfaces switchport": SHOW_INTERFACES_SWITCHPORT,
     "show interfaces trunk": SHOW_INTERFACES_TRUNK,

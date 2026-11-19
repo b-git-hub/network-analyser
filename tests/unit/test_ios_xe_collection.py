@@ -1,21 +1,22 @@
 """IOS/IOS-XE collection (#59): from command replies to the collected-record contract (#52).
 
 Driven through `platforms.collect` with synthetic replies (tests/support/ios_xe_text): a fake
-`send` answers each command as `sw-a` would, and the test reads the `Collected` that comes
+`send` answers each command as `sw-a` would, and the test reads the `Collection` that comes
 back. Expected values are written out by hand from the synthetic text.
 """
 
 from collections.abc import Mapping
-from ipaddress import IPv4Address, IPv4Interface, IPv4Network, IPv6Address
+from ipaddress import IPv4Address, IPv4Interface, IPv4Network
 
 import pytest
 
 from network_analyser import platforms
-from network_analyser.platforms import Collection, ParseProblem
+from network_analyser.platforms import Collection, Problem
+from network_analyser.platforms.ios_xe import parsers
+from network_analyser.platforms.ios_xe.collect import PARSER
 from network_analyser.records import Platform
 from network_analyser.records.collected import (
     ALL_VLANS,
-    NOT_COLLECTED,
     ArpEntry,
     BundleMember,
     Collected,
@@ -24,7 +25,6 @@ from network_analyser.records.collected import (
     Interface,
     InterfaceIp,
     MacEntry,
-    Neighbour,
     PortChannel,
     Reading,
     RoutingNeighbour,
@@ -40,6 +40,8 @@ from network_analyser.records.unknown import Unknown
 from tests.support import device_text, ios_xe_text
 
 DENIED = "                 ^\n% Invalid input detected at '^' marker.\n"
+SHOW_VERSION = "show version"
+CRAWL_COMMANDS = frozenset({"show cdp neighbors detail", "show lldp neighbors detail"})
 
 
 class Device:
@@ -56,7 +58,13 @@ class Device:
 
 
 def collect(device: Device, version: str = device_text.IOS_XE_SHOW_VERSION) -> Collection:
-    return platforms.collect(Platform.IOS_XE, device, version)
+    """Collect as the gateway does: `show version` already read, and answered again."""
+    device.replies.setdefault(SHOW_VERSION, version)
+    found = platforms.collect(
+        Platform.IOS_XE, device, platforms.read_version(Platform.IOS_XE, version)
+    )
+    assert found is not None
+    return found
 
 
 def value[T](part: Reading[T] | Unknown | None) -> T:
@@ -73,10 +81,6 @@ def sw_a() -> Collection:
     return collect(Device())
 
 
-def gi(name: str) -> object:
-    return interface_name(name)
-
-
 # -- What is sent -----------------------------------------------------------------------------
 
 
@@ -86,7 +90,17 @@ def test_every_command_is_on_the_allow_list_and_sent_once() -> None:
     collect(device)
 
     assert len(device.asked) == len(set(device.asked))
-    assert set(device.asked) == set(ios_xe_text.REPLIES) - {"show vrf V6ONLY"}
+    assert set(device.asked) == set(ios_xe_text.REPLIES) | {SHOW_VERSION}
+
+
+def test_the_crawls_neighbour_tables_are_not_asked_for_again() -> None:
+    device = Device()
+
+    collected = collect(device).collected
+
+    assert not CRAWL_COMMANDS & set(device.asked)
+    assert collected.cdp == Unknown("not collected by this version of the tool")
+    assert collected.lldp == Unknown("not collected by this version of the tool")
 
 
 def test_each_vrf_that_carries_ipv4_is_asked_with_the_per_vrf_forms() -> None:
@@ -115,7 +129,7 @@ def test_a_vrf_name_that_does_not_fit_the_allow_list_is_never_sent() -> None:
 # -- Stack and interfaces ---------------------------------------------------------------------
 
 
-def test_stack_members_come_from_show_version(sw_a: Collection) -> None:
+def test_stack_members_come_from_show_version_sent_again(sw_a: Collection) -> None:
     assert sw_a.collected.stack_members == Reading(
         ("show version",),
         (StackMember(1, "TEST0000A01", "C9300-48P"), StackMember(2, "TEST0000A02", "C9300-48P")),
@@ -129,6 +143,17 @@ def test_a_lone_device_is_one_member() -> None:
     assert len(members) == 1
     assert members[0].number == 1
     assert members[0].serial == "TEST0000B01"
+    assert all(i.stack_member is None for i in value(collected.interfaces))
+
+
+def test_show_version_not_answered_again_leaves_the_stack_unknown() -> None:
+    replies: dict[str, str | Unknown] = dict(ios_xe_text.REPLIES)
+    dropped = Unknown("show version: not read, the session was dropped")
+    replies[SHOW_VERSION] = dropped
+
+    collected = collect(Device(replies)).collected
+
+    assert collected.stack_members == dropped
     assert all(i.stack_member is None for i in value(collected.interfaces))
 
 
@@ -242,7 +267,7 @@ def test_a_denied_switchport_command_leaves_modes_unknown_not_routed() -> None:
     interfaces = collect(Device(replies)).collected.interfaces
 
     assert isinstance(interfaces, Reading)
-    reason = Unknown("show interfaces switchport: denied or not supported by the device")
+    reason = Unknown("show interfaces switchport: denied")
     assert interfaces.gaps == (reason,)
     port = {i.name.short: i for i in interfaces.value}["Gi1/0/1"]
     assert (port.mode, port.allowed_vlans, port.access_vlan) == (reason, reason, reason)
@@ -284,70 +309,22 @@ def test_vrfs_include_the_global_table_and_mark_the_management_vrf(sw_a: Collect
     )
 
 
-# -- Neighbours -------------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "text",
+    [
+        "  BLUE                             65000:1               ipv4        Vl20\n",
+        "  Interfaces are listed below\n  BLUE  ipv4\n",
+        "Load for five secs: 1%/0%; one minute: 1%\nTime source is NTP\n",
+    ],
+)
+def test_show_vrf_without_its_header_is_not_understood_never_no_vrfs(text: str) -> None:
+    assert parsers.vrfs(text) is None
 
 
-def test_cdp_neighbours_with_every_address_management_first(sw_a: Collection) -> None:
-    sw_b, rtr_c = value(sw_a.collected.cdp)
+def test_show_vrf_with_its_header_and_no_rows_is_no_vrfs() -> None:
+    header = "  Name                             Default RD            Protocols   Interfaces\n"
 
-    assert sw_b == Neighbour(
-        local_port=interface_name("GigabitEthernet1/0/1"),
-        name="sw-b.example.net",
-        remote_port=interface_name("GigabitEthernet1/0/24"),
-        addresses=(
-            IPv4Address("203.0.113.2"),
-            IPv4Address("192.0.2.2"),
-            IPv4Address("198.51.100.2"),
-        ),
-        platform="cisco C9300-48P",
-        ipv6_addresses=(IPv6Address("2001:db8::2"),),
-        native_vlan=99,
-    )
-    assert rtr_c.addresses == (IPv4Address("192.0.2.254"),)
-    assert rtr_c.native_vlan is None
-    assert rtr_c.remote_port == interface_name("GigabitEthernet2")
-
-
-def test_lldp_neighbours_and_what_was_not_advertised(sw_a: Collection) -> None:
-    sw_b, host = value(sw_a.collected.lldp)
-
-    assert sw_b == Neighbour(
-        local_port=interface_name("Gi1/0/1"),
-        name="sw-b.example.net",
-        remote_port=interface_name("Gi1/0/24"),
-        addresses=(IPv4Address("203.0.113.2"),),
-        platform=(
-            "Cisco IOS Software [Cupertino], Catalyst L3 Switch Software (CAT9K_IOSXE), "
-            "Version 17.9.4a"
-        ),
-        ipv6_addresses=(IPv6Address("2001:db8::2"),),
-        chassis_id="0000.5e00.5340",
-    )
-    assert host.name == Unknown("not advertised")
-    assert host.platform == Unknown("not advertised")
-    assert host.addresses == ()
-    assert host.remote_port == interface_name("0000.5e00.5351")
-    assert host.remote_port.known is False
-
-
-def test_cdp_not_enabled_is_unknown_never_no_neighbours() -> None:
-    replies = dict(ios_xe_text.REPLIES)
-    replies["show cdp neighbors detail"] = ios_xe_text.CDP_NOT_ENABLED
-    replies["show lldp neighbors detail"] = ios_xe_text.LLDP_NOT_ENABLED
-
-    collected = collect(Device(replies)).collected
-
-    assert collected.cdp == Unknown("show cdp neighbors detail: CDP is not enabled on the device")
-    assert collected.lldp == Unknown(
-        "show lldp neighbors detail: LLDP is not enabled on the device"
-    )
-
-
-def test_an_empty_neighbour_table_is_none() -> None:
-    replies = dict(ios_xe_text.REPLIES)
-    replies["show cdp neighbors detail"] = "\nTotal cdp entries displayed : 0\n"
-
-    assert value(collect(Device(replies)).collected.cdp) == ()
+    assert parsers.vrfs(header) == ()
 
 
 # -- ARP, MAC, routing, FHRP -----------------------------------------------------------------
@@ -405,11 +382,13 @@ def test_bgp_not_running_means_no_bgp_neighbours() -> None:
     replies = dict(ios_xe_text.REPLIES)
     replies["show ip bgp summary"] = ios_xe_text.BGP_NOT_ACTIVE
 
-    routing = collect(Device(replies)).collected.routing_neighbours
+    collection = collect(Device(replies))
 
+    routing = collection.collected.routing_neighbours
     assert isinstance(routing, Reading)
     assert routing.gaps == ()
     assert IPv4Address("192.0.2.3") not in {n.ip for n in routing.value}
+    assert collection.problems == ()
 
 
 def test_static_routes_in_every_vrf(sw_a: Collection) -> None:
@@ -436,29 +415,36 @@ def test_ios_xe_has_no_vpc(sw_a: Collection) -> None:
 # -- Unknown, never absent --------------------------------------------------------------------
 
 
+def test_a_full_collection_has_no_problems_and_names_its_parser(sw_a: Collection) -> None:
+    assert sw_a.problems == ()
+    assert sw_a.parser == PARSER
+
+
 def test_every_command_denied_leaves_every_part_unknown_and_nothing_fails() -> None:
-    collection = collect(Device({}))
+    device = Device({})
+    collection = collect(device)
 
     collected = collection.collected
-    assert collected.interfaces == Unknown("show interfaces: denied or not supported by the device")
-    assert collected.vlans == Unknown("show vlan brief: denied or not supported by the device")
-    assert collected.arp == Unknown("show ip arp: denied or not supported by the device")
-    assert isinstance(collected.stack_members, Reading)  # from show version, already read
-    assert collection.parse_problems == ()
+    assert collected.interfaces == Unknown("show interfaces: denied")
+    assert collected.vlans == Unknown("show vlan brief: denied")
+    assert collected.arp == Unknown("show ip arp: denied")
+    assert isinstance(collected.stack_members, Reading)  # show version is always allowed
+    denied = [c for c in device.asked if c != SHOW_VERSION]
+    assert collection.problems == tuple(Problem(c, "denied") for c in denied)
 
 
 def test_a_command_that_was_not_sent_is_unknown_with_the_gateways_reason() -> None:
     replies: dict[str, str | Unknown] = dict(ios_xe_text.REPLIES)
-    replies["show vlan brief"] = Unknown("a command timed out, so the session was dropped")
+    dropped = Unknown("show vlan brief: not read, the session was dropped")
+    replies["show vlan brief"] = dropped
 
-    collected = collect(Device(replies)).collected
+    collection = collect(Device(replies))
 
-    assert collected.vlans == Unknown(
-        "show vlan brief: a command timed out, so the session was dropped"
-    )
+    assert collection.collected.vlans == dropped
+    assert collection.problems == ()  # the gateway has recorded the drop itself
 
 
-def test_output_that_cannot_be_parsed_is_unknown_and_a_parse_problem() -> None:
+def test_output_that_cannot_be_parsed_is_unknown_and_a_problem() -> None:
     replies = dict(ios_xe_text.REPLIES)
     replies["show vlan brief"] = "VLAN tables are made of wood\n"
     replies["show ip ospf neighbor"] = ios_xe_text.NOT_UNDERSTOOD
@@ -469,9 +455,9 @@ def test_output_that_cannot_be_parsed_is_unknown_and_a_parse_problem() -> None:
     routing = collection.collected.routing_neighbours
     assert isinstance(routing, Reading)
     assert routing.gaps == (Unknown("show ip ospf neighbor: not understood"),)
-    assert collection.parse_problems == (
-        ParseProblem("show vlan brief", "ntc-templates cisco_ios", "not understood"),
-        ParseProblem("show ip ospf neighbor", "ntc-templates cisco_ios", "not understood"),
+    assert collection.problems == (
+        Problem("show vlan brief", "not understood"),
+        Problem("show ip ospf neighbor", "not understood"),
     )
 
 
@@ -479,11 +465,13 @@ def test_a_denied_per_vrf_command_is_a_gap_in_its_part() -> None:
     replies = dict(ios_xe_text.REPLIES)
     del replies["show ip arp vrf BLUE"]
 
-    arp = collect(Device(replies)).collected.arp
+    collection = collect(Device(replies))
 
+    arp = collection.collected.arp
     assert isinstance(arp, Reading)
-    assert arp.gaps == (Unknown("show ip arp vrf BLUE: denied or not supported by the device"),)
+    assert arp.gaps == (Unknown("show ip arp vrf BLUE: denied"),)
     assert "show ip arp vrf BLUE" not in arp.commands
+    assert collection.problems == (Problem("show ip arp vrf BLUE", "denied"),)
 
 
 def test_unknown_vrfs_leave_a_gap_where_the_per_vrf_commands_would_be() -> None:
@@ -492,7 +480,7 @@ def test_unknown_vrfs_leave_a_gap_where_the_per_vrf_commands_would_be() -> None:
 
     collected = collect(Device(replies)).collected
 
-    assert collected.vrfs == Unknown("show vrf: denied or not supported by the device")
+    assert collected.vrfs == Unknown("show vrf: denied")
     arp = collected.arp
     assert isinstance(arp, Reading)
     assert [gap.reason.split(":")[0] for gap in arp.gaps] == ["show ip arp vrf {vrf}"]
@@ -509,12 +497,6 @@ def test_device_text_is_never_kept_beyond_parsed_values() -> None:
     assert port.description == "spare?[2J? bell"
 
 
-def test_nx_os_is_not_collected_until_its_own_ticket() -> None:
-    collection = platforms.collect(Platform.NX_OS, Device(), device_text.NXOS_SHOW_VERSION)
-
-    assert collection.collected == Collected.nothing(NOT_COLLECTED)
-
-
 @pytest.mark.parametrize("command", sorted(ios_xe_text.REPLIES))
 def test_a_reply_of_the_wrong_shape_is_never_read_as_none(command: str) -> None:
     replies = dict(ios_xe_text.REPLIES)
@@ -522,5 +504,5 @@ def test_a_reply_of_the_wrong_shape_is_never_read_as_none(command: str) -> None:
 
     collection = collect(Device(replies))
 
-    assert [p.command for p in collection.parse_problems] == [command]
+    assert collection.problems == (Problem(command, "not understood"),)
     assert "CANARY-out-77e1" not in repr(collection)

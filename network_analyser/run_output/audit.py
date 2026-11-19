@@ -87,6 +87,11 @@ AUDIT_SCHEMA: Final[Mapping[type[AuditEvent], tuple[str, tuple[str, ...]]]] = {
         ("ip", "path", "ciphertext_sha256", "scrypt_level"),
     ),
     events.DeviceFinished: ("device_finished", ("ip", "outcome", "reason")),
+    events.AliasFound: ("alias_found", ("ip", "same_as", "evidence")),
+    events.NeighbourNotVisited: (
+        "neighbour_not_visited",
+        ("reported_by", "addresses", "reason"),
+    ),
     events.ErrorRaised: ("error_raised", ("ip", "step", "error_type", "message")),
 }
 

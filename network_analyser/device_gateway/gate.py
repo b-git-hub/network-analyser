@@ -5,8 +5,7 @@ A command reaches a device only if it is on that Platform's compiled-in allow-li
 allows may go. The library's own writes pass the same gate (`DeviceSession.permits`, given
 to `Link.open_shell`), so Netmiko's session set-up cannot slip past it. Every command sent
 is in `audit.log` as its exact string, with its duration, size and result, but never its
-output (story 162). A reply that is the device refusing the command is recorded as
-`denied` (#59); it is returned like any other, and never drops the session.
+output (story 162).
 
 The session is dropped at once if a configuration-mode prompt appears (story 55).
 """
@@ -53,12 +52,17 @@ class NoReplyError(SessionDroppedError):
     """A command, or the prompt, got no complete reply."""
 
 
+class DeviceTimedOutError(SessionDroppedError):
+    """The per-device timeout ran out (story 50)."""
+
+
 CONFIG_MODE: Final = "a configuration-mode prompt appeared, so the session was dropped"
 DROP_REASONS: Final = {
     ConfigModeError: CONFIG_MODE,
     OutputTooLargeError: "a reply was larger than the output cap, so the session was dropped",
     CommandTimedOutError: "a command timed out, so the session was dropped",
     NoReplyError: "a command got no complete reply, so the session was dropped",
+    DeviceTimedOutError: "the per-device timeout ran out, so the session was dropped",
 }
 """The fixed reason a device record gives for each kind of drop."""
 
@@ -66,11 +70,18 @@ DROP_REASONS: Final = {
 class DeviceSession:
     """One logged-in CLI session, behind the allow-list gate. Used by one thread."""
 
-    def __init__(self, ip: IPv4Address, emit: Emit, timeouts: Timeouts) -> None:
-        """Make the gate for the device at `ip`; `attach` the shell once it is open."""
+    def __init__(
+        self, ip: IPv4Address, emit: Emit, timeouts: Timeouts, *, deadline: float | None = None
+    ) -> None:
+        """Make the gate for the device at `ip`; `attach` the shell once it is open.
+
+        `deadline` is when the per-device timeout runs out, on `time.monotonic()`'s clock;
+        no command starts after it, and none may run past it. None for no deadline.
+        """
         self._ip = ip
         self._emit = emit
         self._timeouts = timeouts
+        self._deadline = deadline
         self._platform: Platform | None = None
         self._shell: Shell | None = None
 
@@ -115,15 +126,17 @@ class DeviceSession:
             msg = "the command is not on the Platform's allow-list, so it was not sent"
             raise CommandRefusedError(msg)
         started = time.monotonic()
-        reply = shell.run(command, timeout or self._timeouts.command)
+        timeout = timeout or self._timeouts.command
+        if self._deadline is not None:
+            if started >= self._deadline:
+                raise DeviceTimedOutError
+            timeout = min(timeout, self._deadline - started)
+        reply = shell.run(command, timeout)
         took = round((time.monotonic() - started) * 1000)
         if reply.error is not None:
             self._emit(reply.error)
         size = 0 if reply.text is None else len(reply.text)
         result = CommandResult.ERROR if reply.too_large else reply.result
-        body, _, prompt = clean_output(reply.text or "").rstrip("\n").rpartition("\n")
-        if result is CommandResult.OK and platforms.is_denied(body):
-            result = CommandResult.DENIED  # audited; the caller's data is unknown (#59)
         self._emit(CommandSent(self._ip, command, took, size, result))
         if reply.too_large:
             raise OutputTooLargeError
@@ -131,6 +144,7 @@ class DeviceSession:
             raise CommandTimedOutError
         if reply.result is not CommandResult.OK or reply.text is None:
             raise NoReplyError
+        body, _, prompt = clean_output(reply.text).rstrip("\n").rpartition("\n")
         if platforms.is_config_prompt(prompt):
             raise ConfigModeError
         return body

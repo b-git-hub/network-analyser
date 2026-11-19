@@ -22,12 +22,13 @@ SHOW_PRIVILEGE: Final = "show privilege"
 SHOW_RUNNING_CONFIG: Final = "show running-config view full"
 """The Backup (#51, story 96): always `view full`, so a CLI view user gets the whole config,
 never the parts its view happens to cover. Plain `show running-config` is never sent."""
+SHOW_CDP_NEIGHBORS_DETAIL: Final = "show cdp neighbors detail"
+SHOW_LLDP_NEIGHBORS_DETAIL: Final = "show lldp neighbors detail"
+"""The CDP and LLDP Neighbours the crawl follows (#50); the gateway reads them before the
+Backup, so the collection (#59) never sends them again."""
 
 # -- Collection (#59) ------------------------------------------------------------------------
 
-SHOW_CDP_NEIGHBORS_DETAIL: Final = "show cdp neighbors detail"
-SHOW_LLDP_NEIGHBORS_DETAIL: Final = "show lldp neighbors detail"
-"""The CDP and LLDP Neighbours (the same strings the crawl, #50, sends)."""
 SHOW_INTERFACES: Final = "show interfaces"
 SHOW_INTERFACES_SWITCHPORT: Final = "show interfaces switchport"
 SHOW_INTERFACES_TRUNK: Final = "show interfaces trunk"

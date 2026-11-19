@@ -312,9 +312,6 @@ class CommandResult(Enum):
     OK = "ok"
     TIMEOUT = "timeout"
     ERROR = "error"
-    DENIED = "denied"
-    """The device answered with a refusal (or does not have the command): its data is
-    unknown, and the visit goes on (#59; story 126)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -422,6 +419,36 @@ class DeviceFinished(AuditEvent):
     def severity(self) -> Severity:
         """A partial or Unvisited Device is listed for attention."""
         return Severity.INFO if self.outcome is DeviceOutcome.VISITED else Severity.WARNING
+
+
+@dataclass(frozen=True, slots=True)
+class AliasFound(AuditEvent):
+    """An IP turned out to be a device already examined this Run, so it was left (story 73).
+
+    Attributes:
+        ip: the address the alias was reached at.
+        same_as: the address the device was first examined at.
+        evidence: `same host key` (left before any password) or `same chassis serial`.
+    """
+
+    ip: IPv4Address
+    same_as: IPv4Address
+    evidence: str
+
+
+@dataclass(frozen=True, slots=True)
+class NeighbourNotVisited(AuditEvent):
+    """A device known from a Neighbour advertisement was never dialled (stories 62, 66-67).
+
+    Attributes:
+        reported_by: the Visited Device that advertised it; None for a Seed never tried.
+        addresses: the IPv4 addresses it advertised (an IPv6-only one has none here).
+        reason: its Unvisited reason, one of the fixed strings.
+    """
+
+    reported_by: IPv4Address | None
+    addresses: tuple[IPv4Address, ...]
+    reason: str
 
 
 # -- Errors ---------------------------------------------------------------------------------

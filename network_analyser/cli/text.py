@@ -11,11 +11,15 @@ _BYTE = 0xFF
 _SHOWN_AT_MOST = 80
 
 
-def escape_controls(text: str, limit: int = _SHOWN_AT_MOST) -> str:
-    """Return `text` as printable ASCII, cut to `limit` characters with `...` if longer."""
-    shown = text if len(text) <= limit else text[:limit]
+def escape_controls(text: str, limit: int | None = _SHOWN_AT_MOST) -> str:
+    """Return `text` as printable ASCII, cut to `limit` characters with `...` if longer.
+
+    A `limit` of None never cuts: `show-backup` prints a whole config line (#57).
+    """
+    cut = limit is not None and len(text) > limit
+    shown = text[:limit] if cut else text
     escaped = "".join(_escape(ch) for ch in shown)
-    return escaped + ("..." if len(text) > limit else "")
+    return escaped + ("..." if cut else "")
 
 
 def _escape(ch: str) -> str:

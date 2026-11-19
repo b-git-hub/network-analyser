@@ -1,9 +1,16 @@
 """IOS/IOS-XE collection: every Visited Device's data for the Topology (#59; spec #37).
 
-`collect(send, show_version)` sends each collection command once, through the gateway's
-allow-list gate, and builds `records.collected.Collected`. A command that is denied, fails or
-is not understood leaves its data unknown, never ends the visit, and never stands in for
-"none" (story 126). Nothing comes from the running config.
+`collect(send, version)` sends each collection command once, through the gateway's
+allow-list gate, and builds `records.collected.Collected`. A command that is denied or not
+understood leaves its data unknown, is handed back as a `Problem` for the Audit log, never
+ends the visit, and never stands in for "none" (story 126). A reply of `Unknown` (the
+session was dropped) leaves that data unknown with the gateway's reason. Nothing comes from
+the running config.
+
+The CDP and LLDP tables are not read here: the crawl reads them before the Backup (#50) and
+the gateway puts its readings in their place. `show version` is sent again for the stack
+member table, which `VersionFacts` does not carry; its model and serials come from the
+gateway's own reading.
 
 Per VRF: `show vrf` lists the VRFs; each that carries IPv4 is asked for its ARP table, EIGRP
 and BGP neighbours and static routes with the per-VRF templates. OSPF needs no per-VRF form:
@@ -15,12 +22,13 @@ from functools import partial
 from typing import Final
 
 from network_analyser.platforms.allowlist import Template
-from network_analyser.platforms.collection import Asker, Collection, Part, Send
+from network_analyser.platforms.collection import Collection, Send
 from network_analyser.platforms.ios_xe import commands as c
-from network_analyser.platforms.ios_xe import neighbours, parsers
-from network_analyser.platforms.ios_xe.identify import read_version
-from network_analyser.platforms.ios_xe.parsers import DEFAULT_VRF, NTC, OWN, Peer
+from network_analyser.platforms.ios_xe import parsers
+from network_analyser.platforms.ios_xe.asking import Asker, Part
+from network_analyser.platforms.ios_xe.parsers import DEFAULT_VRF, Peer
 from network_analyser.records.collected import (
+    NOT_COLLECTED,
     ArpEntry,
     Collected,
     FhrpGroup,
@@ -34,11 +42,15 @@ from network_analyser.records.collected import (
     SwitchportMode,
     Vrf,
 )
+from network_analyser.records.device import VersionFacts
 from network_analyser.records.interface_names import InterfaceName
 from network_analyser.records.unknown import Unknown
 
-_CDP_OFF: Final = Unknown(f"{c.SHOW_CDP_NEIGHBORS_DETAIL}: CDP is not enabled on the device")
-_LLDP_OFF: Final = Unknown(f"{c.SHOW_LLDP_NEIGHBORS_DETAIL}: LLDP is not enabled on the device")
+PARSER: Final = "Network Analyser IOS/IOS-XE reader (ntc-templates cisco_ios)"
+"""The parser's name in a `parse_failed` Audit log event. One name for every command: each
+command has exactly one reader, an ntc-templates template or our own, so the command in the
+event already says which."""
+
 _NO_PEERS: Final[tuple[Peer, ...]] = ()
 _NO_GROUPS: Final[tuple[FhrpGroup, ...]] = ()
 """What a routing or FHRP feature that is not running means: none of its neighbours or
@@ -47,55 +59,48 @@ groups."""
 type Ips = dict[str, InterfaceIp | None]
 
 
-def collect(send: Send, show_version: str) -> Collection:
+def collect(send: Send, version: VersionFacts) -> Collection:
     """Collect every part of a Visited IOS/IOS-XE device's data through `send`."""
     asker = Asker(send)
-    stack = _stack(show_version)
-    ips = asker.ask(c.SHOW_IP_INTERFACE, parsers.ip_interfaces, parser=OWN)
-    shown_vrfs = asker.ask(c.SHOW_VRF, parsers.vrfs, parser=NTC)
+    stack = _stack(asker, version)
+    ips = asker.ask(c.SHOW_IP_INTERFACE, parsers.ip_interfaces)
+    shown_vrfs = asker.ask(c.SHOW_VRF, parsers.vrfs)
     vrf_names = (
         shown_vrfs
         if isinstance(shown_vrfs, Unknown)
         else tuple(s.vrf.name for s in shown_vrfs if s.ipv4)
     )
-    members = stack.value
+    stacked = isinstance(stack, Reading) and len(stack.value) > 1
     collected = Collected(
         stack_members=stack,
-        interfaces=_interfaces(asker, ips, stacked=len(members) > 1),
-        cdp=_single(
-            asker, c.SHOW_CDP_NEIGHBORS_DETAIL, neighbours.cdp, neighbours.PARSER, _CDP_OFF
-        ),
-        lldp=_single(
-            asker, c.SHOW_LLDP_NEIGHBORS_DETAIL, neighbours.lldp, neighbours.PARSER, _LLDP_OFF
-        ),
-        vlans=_single(asker, c.SHOW_VLAN_BRIEF, parsers.vlans, NTC),
-        port_channels=_single(asker, c.SHOW_ETHERCHANNEL_SUMMARY, parsers.port_channels, NTC),
+        interfaces=_interfaces(asker, ips, stacked=stacked),
+        cdp=Unknown(NOT_COLLECTED),  # the crawl's own reading goes here (#50)
+        lldp=Unknown(NOT_COLLECTED),
+        vlans=_single(asker, c.SHOW_VLAN_BRIEF, parsers.vlans),
+        port_channels=_single(asker, c.SHOW_ETHERCHANNEL_SUMMARY, parsers.port_channels),
         vpc=None,
         vrfs=_vrfs(shown_vrfs),
         arp=_arp(asker, vrf_names),
-        mac=_single(asker, c.SHOW_MAC_ADDRESS_TABLE, parsers.mac_table, NTC),
+        mac=_single(asker, c.SHOW_MAC_ADDRESS_TABLE, parsers.mac_table),
         routing_neighbours=_routing(asker, ips, vrf_names),
         static_routes=_static_routes(asker, vrf_names),
         fhrp=_fhrp(asker),
     )
-    return Collection(collected, tuple(asker.problems))
+    return Collection(collected, tuple(asker.problems), PARSER)
 
 
-def _single[T](
-    asker: Asker,
-    command: str,
-    read: Callable[[str], T | None],
-    parser: str,
-    off: T | Unknown | None = None,
-) -> Reading[T] | Unknown:
-    value = asker.ask(command, read, parser=parser, off=off)
+def _single[T](asker: Asker, command: str, read: Callable[[str], T | None]) -> Reading[T] | Unknown:
+    value = asker.ask(command, read)
     return value if isinstance(value, Unknown) else Reading((command,), value)
 
 
-def _stack(show_version: str) -> Reading[tuple[StackMember, ...]]:
-    facts = read_version(show_version)
-    members = parsers.stack_members(show_version, facts.model, facts.serials)
-    return Reading((c.SHOW_VERSION,), members)
+def _stack(asker: Asker, version: VersionFacts) -> Reading[tuple[StackMember, ...]] | Unknown:
+    """The member switches, from the member table of `show version` sent again (story 133)."""
+    return _single(
+        asker,
+        c.SHOW_VERSION,
+        partial(parsers.stack_members, model=version.model, serials=version.serials),
+    )
 
 
 # -- Interfaces -------------------------------------------------------------------------------
@@ -105,14 +110,12 @@ def _interfaces(
     asker: Asker, ips: Ips | Unknown, *, stacked: bool
 ) -> Reading[tuple[Interface, ...]] | Unknown:
     part = Part()
-    shown = part.take(
-        c.SHOW_INTERFACES, asker.ask(c.SHOW_INTERFACES, parsers.interfaces, parser=NTC)
-    )
+    shown = part.take(c.SHOW_INTERFACES, asker.ask(c.SHOW_INTERFACES, parsers.interfaces))
     if shown is None:
         return part.reading(())
-    ports = asker.ask(c.SHOW_INTERFACES_SWITCHPORT, parsers.switchports, parser=NTC)
-    trunks = asker.ask(c.SHOW_INTERFACES_TRUNK, parsers.trunks, parser=OWN)
-    channels = asker.ask(c.SHOW_ETHERCHANNEL_SUMMARY, parsers.port_channels, parser=NTC)
+    ports = asker.ask(c.SHOW_INTERFACES_SWITCHPORT, parsers.switchports)
+    trunks = asker.ask(c.SHOW_INTERFACES_TRUNK, parsers.trunks)
+    channels = asker.ask(c.SHOW_ETHERCHANNEL_SUMMARY, parsers.port_channels)
     part.take(c.SHOW_INTERFACES_SWITCHPORT, ports)
     part.take(c.SHOW_INTERFACES_TRUNK, trunks)
     part.take(c.SHOW_IP_INTERFACE, ips)
@@ -195,7 +198,6 @@ def _each_vrf[T](  # noqa: PLR0913 (the per-VRF command and how to read each rep
     vrfs: tuple[str, ...] | Unknown,
     read: Callable[..., T | None],
     *,
-    parser: str,
     off: T | None = None,
 ) -> list[tuple[str, T]]:
     """Ask `template` for each VRF; each VRF that cannot be asked or read is a gap."""
@@ -208,9 +210,7 @@ def _each_vrf[T](  # noqa: PLR0913 (the per-VRF command and how to read each rep
         if command is None:
             part.gap(f"{template.text}: a VRF's name does not fit the allow-list, so not sent")
             continue
-        value = part.take(
-            command, asker.ask(command, partial(read, vrf=vrf), parser=parser, off=off)
-        )
+        value = part.take(command, asker.ask(command, partial(read, vrf=vrf), off=off))
         if value is not None:
             found.append((vrf, value))
     return found
@@ -220,10 +220,10 @@ def _arp(asker: Asker, vrfs: tuple[str, ...] | Unknown) -> Reading[tuple[ArpEntr
     part = Part()
     entries: list[ArpEntry] = []
     found = part.take(
-        c.SHOW_IP_ARP, asker.ask(c.SHOW_IP_ARP, partial(parsers.arp, vrf=DEFAULT_VRF), parser=NTC)
+        c.SHOW_IP_ARP, asker.ask(c.SHOW_IP_ARP, partial(parsers.arp, vrf=DEFAULT_VRF))
     )
     entries.extend(found or ())
-    for _, value in _each_vrf(asker, part, c.SHOW_IP_ARP_VRF, vrfs, parsers.arp, parser=NTC):
+    for _, value in _each_vrf(asker, part, c.SHOW_IP_ARP_VRF, vrfs, parsers.arp):
         entries.extend(value)
     return part.reading(tuple(entries))
 
@@ -235,7 +235,7 @@ def _routing(
     found: list[RoutingNeighbour] = []
     ospf = part.take(
         c.SHOW_IP_OSPF_NEIGHBOR,
-        asker.ask(c.SHOW_IP_OSPF_NEIGHBOR, parsers.ospf_neighbours, parser=NTC, off=_NO_PEERS),
+        asker.ask(c.SHOW_IP_OSPF_NEIGHBOR, parsers.ospf_neighbours, off=_NO_PEERS),
     )
     if ospf and isinstance(ips, Unknown):
         part.gap(f"{c.SHOW_IP_OSPF_NEIGHBOR}: the neighbours' VRFs are unknown ({ips.reason})")
@@ -243,27 +243,23 @@ def _routing(
         found.extend(
             _neighbour(RoutingProtocol.OSPF, _vrf_of(peer.interface, ips), peer) for peer in ospf
         )
-    for protocol, command, template, read, parser in (
+    for protocol, command, template, read in (
         (
             RoutingProtocol.EIGRP,
             c.SHOW_IP_EIGRP_NEIGHBORS,
             c.SHOW_IP_EIGRP_VRF_NEIGHBORS,
             parsers.eigrp_neighbours,
-            OWN,
         ),
         (
             RoutingProtocol.BGP,
             c.SHOW_IP_BGP_SUMMARY,
             c.SHOW_IP_BGP_VPNV4_VRF_SUMMARY,
             parsers.bgp_neighbours,
-            NTC,
         ),
     ):
-        peers = part.take(command, asker.ask(command, read, parser=parser, off=_NO_PEERS))
+        peers = part.take(command, asker.ask(command, read, off=_NO_PEERS))
         found.extend(_neighbour(protocol, DEFAULT_VRF, peer) for peer in peers or ())
-        each = _each_vrf(
-            asker, part, template, vrfs, _ignore_vrf(read), parser=parser, off=_NO_PEERS
-        )
+        each = _each_vrf(asker, part, template, vrfs, _ignore_vrf(read), off=_NO_PEERS)
         found.extend(_neighbour(protocol, vrf, peer) for vrf, peers in each for peer in peers)
     return part.reading(tuple(found))
 
@@ -294,14 +290,10 @@ def _static_routes(
     routes: list[StaticRoute] = []
     found = part.take(
         c.SHOW_IP_ROUTE_STATIC,
-        asker.ask(
-            c.SHOW_IP_ROUTE_STATIC, partial(parsers.static_routes, vrf=DEFAULT_VRF), parser=NTC
-        ),
+        asker.ask(c.SHOW_IP_ROUTE_STATIC, partial(parsers.static_routes, vrf=DEFAULT_VRF)),
     )
     routes.extend(found or ())
-    for _, value in _each_vrf(
-        asker, part, c.SHOW_IP_ROUTE_VRF_STATIC, vrfs, parsers.static_routes, parser=NTC
-    ):
+    for _, value in _each_vrf(asker, part, c.SHOW_IP_ROUTE_VRF_STATIC, vrfs, parsers.static_routes):
         routes.extend(value)
     return part.reading(tuple(routes))
 
@@ -309,12 +301,10 @@ def _static_routes(
 def _fhrp(asker: Asker) -> Reading[tuple[FhrpGroup, ...]] | Unknown:
     part = Part()
     groups: list[FhrpGroup] = []
-    for command, read, parser in (
-        (c.SHOW_STANDBY_BRIEF, parsers.hsrp, NTC),
-        (c.SHOW_VRRP_BRIEF, parsers.vrrp, NTC),
-        (c.SHOW_GLBP_BRIEF, parsers.glbp, OWN),
+    for command, read in (
+        (c.SHOW_STANDBY_BRIEF, parsers.hsrp),
+        (c.SHOW_VRRP_BRIEF, parsers.vrrp),
+        (c.SHOW_GLBP_BRIEF, parsers.glbp),
     ):
-        groups.extend(
-            part.take(command, asker.ask(command, read, parser=parser, off=_NO_GROUPS)) or ()
-        )
+        groups.extend(part.take(command, asker.ask(command, read, off=_NO_GROUPS)) or ())
     return part.reading(tuple(groups))

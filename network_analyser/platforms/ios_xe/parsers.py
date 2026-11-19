@@ -36,9 +36,6 @@ from network_analyser.records.collected import (
 from network_analyser.records.interface_names import InterfaceName, interface_name
 from network_analyser.records.unknown import Unknown
 
-NTC: Final = "ntc-templates cisco_ios"
-OWN: Final = "Network Analyser IOS/IOS-XE reader"
-"""The parser names a `parse_failed` Audit log event gives."""
 DEFAULT_VRF: Final = "default"
 
 _TEMPLATES: Final = "cisco_ios"
@@ -343,7 +340,7 @@ def vrfs(text: str) -> tuple[VrfShown, ...] | None:
     """Read `show vrf`: the named VRFs. The global table (`default`) is not listed."""
     if not _has_data(text):
         return ()
-    rows = _rows("show vrf", text)
+    rows = _table("show vrf", text, r"^\s*Name\s+Default RD\s+Protocols")
     if rows is None:
         return None
     found: list[VrfShown] = []

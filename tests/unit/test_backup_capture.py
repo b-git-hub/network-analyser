@@ -41,7 +41,7 @@ class Capture:
     def __call__(self) -> DeviceRecord:
         fence = scope.parse(["192.0.2.0/24"], [])
         assert isinstance(fence, ScopeRecord)
-        return device_gateway.visit(
+        record = device_gateway.visit(
             SEED,
             scope=fence,
             trust=trust_store.load(self.tmp_path / "known_hosts"),
@@ -51,7 +51,10 @@ class Capture:
             timeouts=TIMEOUTS,
             dial=self.network.dial,
             backup_sink=self.sink,
+            wait_before_retry=self.network.wait_before_retry,
         )
+        assert isinstance(record, DeviceRecord)  # no identity register: never an alias
+        return record
 
 
 @pytest.fixture
@@ -72,7 +75,7 @@ def test_an_ios_xe_config_goes_to_the_sink_exactly_as_the_device_sent_it(
     record = capture()
 
     assert record.outcome is DeviceOutcome.VISITED
-    assert device.lines[4] == "show running-config view full"  # then collection (#59)
+    assert device.lines[6] == "show running-config view full"  # then collection (#59)
     ((identity, config),) = capture.backups
     assert config == device_text.IOS_XE_RUNNING_CONFIG
     assert identity.ip == SEED
@@ -89,7 +92,7 @@ def test_an_nxos_config_goes_to_the_sink(capture: Capture) -> None:
 
     capture()
 
-    assert device.lines[-1] == "show running-config"
+    assert device.lines.count("show running-config") == 1
     ((identity, config),) = capture.backups
     assert config == device_text.NXOS_RUNNING_CONFIG
     assert identity.hostname == "nx-a"
