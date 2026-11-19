@@ -6,7 +6,7 @@ an allow-list it cannot express exactly. Each Platform's generator takes the all
 a keyword, so a future entry can be tried here without changing the compiled-in list.
 """
 
-from collections.abc import Callable
+import re
 
 import pytest
 
@@ -121,16 +121,40 @@ def test_a_plain_username_fits(username: str) -> None:
 VRF_TEMPLATE = Template("show ip arp vrf {vrf}", {"vrf": r"[A-Za-z0-9_-]{1,32}"})
 
 
-@pytest.mark.parametrize(
-    "generate", [ios_xe_role.role_snippet, nxos_role.role_snippet], ids=["IOS-XE", "NX-OS"]
-)
-def test_a_template_with_no_exact_role_form_is_refused_not_widened(
-    generate: Callable[..., str],
-) -> None:
+def test_nx_os_refuses_a_template_with_no_exact_role_form_rather_than_widen_it() -> None:
     allow_list = AllowList((Exact("show version"), VRF_TEMPLATE))
 
     with pytest.raises(RoleError):
-        generate("netanalyser", tacacs=False, allow_list=allow_list)
+        nxos_role.role_snippet("netanalyser", tacacs=False, allow_list=allow_list)
+
+
+def test_ios_xe_names_a_per_vrf_command_up_to_the_vrf_and_ise_keeps_its_pattern() -> None:
+    allow_list = AllowList((Exact("show version"), VRF_TEMPLATE))
+
+    local = ios_xe_role.role_snippet("netanalyser", tacacs=False, allow_list=allow_list)
+    tacacs = ios_xe_role.role_snippet("netanalyser", tacacs=True, allow_list=allow_list)
+
+    assert " commands exec include show ip arp vrf\n" in local
+    assert "!   privilege exec level 7 show ip arp vrf\n" in local
+    assert re.search(r"PERMIT  show +\^ip arp vrf \[A-Za-z0-9_-\]\{1,32\}\$\n", tacacs)
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        Template("{vrf} arp", {"vrf": "[a-z]{1,8}"}),
+        Template("show {vrf}", {"vrf": "[a-z]{1,8}"}),
+        Template("show ip arp vrf{vrf}", {"vrf": "[a-z]{1,8}"}),
+        Template("show ip arp vrf {vrf}", {"vrf": r"\w{1,8}"}),
+        Template("show ip arp vrf {vrf}", {"vrf": "(?:a|b)"}),
+    ],
+    ids=["first word", "no words before", "joined to a word", "escape", "group"],
+)
+def test_ios_xe_refuses_a_template_it_cannot_express_exactly(template: Template) -> None:
+    allow_list = AllowList((Exact("show version"), template))
+
+    with pytest.raises(RoleError):
+        ios_xe_role.role_snippet("netanalyser", tacacs=True, allow_list=allow_list)
 
 
 def test_nx_os_refuses_more_rules_than_a_role_holds() -> None:

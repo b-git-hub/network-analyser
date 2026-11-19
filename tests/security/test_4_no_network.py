@@ -2,7 +2,8 @@
 
 A static scan of a generated `diagram.html` finds no `http(s)://`, no `<script src>` and no
 fetch calls, nor any other way for the page to load or send anything, even when device
-text is written to look like one (#63). The `run-report.html` half follows in #66.
+text is written to look like one (#63). The same scan of a generated `diagram.drawio` finds
+no URL and no namespace to fetch (#65). The `run-report.html` half follows in #66.
 """
 
 import json
@@ -102,3 +103,48 @@ def test_a_rendered_diagram_cannot_reach_the_network(tmp_path: Path) -> None:
     page = (tmp_path / "diagram.html").read_text(encoding="utf-8")
     assert offences(page) == []
     assert "dev-S2" in page  # the hostile Topology was drawn, not dropped
+
+    drawio = (tmp_path / "diagram.drawio").read_text(encoding="utf-8")
+    assert drawio_offences(drawio) == []
+    assert "dev-S2" in drawio
+
+
+# A draw.io shape that carries data is an `<object>`, so that tag is not a loaded resource here.
+DRAWIO_RESOURCE = re.compile(
+    r"<[a-z][^>]*\s(?:src|href|srcset|action|formaction|data|poster)\s*="
+    r"|<link\b|<iframe\b|<embed\b|@import|url\s*\(",
+    re.IGNORECASE,
+)
+
+
+def drawio_offences(text: str) -> list[str]:
+    """Name each way a draw.io file could point outside itself.
+
+    A draw.io file has no code, so a device description that merely says "fetch" is only
+    text; what matters is a URL, a namespace, a link property or a loaded resource.
+    """
+    found = [
+        what
+        for what, pattern in NETWORK.items()
+        if what != "a loaded resource" and pattern.search(text)
+    ]
+    if DRAWIO_RESOURCE.search(text):
+        found.append("a loaded resource")
+    if re.search(r"xmlns|\blink\s*=|<!doctype|<!entity", text, re.IGNORECASE):
+        found.append("a namespace, link or entity")
+    return found
+
+
+@pytest.mark.parametrize(
+    "planted",
+    [
+        '<mxfile xmlns="http://www.w3.org/1999/xhtml">',
+        '<object label="x" link="https://evil.example/x">',
+        '<mxCell value="//evil.example/x"/>',
+        '<mxCell style="shape=image;image=x" src="x.png"/>',
+        "<iframe>",
+        '<!DOCTYPE mxfile [<!ENTITY x SYSTEM "file:///etc/passwd">]>',
+    ],
+)
+def test_the_scan_finds_a_planted_reference_in_a_drawio_file(planted: str) -> None:
+    assert drawio_offences(planted)

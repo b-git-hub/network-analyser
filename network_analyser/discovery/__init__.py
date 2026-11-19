@@ -7,6 +7,7 @@ TCP 22 and names the extra Seeds a banner allows (#55). Ctrl+C stopping comes la
 """
 
 from network_analyser.discovery.crawl import (
+    ALL_SETS_RETIRED,
     MAX_ADDRESSES,
     IdentityRegister,
     Visit,
@@ -15,6 +16,7 @@ from network_analyser.discovery.crawl import (
 from network_analyser.discovery.sweep import combine_seeds, sweep
 
 __all__ = [
+    "ALL_SETS_RETIRED",
     "MAX_ADDRESSES",
     "IdentityRegister",
     "Visit",

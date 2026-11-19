@@ -21,14 +21,24 @@ and the Run ends with a summary of every device found.
 """
 
 import argparse
+import dataclasses
 import sys
-from dataclasses import replace
+import threading
+from collections.abc import Callable
 from datetime import UTC, datetime
 from ipaddress import IPv4Address
 
 from network_analyser import backup_store, device_gateway, discovery, run_output
 from network_analyser._version import __version__
-from network_analyser.cli import ready, run_file, run_secrets, run_start, run_topology, run_trail
+from network_analyser.cli import (
+    ready,
+    run_file,
+    run_secrets,
+    run_start,
+    run_summary,
+    run_topology,
+    run_trail,
+)
 from network_analyser.cli.console import scanned_console
 from network_analyser.cli.crash_dump_guard import guard_crash_dumps
 from network_analyser.cli.exit_codes import ExitCode
@@ -48,10 +58,11 @@ from network_analyser.cli.text import escape_controls
 from network_analyser.cli.trust_folder import check_trust_folder
 from network_analyser.cli.trust_keys import load_trust_store
 from network_analyser.credentials import CredentialSets, SecretScan
-from network_analyser.records import RunRequest, Source, Sourced
+from network_analyser.records import Platform, RunRequest, Source, Sourced
 from network_analyser.records.backup import BackupResults
 from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord
+from network_analyser.records.events import AuditEvent, CredentialSetRetired
 from network_analyser.records.identity import Alias
 from network_analyser.records.sweep import SweepResult
 
@@ -130,9 +141,10 @@ def _after_folder_checks(
 
     def crawl(audit: run_output.AuditLog) -> tuple[CrawlResult, BackupResults]:
         # #50: the crawl. `check.notices` and the Credential Sets' views go to the Run
-        # report (#66). #51: each running config goes from the gateway straight to the
-        # locking worker, which locks whatever was taken even on Ctrl+C. #52: every record
-        # is kept as it comes back, for topology.json.
+        # report (#66); each set's results ride on the crawl result (#54). #51: each
+        # running config goes from the gateway straight to the locking worker, which locks
+        # whatever was taken even on Ctrl+C. #52: every record is kept as it comes back,
+        # for topology.json.
         locker = backup_store.BackupLocker(
             folder.io_path,
             shown=folder.path,
@@ -143,20 +155,29 @@ def _after_folder_checks(
             tool_version=__version__,
         )
 
+        emit = _announcing_retirements(audit.record)
+
         def visit(
-            ip: IPv4Address, *, id_gate: bool, identity: device_gateway.Identity
+            ip: IPv4Address,
+            *,
+            id_gate: bool,
+            neighbour_hint: Platform | None,
+            identity: device_gateway.Identity,
         ) -> DeviceRecord | Alias:
-            return device_gateway.visit(
-                ip,
-                scope=request.scope.value,
-                trust=trust,
-                sets=sets,
-                emit=audit.record,
-                failure_budget=request.failure_budget.value,
-                backup_sink=locker.take,
-                timeouts=request.timeouts,
-                id_gate=id_gate,
-                identity=identity,
+            return collected.add(
+                device_gateway.visit(
+                    ip,
+                    scope=request.scope.value,
+                    trust=trust,
+                    sets=sets,
+                    emit=emit,
+                    failure_budget=request.failure_budget.value,
+                    backup_sink=locker.take,
+                    timeouts=request.timeouts,
+                    id_gate=id_gate,
+                    neighbour_hint=neighbour_hint,
+                    identity=identity,
+                )
             )
 
         # #55: opt-in Sweep, after the confirm and inside the audit trail. Kept in this
@@ -173,19 +194,16 @@ def _after_folder_checks(
         try:
             result = discovery.crawl(
                 seeds,
-                lambda ip, *, id_gate, identity: collected.add(
-                    visit(ip, id_gate=id_gate, identity=identity)
-                ),
+                visit,
                 scope=request.scope.value,
                 parallel=request.parallel.value,
                 emit=audit.record,
                 skipped=collected.add,
+                all_retired=sets.all_retired,
             )
         finally:
             backups = locker.finish()
-        if swept is not None:
-            result = replace(result, sweep=swept)
-        return result, backups
+        return dataclasses.replace(result, credential_sets=sets.results(), sweep=swept), backups
 
     return run_topology.then_save(
         folder,
@@ -216,6 +234,22 @@ def _secrets(
         print(_LABEL_IS_A_SECRET, file=sys.stderr)
         return ExitCode.REFUSED
     return passphrase, sets
+
+
+def _announcing_retirements(record: Callable[[AuditEvent], None]) -> Callable[[AuditEvent], None]:
+    """Record each event; tell the operator at once when a set is retired (story 36).
+
+    Visits run on the pool's threads, so the console line is printed under a lock.
+    """
+    lock = threading.Lock()
+
+    def emit(event: AuditEvent) -> None:
+        record(event)
+        if isinstance(event, CredentialSetRetired):
+            with lock:
+                print(run_summary.retirement_notice(event), flush=True)
+
+    return emit
 
 
 def _load_run_file(path: str | None) -> run_file.RunFile | ExitCode | None:

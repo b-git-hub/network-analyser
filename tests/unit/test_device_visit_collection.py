@@ -1,8 +1,9 @@
-"""A visit collects the Topology's data from an NX-OS device after its Backup (ticket #60).
+"""A visit collects the Topology's data after the Backup (tickets #59 and #60).
 
 Driven through `device_gateway.visit` with fake devices at the gateway seam
-(tests/support/fake_device) answering hand-written `| json` replies
-(tests/support/nxos_json): no SSH server, no network.
+(tests/support/fake_device) answering hand-written NX-OS `| json` replies
+(tests/support/nxos_json) or IOS/IOS-XE text (tests/support/ios_xe_text): no SSH server,
+no network.
 """
 
 from ipaddress import IPv4Address
@@ -15,7 +16,7 @@ from network_analyser.credentials import CredentialSet, CredentialSets, Secret
 from network_analyser.device_gateway.gate import DROP_REASONS, CommandTimedOutError
 from network_analyser.records import Platform, ScopeRecord
 from network_analyser.records.backup import BackupCapture
-from network_analyser.records.collected import NOT_COLLECTED, Reading
+from network_analyser.records.collected import Reading
 from network_analyser.records.device import DeviceRecord, Unknown
 from network_analyser.records.events import (
     AuditEvent,
@@ -23,12 +24,20 @@ from network_analyser.records.events import (
     DeviceOutcome,
     ParseFailed,
 )
-from tests.support import device_text, nxos_json
-from tests.support.fake_device import DEVICE_CANARY, NXOS_REPLIES, FakeDevice, FakeNetwork
+from tests.support import device_text, ios_xe_text, nxos_json
+from tests.support.fake_device import (
+    DEVICE_CANARY,
+    IOS_XE_REPLIES,
+    NXOS_REPLIES,
+    FakeDevice,
+    FakeNetwork,
+)
 from tests.support.nxos_json import NXOS_JSON_REPLIES
 
 SEED = IPv4Address("192.0.2.10")
 PARSER = "Network Analyser NX-OS JSON reader"
+IOS_PARSER = "Network Analyser IOS/IOS-XE reader (ntc-templates cisco_ios)"
+IOS_BACKUP = "show running-config view full"
 
 
 class Visit:
@@ -64,6 +73,17 @@ class Visit:
             str(SEED),
             FakeDevice(ssh_id="SSH-2.0-OpenSSH_8.8 FIPS", prompt="nx-a#", replies=replies),
         )
+
+    def catalyst(
+        self, changes: dict[str, str] | None = None, *, hangs_on: frozenset[str] = frozenset()
+    ) -> FakeDevice:
+        replies = {
+            **IOS_XE_REPLIES,
+            **ios_xe_text.NEIGHBOUR_REPLIES,
+            **ios_xe_text.REPLIES,
+            **(changes or {}),
+        }
+        return self.network.add(str(SEED), FakeDevice(replies=replies, hangs_on=hangs_on))
 
 
 @pytest.fixture
@@ -123,12 +143,91 @@ def test_a_dropped_session_keeps_the_backup_and_what_was_collected(visit: Visit)
     assert device.lines[-1] == "show vlan brief | json"
 
 
-def test_an_ios_xe_device_collects_only_its_neighbours_until_59(visit: Visit) -> None:
-    device = visit.network.add(str(SEED))
+# -- IOS/IOS-XE (#59) ------------------------------------------------------------------------
+
+
+def test_a_catalyst_is_backed_up_then_its_data_collected(visit: Visit) -> None:
+    device = visit.catalyst()
 
     record = visit()
 
+    assert record.outcome is DeviceOutcome.VISITED
     assert record.platform is Platform.IOS_XE
     assert record.collected is not None
-    assert record.collected.interfaces == Unknown(NOT_COLLECTED)
-    assert device.lines[-1] == "show running-config view full"
+    assert isinstance(record.collected.interfaces, Reading)
+    assert isinstance(record.collected.stack_members, Reading)
+    assert record.collected.vpc is None
+    backup_at = device.lines.index(IOS_BACKUP)
+    assert device.lines[backup_at + 1] == "show version"  # again, for the stack members
+    assert sorted(device.lines[backup_at + 2 :]) == sorted(ios_xe_text.REPLIES)
+    assert visit.backups == [device_text.IOS_XE_RUNNING_CONFIG]
+    assert not [e for e in visit.events if isinstance(e, ParseFailed)]
+
+
+def test_the_crawls_neighbour_tables_are_read_once_before_the_backup(visit: Visit) -> None:
+    device = visit.catalyst()
+
+    record = visit()
+
+    backup_at = device.lines.index(IOS_BACKUP)
+    for command in ios_xe_text.NEIGHBOUR_REPLIES:
+        assert device.lines.count(command) == 1
+        assert device.lines.index(command) < backup_at
+    assert record.collected is not None
+    assert isinstance(record.collected.cdp, Reading)
+    assert len(record.collected.cdp.value) == 2
+    assert isinstance(record.collected.lldp, Reading)
+
+
+def test_a_denied_ios_command_is_audited_and_never_fatal(visit: Visit) -> None:
+    visit.catalyst({"show vlan brief": device_text.IOS_XE_INVALID_INPUT})
+
+    record = visit()
+
+    assert record.outcome is DeviceOutcome.VISITED
+    assert record.collected is not None
+    assert record.collected.vlans == Unknown("show vlan brief: denied")
+    assert isinstance(record.collected.mac, Reading)
+    failed = [e for e in visit.events if isinstance(e, ParseFailed)]
+    assert failed == [ParseFailed(SEED, "show vlan brief", IOS_PARSER, "denied")]
+    assert all("Invalid input" not in repr(e) for e in visit.events)
+
+
+def test_an_ios_reply_that_cannot_be_parsed_is_audited_without_its_text(visit: Visit) -> None:
+    visit.catalyst({"show vlan brief": "CANARY-out-3f1a not a vlan table\n"})
+
+    visit()
+
+    failed = [e for e in visit.events if isinstance(e, ParseFailed)]
+    assert failed == [ParseFailed(SEED, "show vlan brief", IOS_PARSER, "not understood")]
+    assert "CANARY-out-3f1a" not in repr(visit.events)
+
+
+def test_a_drop_during_ios_collection_keeps_the_backup_and_what_was_read(visit: Visit) -> None:
+    device = visit.catalyst(hangs_on=frozenset({"show vlan brief"}))
+
+    record = visit()
+
+    assert record.outcome is DeviceOutcome.PARTIAL
+    assert record.partial_reason == DROP_REASONS[CommandTimedOutError]
+    assert visit.backups == [device_text.IOS_XE_RUNNING_CONFIG]
+    assert record.collected is not None
+    assert isinstance(record.collected.cdp, Reading)
+    assert isinstance(record.collected.interfaces, Reading)
+    assert record.collected.vlans == Unknown("show vlan brief: not read, the session was dropped")
+    assert record.collected.mac == Unknown(
+        "show mac address-table: not read, the session was dropped"
+    )
+    assert device.lines[-1] == "show vlan brief", "nothing is sent after the drop"
+    assert device.open_links == 0
+
+
+def test_a_catalyst_with_no_full_config_is_still_collected(visit: Visit) -> None:
+    visit.catalyst({IOS_BACKUP: "% Permission denied\n"})
+
+    record = visit()
+
+    assert record.outcome is DeviceOutcome.PARTIAL
+    assert visit.backups == []
+    assert record.collected is not None
+    assert isinstance(record.collected.interfaces, Reading)

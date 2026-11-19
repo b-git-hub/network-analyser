@@ -267,6 +267,8 @@ class LoginResult(Enum):
 
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    LOST = "lost"
+    """The connection dropped after the password was sent: it counts as a failed login."""
 
 
 @dataclass(frozen=True, slots=True)
