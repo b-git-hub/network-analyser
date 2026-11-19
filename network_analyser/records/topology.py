@@ -79,6 +79,8 @@ class VisitedDevice:
         management_ip: the address the tool logged into.
         alias_ips: its other addresses: learned aliases, and its interface addresses.
         interfaces: every interface, down ones included.
+        vlan_database: the VLANs listed in its VLAN database, active or not, for the
+            diagram's VLAN view (#64); unknown when not collected or incomplete.
         vpc: its vPC domain; None when it has none.
     """
 
@@ -94,6 +96,7 @@ class VisitedDevice:
     management_ip: IPv4Address
     alias_ips: tuple[IPv4Address, ...]
     interfaces: tuple[Interface, ...] | Unknown
+    vlan_database: frozenset[int] | Unknown
     vpc: VpcState | Unknown | None
 
 
