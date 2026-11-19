@@ -8,6 +8,7 @@ argparse defaults: a flag left out parses as None, so the run file and the promp
 import argparse
 import re
 import sys
+import textwrap
 from collections.abc import Callable
 from typing import NoReturn, override
 
@@ -305,13 +306,27 @@ def _add_role_snippet(commands: _Commands) -> None:
     )
 
 
+_MANUAL_RESET = r"""forgotten the Backup Passphrase?
+  It cannot be recovered, and there is no reset command, so Backups are never abandoned
+  by accident. To start over, delete the check file by hand:
+    %LOCALAPPDATA%\NetworkAnalyser\passphrase-check.age
+  If a change was left unfinished, also delete change-pending.json and
+  passphrase-check.previous.age beside it. The next Run then asks for a new passphrase
+  twice. Backups locked with the forgotten one stay locked for good: a later
+  change-passphrase lists them as not re-locked."""
+
+
 def _add_change_passphrase(commands: _Commands) -> None:
-    change = _command(
-        commands,
+    change = commands.add_parser(
         "change-passphrase",
-        "re-lock every Backup with a new Backup Passphrase",
-        "Re-lock every Backup and Run manifest in place under a new Backup Passphrase. "
-        f"{SECRETS_ARE_NEVER_OPTIONS}",
+        help="re-lock every Backup with a new Backup Passphrase",
+        description="Re-lock every Backup and Run manifest in place under a new Backup "
+        "Passphrase, one file\nat a time, with no plaintext on disk. If it is interrupted, "
+        "run it again to resume.\n\n" + textwrap.fill(SECRETS_ARE_NEVER_OPTIONS, 79),
+        epilog=_MANUAL_RESET,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        allow_abbrev=False,
+        color=False,
     )
     change.add_argument(
         "--run-folder",

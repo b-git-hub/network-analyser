@@ -15,7 +15,7 @@ import pytest
 from network_analyser import device_gateway, discovery, scope, trust_store
 from network_analyser.credentials import CredentialSet, CredentialSets, Secret
 from network_analyser.device_gateway.identity import Identity
-from network_analyser.records import ScopeRecord
+from network_analyser.records import Platform, ScopeRecord
 from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord, UnvisitedReason
 from network_analyser.records.events import (
@@ -86,6 +86,7 @@ class Lab:
         self.store: TrustStore = trust_store.load(tmp_path / "trust" / "known_hosts")
         self.sets = CredentialSets([CredentialSet("netops-ro", Secret(DEVICE_CANARY), None)])
         self.count = 0
+        self.budget = 3
         self.backups = Backups()
         self.stop = device_gateway.RunStop()
         self.ticks: list[int] = []
@@ -106,18 +107,26 @@ class Lab:
             setattr(device, key, value)
         return self.network.add(ip, device)
 
-    def visit(self, ip: IPv4Address, *, id_gate: bool, identity: Identity) -> DeviceRecord | Alias:
+    def visit(
+        self,
+        ip: IPv4Address,
+        *,
+        id_gate: bool,
+        neighbour_hint: Platform | None,
+        identity: Identity,
+    ) -> DeviceRecord | Alias:
         return device_gateway.visit(
             ip,
             scope=self.scope,
             trust=self.store,
             sets=self.sets,
             emit=self.events.append,
-            failure_budget=3,
+            failure_budget=self.budget,
             timeouts=Timeouts(),
             backup_sink=self.backups.append_capture,
             dial=self.network.dial,
             id_gate=id_gate,
+            neighbour_hint=neighbour_hint,
             identity=identity,
             wait_before_retry=self.network.wait_before_retry,
             stop=self.stop,
@@ -132,6 +141,7 @@ class Lab:
             emit=self.events.append,
             stop=self.stop,
             tick=self.ticks.append,
+            all_retired=self.sets.all_retired,
         )
 
 
@@ -407,13 +417,15 @@ def test_no_more_than_the_parallel_limit_run_at_once(lab: Lab) -> None:
     most = [0]
     real = lab.visit
 
-    def counted(ip: IPv4Address, *, id_gate: bool, identity: Identity) -> DeviceRecord | Alias:
+    def counted(
+        ip: IPv4Address, *, id_gate: bool, neighbour_hint: Platform | None, identity: Identity
+    ) -> DeviceRecord | Alias:
         with lock:
             running[0] += 1
             most[0] = max(most[0], running[0])
         time.sleep(0.02)
         try:
-            return real(ip, id_gate=id_gate, identity=identity)
+            return real(ip, id_gate=id_gate, neighbour_hint=neighbour_hint, identity=identity)
         finally:
             with lock:
                 running[0] -= 1
@@ -502,3 +514,55 @@ def test_a_trust_store_that_cannot_be_written_also_stops_visits_under_way(
     lab.crawl(str(SEED), parallel=1)
 
     assert lab.stop.requested
+
+
+# -- Credential Sets (#54; stories 32, 37) -------------------------------------------------
+
+
+def test_once_every_set_is_retired_the_crawl_stops_and_records_the_queue(lab: Lab) -> None:
+    neighbours = [f"192.0.2.{n}" for n in range(2, 7)]
+    lab.device(str(SEED), *(entry(f"sw-{ip}", management=(ip,)) for ip in neighbours))
+    for ip in neighbours:
+        lab.device(ip, password=WRONG)
+
+    result = lab.crawl(parallel=1)
+
+    assert result.stopped == discovery.ALL_SETS_RETIRED
+    assert lab.network.dialled == [SEED, *(IPv4Address(ip) for ip in neighbours[:3])]
+    tried = [d.unvisited_reason for d in result.devices if d.ip != SEED]
+    assert tried == [UnvisitedReason.AUTHENTICATION_FAILED] * 3
+    assert result.unvisited == tuple(
+        DeviceRecord(
+            IPv4Address(ip), DeviceOutcome.UNVISITED, unvisited_reason=UnvisitedReason.SETS_RETIRED
+        )
+        for ip in neighbours[3:]
+    )
+
+
+def test_a_neighbours_platform_hint_is_handed_to_its_visit(lab: Lab) -> None:
+    nexus = entry(
+        "nx-b",
+        management=("192.0.2.2",),
+        platform="N9K-C93180YC-EX",
+        version="Cisco Nexus Operating System (NX-OS) Software, Version 9.3(8)",
+    )
+    unknown = entry("sw-c", management=("192.0.2.3",), platform="unknown box", version="")
+    lab.device(str(SEED), nexus, unknown)
+    lab.device("192.0.2.2")
+    lab.device("192.0.2.3")
+    hints: dict[IPv4Address, Platform | None] = {}
+    real = lab.visit
+
+    def noted(
+        ip: IPv4Address, *, id_gate: bool, neighbour_hint: Platform | None, identity: Identity
+    ) -> DeviceRecord | Alias:
+        hints[ip] = neighbour_hint
+        return real(ip, id_gate=id_gate, neighbour_hint=neighbour_hint, identity=identity)
+
+    discovery.crawl([SEED], noted, scope=lab.scope, parallel=1, emit=lab.events.append)
+
+    assert hints == {
+        SEED: None,
+        IPv4Address("192.0.2.2"): Platform.NX_OS,
+        IPv4Address("192.0.2.3"): None,
+    }

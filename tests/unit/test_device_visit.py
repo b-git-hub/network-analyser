@@ -40,6 +40,7 @@ from network_analyser.records.events import (
     LoginAttempted,
     LoginResult,
     OutOfScopeRefused,
+    ParseFailed,
 )
 from network_analyser.trust_store import TrustStore
 from tests.support import device_text
@@ -123,7 +124,7 @@ def test_a_seed_is_logged_into_identified_and_left(visit: Visit) -> None:
     )
     assert record.host_key is not None
     assert record.host_key.verdict is HostKeyVerdict.NEW
-    assert device.lines == [
+    assert device.lines[:7] == [
         "terminal length 0",
         "terminal width 511",
         "show version",
@@ -131,7 +132,7 @@ def test_a_seed_is_logged_into_identified_and_left(visit: Visit) -> None:
         "show cdp neighbors detail",
         "show lldp neighbors detail",
         "show running-config view full",
-    ]
+    ]  # then the collection commands (#59, tests/unit/test_device_visit_collection.py)
     assert visit.backups == [device_text.IOS_XE_RUNNING_CONFIG]
     assert device.passwords_received == [DEVICE_CANARY]
     assert device.open_links == 0
@@ -147,7 +148,9 @@ def test_an_nxos_seed_reports_its_roles(visit: Visit) -> None:
 
     assert record.platform is Platform.NX_OS
     assert record.landing_privilege == LandingPrivilege("roles NA-READ", too_low=False)
-    assert visit.commands()[-4:] == [
+    commands = visit.commands()
+    start = commands.index("show user-account netops-ro")
+    assert commands[start : start + 4] == [  # then the collection commands (#60)
         "show user-account netops-ro",
         "show cdp neighbors detail | json",
         "show lldp neighbors detail | json",
@@ -161,7 +164,7 @@ def test_every_step_is_audited_in_order_without_device_output(visit: Visit) -> N
     visit()
 
     kinds = [type(e) for e in visit.events]
-    assert kinds == [
+    assert kinds[:11] == [
         ConnectionAttempted,
         HostKeyChecked,
         LoginAttempted,
@@ -173,11 +176,13 @@ def test_every_step_is_audited_in_order_without_device_output(visit: Visit) -> N
         CommandSent,
         CommandSent,
         CommandSent,
-        DeviceFinished,
     ]
+    # Then the collection commands (#59); this fake device denies them all, each audited.
+    assert set(kinds[11:-1]) == {CommandSent, ParseFailed}
+    assert kinds[-1] is DeviceFinished
     assert visit.events[0] == ConnectionAttempted(SEED, 22, ConnectionResult.CONNECTED, retry=False)
     assert visit.events[2] == LoginAttempted(SEED, 1, "netops-ro", LoginResult.SUCCEEDED)
-    assert visit.events[-5] == DeviceIdentified(SEED, Platform.IOS_XE, "level 15")
+    assert visit.events[7] == DeviceIdentified(SEED, Platform.IOS_XE, "level 15")
     assert visit.events[-1] == DeviceFinished(SEED, DeviceOutcome.VISITED, None)
     assert all(DEVICE_CANARY not in repr(e) for e in visit.events)
     assert all("uptime" not in repr(e) for e in visit.events)

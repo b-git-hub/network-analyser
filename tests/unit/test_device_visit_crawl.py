@@ -33,7 +33,7 @@ from network_analyser.records.identity import Alias, AliasEvidence
 from network_analyser.records.run_request import Timeouts
 from network_analyser.records.unknown import Unknown
 from network_analyser.trust_store import TrustStore
-from tests.support import device_text
+from tests.support import device_text, ios_xe_text
 from tests.support.fake_device import (
     DEVICE_CANARY,
     NXOS_REPLIES,
@@ -129,13 +129,15 @@ def _record(result: DeviceRecord | Alias) -> DeviceRecord:
 
 def test_cdp_then_lldp_neighbours_are_read_after_identification(visit: Visit) -> None:
     device = visit.network.add(str(DEVICE))
+    device.replies.update(ios_xe_text.REPLIES)
     device.replies["show cdp neighbors detail"] = device_text.IOS_XE_CDP_DETAIL
     device.replies["show lldp neighbors detail"] = device_text.IOS_XE_LLDP_DETAIL
 
     record = _record(visit())
 
     assert record.outcome is DeviceOutcome.VISITED
-    assert device.lines[-3:-1] == NEIGHBOUR_LINES
+    backup_at = device.lines.index("show running-config view full")
+    assert device.lines[backup_at - 2 : backup_at] == NEIGHBOUR_LINES
     cdp = _table(record, "cdp")
     assert isinstance(cdp, tuple)
     assert [n.name for n in cdp] == ["sw-b.example.test", "SEP00AABBCCDDEE"]
@@ -145,7 +147,7 @@ def test_cdp_then_lldp_neighbours_are_read_after_identification(visit: Visit) ->
     assert record.collected is not None
     assert isinstance(record.collected.cdp, Reading)
     assert record.collected.cdp.commands == ("show cdp neighbors detail",)
-    assert isinstance(record.collected.interfaces, Unknown)  # collected by #59 and #60
+    assert isinstance(record.collected.interfaces, Reading)  # collected after the Backup (#59)
     assert visit.of(ParseFailed) == []
 
 
@@ -158,7 +160,8 @@ def test_an_nxos_device_is_asked_for_the_json_tables(visit: Visit) -> None:
 
     record = _record(visit())
 
-    assert device.lines[-3:-1] == [f"{line} | json" for line in NEIGHBOUR_LINES]
+    backup_at = device.lines.index("show running-config")  # collection (#60) follows it
+    assert device.lines[backup_at - 2 : backup_at] == [f"{line} | json" for line in NEIGHBOUR_LINES]
     cdp = _table(record, "cdp")
     assert isinstance(cdp, tuple)
     assert len(cdp) == 2
@@ -167,6 +170,7 @@ def test_an_nxos_device_is_asked_for_the_json_tables(visit: Visit) -> None:
 
 def test_a_table_the_device_refuses_is_unknown_and_audited_without_output(visit: Visit) -> None:
     device = visit.network.add(str(DEVICE))
+    device.replies.update(ios_xe_text.REPLIES)
     device.replies["show cdp neighbors detail"] = "% CDP is not enabled\n"
 
     record = _record(visit())

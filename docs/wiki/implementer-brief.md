@@ -19,6 +19,7 @@ You implement ONE ticket of spec https://github.com/b-git-hub/network-analyser/i
 - In a Bash call whose text mentions git anywhere (a `git` command, `.gitignore`, `github.com`), use no `$` expansion (`$?`, `$VAR`, `$(...)`, loop variables): the worktree guard refuses it. Run git alone and read the exit code from the result. (Root cause found by the #38 retro, 2026-11-18.)
 - Read [spec-37-follow-ups](spec-37-follow-ups.md) for items targeted at your ticket.
 - Before reporting done: commit, then `git merge claude/lucid-shannon-8xewst` (the tip may have moved), resolve conflicts, re-run the full test suite and linters, commit.
+- Don't squash, rebase or `reset --soft` onto the branch name: the integration tip moves while you work, and a reset onto the moved tip silently reverts other tickets (#58 nearly undid #50 this way, 2026-11-19). Plain commits plus one merge of the tip are enough.
 - Commit messages end with the attribution lines from your own session's system reminder (they name the model that actually ran you; don't copy another agent's). Changed 2026-11-18 after a Sonnet merger noticed the hard-coded Opus line.
   Reference the ticket ("Part of #NN"); do not write "Closes".
 

@@ -1,9 +1,11 @@
-"""A Run writes `topology.json` at its end, including after Ctrl+C (#52).
+"""A Run writes `topology.json` at its end, including after Ctrl+C (#52), and draws
+`diagram.html` (#63) and `diagram.drawio` (#65) from it.
 
 Driven through `main(argv)` with what the operator types; the Seeds are fake devices.
 """
 
 import json
+import xml.etree.ElementTree as ET
 from ipaddress import IPv4Address
 from pathlib import Path
 
@@ -46,6 +48,30 @@ def test_a_run_writes_topology_json_at_its_end(run: Runner) -> None:
     assert "topology.json" in got.out
 
 
+def test_a_run_draws_diagram_html_from_its_topology(run: Runner) -> None:
+    got = run(*FLAGS, typed=first_run())
+
+    assert got.code == ExitCode.CLEAN
+    (folder,) = data_folder().runs.iterdir()
+    page = (Path(folder) / "diagram.html").read_text(encoding="utf-8")
+    assert _topology()["devices"][0]["id"] in page  # type: ignore[index]  # JSON data
+    assert "netops-ro" not in page
+    assert "diagram.html" in got.out
+
+
+def test_a_run_draws_diagram_drawio_beside_diagram_html(run: Runner) -> None:
+    got = run(*FLAGS, typed=first_run())
+
+    assert got.code == ExitCode.CLEAN
+    (folder,) = data_folder().runs.iterdir()
+    root = ET.fromstring((Path(folder) / "diagram.drawio").read_bytes())  # noqa: S314 (our own)
+    assert [d.get("name") for d in root.findall("diagram")] == ["Physical", "Routing"]
+    ident = _topology()["devices"][0]["id"]  # type: ignore[index]  # JSON data
+    assert f'id="n-{ident}"' in (Path(folder) / "diagram.drawio").read_text(encoding="utf-8")
+    assert "netops-ro" not in (Path(folder) / "diagram.drawio").read_text(encoding="utf-8")
+    assert "diagram.drawio" in got.out
+
+
 def test_a_run_stopped_by_ctrl_c_still_writes_topology_json(
     run: Runner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -65,6 +91,9 @@ def test_a_run_stopped_by_ctrl_c_still_writes_topology_json(
     devices = _topology()["devices"]
     assert isinstance(devices, list)
     assert [d["management_ip"] for d in devices] == ["192.0.2.1"]
+    (folder,) = data_folder().runs.iterdir()
+    assert (Path(folder) / "diagram.html").is_file()
+    assert (Path(folder) / "diagram.drawio").is_file()
 
 
 def test_a_topology_that_cannot_be_written_needs_attention(
@@ -81,3 +110,18 @@ def test_a_topology_that_cannot_be_written_needs_attention(
     assert "topology.json could not be written" in got.err
     (folder,) = data_folder().runs.iterdir()
     assert not (Path(folder) / "topology.json").exists()
+
+
+def test_a_diagram_that_cannot_be_drawn_needs_attention(
+    run: Runner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def disk_full(*_args: object) -> int:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(run_output, "write_scanned_text", disk_full)
+
+    got = run(*FLAGS, typed=first_run())
+
+    assert got.code == ExitCode.NEEDS_ATTENTION
+    assert "diagram.html or diagram.drawio could not be drawn" in got.err
+    assert _topology()["format_version"] == 1  # topology.json was still written

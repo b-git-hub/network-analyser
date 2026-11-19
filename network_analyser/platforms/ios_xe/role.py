@@ -19,9 +19,10 @@ from network_analyser.platforms.roles import (
     ROLE_NAME,
     USERNAME_PLACEHOLDER,
     RoleError,
+    RoleRule,
     header,
     ise_command_set_rows,
-    role_commands,
+    role_rules,
 )
 
 FALLBACK_LEVEL: Final = 7
@@ -35,7 +36,8 @@ starts with any other keyword needs its default level checked before it joins th
 
 def role_snippet(username: str | None, *, tacacs: bool, allow_list: AllowList = ALLOW_LIST) -> str:
     """Return the CLI view, local or TACACS+ form, permitting exactly `allow_list`."""
-    commands = role_commands(allow_list, username)
+    rules = role_rules(allow_list, username, parameters=True)
+    commands = tuple(rule.command for rule in rules)
     account = USERNAME_PLACEHOLDER if username is None else username
     lines = header(
         "IOS/IOS-XE",
@@ -47,7 +49,7 @@ def role_snippet(username: str | None, *, tacacs: bool, allow_list: AllowList = 
     lines += [f" commands exec include {command}" for command in commands]
     lines += ["!"]
     if tacacs:
-        lines += _tacacs_part(commands, account)
+        lines += _tacacs_part(rules, account)
     else:
         lines += _local_part(commands, account)
     return "\n".join(lines) + "\n"
@@ -112,7 +114,7 @@ def _fallback(commands: tuple[str, ...], account: str) -> list[str]:
     ]
 
 
-def _tacacs_part(commands: tuple[str, ...], account: str) -> list[str]:
+def _tacacs_part(rules: tuple[RoleRule, ...], account: str) -> list[str]:
     return [
         "! On ISE (Work Centers > Device Administration > Policy Elements > Results):",
         "!",
@@ -123,7 +125,7 @@ def _tacacs_part(commands: tuple[str, ...], account: str) -> list[str]:
         f'! TACACS Command Set "{ROLE_NAME}", with "Permit any command that is not listed',
         "! below\" unticked. Each row's arguments are an anchored regular expression,",
         "! so the row permits that one command only:",
-        *ise_command_set_rows(commands),
+        *ise_command_set_rows(rules),
         "!",
         f"! Then a device administration authorisation rule for {account} that returns",
         "! this profile and this command set.",
