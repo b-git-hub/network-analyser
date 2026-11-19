@@ -32,21 +32,6 @@ def test_version_prints_semver_0_y_z(capsys: pytest.CaptureFixture[str]) -> None
 
 FINGERPRINT = "SHA256:" + "A" * 43
 
-EVERY_COMMAND = [
-    pytest.param(["render", "runs/2026-01-01T000000Z"], id="render"),
-]
-
-
-@pytest.mark.parametrize("argv", EVERY_COMMAND)
-def test_a_command_not_built_yet_says_so_and_exits_4(
-    argv: list[str], capsys: pytest.CaptureFixture[str]
-) -> None:
-    code = main(argv)
-
-    err = capsys.readouterr().err
-    assert code == ExitCode.INTERNAL_ERROR
-    assert f"network-analyser {argv[0]}: not built yet\n" in err
-
 
 def test_every_change_passphrase_flag_of_the_frozen_surface_parses(
     capsys: pytest.CaptureFixture[str],

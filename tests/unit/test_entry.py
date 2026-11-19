@@ -20,9 +20,9 @@ def test_python_m_network_analyser_prints_the_version_and_exits_0() -> None:
     assert result.stdout.startswith("network-analyser 0.")
 
 
-def test_a_command_not_built_yet_exits_4_from_the_real_entry_point() -> None:
+def test_a_command_s_exit_code_reaches_the_real_entry_point() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "network_analyser", "render", "runs/x"],
+        [sys.executable, "-m", "network_analyser", "render", "runs/no-such-run"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -30,5 +30,5 @@ def test_a_command_not_built_yet_exits_4_from_the_real_entry_point() -> None:
         timeout=60,
     )
 
-    assert result.returncode == 4
-    assert "network-analyser render: not built yet" in result.stderr
+    assert result.returncode == 2
+    assert "network-analyser render: refused" in result.stderr
