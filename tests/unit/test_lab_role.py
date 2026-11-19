@@ -47,7 +47,7 @@ def test_regenerating_replaces_a_hand_written_role_and_keeps_the_rest() -> None:
         "    !\n"
         "    role name NA-READ\n"
         "      description old\n"
-        "      rule 1 permit command show vpc\n"
+        "      rule 1 permit command show tech-support\n"
         "    username netanalyser password CHANGE_ME role NA-READ\n"
     )
 
@@ -55,7 +55,7 @@ def test_regenerating_replaces_a_hand_written_role_and_keeps_the_rest() -> None:
 
     assert fresh.startswith("    hostname sw-a\n    parser view NA-READ\n     secret CHANGE_ME\n")
     assert "show parser view" not in fresh
-    assert "show vpc" not in fresh
+    assert "show tech-support" not in fresh
     assert "     commands exec include show version\n" in fresh
     assert "\n    !\n    role name NA-READ\n      description Network Analyser" in fresh
     assert "      rule 1 permit command terminal length 0\n" in fresh

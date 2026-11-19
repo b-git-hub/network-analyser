@@ -17,7 +17,10 @@ The order is the safety (ADR 0002, ADR 0003, stories 38-52, 57-59, 63-64, 73):
    `show version` decides the Platform. An unsupported one is left at once.
 7. The landing privilege; then the chassis serial check (a serial already seen this Run is
    the same device, left before anything else is collected); then the CDP and LLDP tables;
-   then the running config (#51).
+   then the running config (#51); then the Platform's collection commands (#59, #60).
+   A collection command that is denied or not understood leaves only its data unknown;
+   one that drops the session leaves the device partial, keeping the Backup and what
+   was collected before it.
 8. Leave. Nothing is sent to end the session. No command runs past the per-device timeout,
    and a command that times out leaves the device partial; it is never retried. A whole
    config goes to the Backup sink once the session is closed, and to nothing else; one that
@@ -76,6 +79,7 @@ REFUSED_COMMAND: Final = "a command was refused by the allow-list gate (a bug in
 NO_SHELL: Final = "logged in, but the device's CLI could not be opened"
 TRUST_STORE_UNWRITABLE: Final = "the Trust Store could not be written"
 """The fixed message when a NEW key could not be saved: the device is left and the Run stops."""
+_NOT_READ: Final = "not read, the session was dropped"
 _USERNAME_DOES_NOT_FIT: Final = "the username does not fit the privilege command's pattern"
 _PARSER: Final = {
     Platform.IOS_XE: "ntc-templates cisco_ios",
@@ -198,6 +202,7 @@ class _Visitor:
         self.facts: VersionFacts | None = None
         self.privilege: LandingPrivilege | Unknown | None = None
         self.neighbours: dict[NeighbourProtocol, Neighbours] = {}
+        self.collection: Collected | None = None
 
     def run(self) -> DeviceRecord | Alias:
         placement = self.scope.placement(self.ip)
@@ -370,15 +375,18 @@ class _Visitor:
             platform, facts = found
             self.read_neighbours(session, platform)
             backup = self.capture_backup(session, platform, facts)
+            dropped_by = self.collect(session, platform, facts)
         except SessionDroppedError as dropped:
             return self.partial(view, DROP_REASONS[type(dropped)], session)
         except CommandRefusedError:
             return self.partial(view, REFUSED_COMMAND, session)
         finally:
             session.close()
-        if isinstance(backup, str):
-            return self.partial(view, backup, session)
-        self.backup_sink(*backup)  # the session is closed first: the sink may wait its turn
+        if not isinstance(backup, str):
+            self.backup_sink(*backup)  # the session is closed first: the sink may wait its turn
+        reason = backup if isinstance(backup, str) else dropped_by
+        if reason is not None:
+            return self.partial(view, reason, session)
         return self.record(ev.DeviceOutcome.VISITED, view, session.platform)
 
     def identify(
@@ -467,6 +475,33 @@ class _Visitor:
             else:
                 self.neighbours[protocol] = Reading((command,), found)
 
+    def collect(
+        self, session: DeviceSession, platform: Platform, facts: VersionFacts
+    ) -> str | None:
+        """Send the Platform's collection commands (#59, #60); return why the session dropped.
+
+        A command that drops the session leaves it and every later one unknown, and its
+        reason makes the device partial. Each denied or unreadable command is audited.
+        """
+        dropped: list[str] = []
+
+        def send(command: str) -> str | Unknown:
+            if not dropped:
+                try:
+                    return session.send(platform, command)
+                except SessionDroppedError as error:
+                    dropped.append(DROP_REASONS[type(error)])
+            return Unknown(f"{command}: {_NOT_READ}")
+
+        collection = platforms.collect(platform, send, facts)
+        if collection is not None:
+            self.collection = collection.collected
+            for problem in collection.problems:
+                self.emit(
+                    ev.ParseFailed(self.ip, problem.command, collection.parser, problem.reason)
+                )
+        return dropped[0] if dropped else None
+
     def identified(self, platform: Platform, privilege: LandingPrivilege | Unknown) -> None:
         shown = privilege.shown if isinstance(privilege, LandingPrivilege) else "unknown"
         self.emit(ev.DeviceIdentified(self.ip, platform, shown))
@@ -511,9 +546,9 @@ class _Visitor:
         )
 
     def collected(self) -> Collected:
-        """The CDP and LLDP tables (#50); the rest waits for the collection tickets (#59, #60)."""
+        """The CDP and LLDP tables (#50) on top of the Platform's collection (#59, #60)."""
         return dataclasses.replace(
-            Collected.nothing(NOT_COLLECTED),
+            self.collection or Collected.nothing(NOT_COLLECTED),
             cdp=self._table(NeighbourProtocol.CDP),
             lldp=self._table(NeighbourProtocol.LLDP),
         )

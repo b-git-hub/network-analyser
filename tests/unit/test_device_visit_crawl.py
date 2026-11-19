@@ -158,7 +158,8 @@ def test_an_nxos_device_is_asked_for_the_json_tables(visit: Visit) -> None:
 
     record = _record(visit())
 
-    assert device.lines[-3:-1] == [f"{line} | json" for line in NEIGHBOUR_LINES]
+    backup_at = device.lines.index("show running-config")  # collection (#60) follows it
+    assert device.lines[backup_at - 2 : backup_at] == [f"{line} | json" for line in NEIGHBOUR_LINES]
     cdp = _table(record, "cdp")
     assert isinstance(cdp, tuple)
     assert len(cdp) == 2

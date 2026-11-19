@@ -138,7 +138,7 @@ def _show(command: str, data: run_output.DataFolder, path: Path) -> ExitCode:
         return ExitCode.REFUSED
     passphrase = ask.secret("Backup Passphrase: ")
     ask.say("Opening the Backup in memory (about a second)...")
-    files = show.PassphraseFiles(
+    files = backup_store.PassphraseFiles(
         check_file=data.check_file,
         previous_check_file=data.previous_check_file,
         change_pending=data.change_pending,

@@ -16,6 +16,7 @@ from typing import Final
 
 from network_analyser.platforms import neighbours
 from network_analyser.platforms.allowlist import AllowList, Exact, Template
+from network_analyser.platforms.collection import Collection, Problem, Send
 from network_analyser.platforms.hints import neighbour_hint
 from network_analyser.platforms.identify import (
     Hint,
@@ -30,6 +31,7 @@ from network_analyser.platforms.ios_xe import identify as ios_xe
 from network_analyser.platforms.ios_xe import role as ios_xe_role
 from network_analyser.platforms.neighbours import NeighbourProtocol
 from network_analyser.platforms.nxos import backup as nxos_backup
+from network_analyser.platforms.nxos import collect as nxos_collect
 from network_analyser.platforms.nxos import commands as nxos_commands
 from network_analyser.platforms.nxos import identify as nxos
 from network_analyser.platforms.nxos import role as nxos_role
@@ -140,6 +142,18 @@ def backup_problem(platform: Platform, text: str) -> str | None:
     return check(text)
 
 
+def collect(platform: Platform, send: Send, version: VersionFacts) -> Collection | None:
+    """Send `platform`'s collection commands through `send`; return what they told the tool.
+
+    Every part of the result is a reading or unknown (#52); a denied or unreadable command
+    leaves its own data unknown and is listed as a problem, never ending the visit. None
+    when this version of the tool collects nothing from `platform` (IOS/IOS-XE until #59).
+    """
+    if platform is Platform.NX_OS:
+        return nxos_collect.collect(send, version)
+    return None
+
+
 def role_snippet(platform: Platform, username: str | None, *, tacacs: bool) -> str:
     """Return the Device Role for `platform`, generated from its allow-list (ADR 0005).
 
@@ -163,14 +177,18 @@ __all__ = [
     "SESSION_SETUP",
     "SHOW_VERSION",
     "AllowList",
+    "Collection",
     "Exact",
     "Hint",
     "NeighbourProtocol",
+    "Problem",
     "RoleError",
+    "Send",
     "Template",
     "Unsupported",
     "backup_command",
     "backup_problem",
+    "collect",
     "identify",
     "is_config_prompt",
     "neighbour_commands",
