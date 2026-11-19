@@ -205,6 +205,11 @@ WRITE_OWNERS: frozenset[str] = frozenset(
         # later the diagrams and the Run report). Every string passes through the secret scan
         # before any escaping, then the whole text again; temp-then-rename.
         "run_output/scanned_file.py",
+        # #51: Backups and manifest.age, temp-then-rename, never replacing a file. Only age
+        # ciphertext is written: each config is locked in memory first, so no plaintext
+        # config ever reaches the disk. Ciphertext cannot hold a typed secret to scan for,
+        # and a file name that holds one is never used.
+        "backup_store/locker.py",
     }
 )
 _WRITE_CALLS = frozenset({"write_text", "write_bytes", "symlink_to", "hardlink_to", "touch"})

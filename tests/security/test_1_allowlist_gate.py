@@ -22,13 +22,20 @@ pytestmark = pytest.mark.security
 DEVICE = IPv4Address("192.0.2.10")
 
 ALLOWED = {
-    Platform.IOS_XE: ["terminal length 0", "terminal width 511", "show version", "show privilege"],
+    Platform.IOS_XE: [
+        "terminal length 0",
+        "terminal width 511",
+        "show version",
+        "show privilege",
+        "show running-config view full",
+    ],
     Platform.NX_OS: [
         "terminal length 0",
         "terminal width 511",
         "show version",
         "show user-account netops-ro",
         "show user-account svc.nexus_2",
+        "show running-config",
     ],
 }
 
@@ -62,9 +69,20 @@ NEAR_MISSES = [
     "write memory",
     "copy running-config startup-config",
     "reload",
-    "show running-config",
+    "show running-config all",
+    "show running-config view",
+    "show running-config view full | include secret",
+    "show running-config | redirect flash:x",
+    "show running-config interface Vlan1",
+    "show startup-config",
     "show privilege\x1b[A",
 ]
+# Near-misses on one Platform that are allowed on the other (#51): IOS-XE is only ever sent
+# the full view (story 96), and NX-OS has no CLI views.
+PLATFORM_NEAR_MISSES = {
+    Platform.IOS_XE: ["show running-config"],
+    Platform.NX_OS: ["show running-config view full"],
+}
 
 BAD_PARAMETERS = [
     "show user-account",
@@ -128,8 +146,10 @@ def test_an_allow_listed_command_is_sent_and_audited_as_its_exact_string(
     assert sent.command == command
 
 
-@pytest.mark.parametrize("platform", list(Platform))
-@pytest.mark.parametrize("command", NEAR_MISSES + BAD_PARAMETERS)
+@pytest.mark.parametrize(
+    ("platform", "command"),
+    [(p, c) for p in Platform for c in NEAR_MISSES + BAD_PARAMETERS + PLATFORM_NEAR_MISSES[p]],
+)
 def test_anything_else_is_refused_and_never_reaches_the_device(
     platform: Platform, command: str
 ) -> None:

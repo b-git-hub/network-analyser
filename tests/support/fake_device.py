@@ -41,12 +41,14 @@ IOS_XE_REPLIES = {
     "terminal width 511": "",
     "show version": device_text.IOS_XE_SHOW_VERSION,
     "show privilege": device_text.IOS_XE_PRIVILEGE_15,
+    "show running-config view full": device_text.IOS_XE_RUNNING_CONFIG,
 }
 NXOS_REPLIES = {
     "terminal length 0": "",
     "terminal width 511": "",
     "show version": device_text.NXOS_SHOW_VERSION,
     "show user-account netops-ro": device_text.NXOS_USER_ACCOUNT,
+    "show running-config": device_text.NXOS_RUNNING_CONFIG,
 }
 
 
@@ -73,6 +75,8 @@ class FakeDevice:
     passwords_received: list[str] = field(default_factory=list)
     lines: list[str] = field(default_factory=list)
     key_types_asked: list[tuple[str, ...]] = field(default_factory=list)
+    timeouts: list[float] = field(default_factory=list)
+    """The timeout each line in `lines` was sent with."""
     open_links: int = 0
     gate: Callable[[str], bool] | None = None
 
@@ -88,6 +92,7 @@ class _FakeShell:
         device = self._device
         assert timeout > 0
         device.lines.append(line)
+        device.timeouts.append(timeout)
         if line in device.hangs_on:
             return Reply(None, CommandResult.TIMEOUT)
         if line == device.config_prompt_after:

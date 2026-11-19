@@ -71,7 +71,7 @@ def test_a_started_run_records_its_start_and_end_in_audit_log(
         "ended": "completed",
         "devices_visited": 1,
         "devices_unvisited": 0,
-        "backups_written": 0,
+        "backups_written": 1,
         "secret_scan_hits": 0,
     }
     text = (folder / "audit.log").read_text(encoding="utf-8")

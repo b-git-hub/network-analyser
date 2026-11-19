@@ -35,3 +35,5 @@ How [spec #37](https://github.com/b-git-hub/network-analyser/issues/37) (Network
 - 2026-11-18: merged #48 at `a1d294e`; no conflicts, check.py all green, 561 tests passed; adds audit log, secret scan and redaction layer.
 - 2026-11-18: merged #49 at `994678340c2f`; no conflicts, check.py all green, 827 tests passed; adds SSH seed login, Platform identification, allow-list gate and trust-key command.
 - 2026-11-18: wave 4 started after #49 merged: #50, #51, #52, #53 in parallel.
+- 2026-11-19: merged #53 at `943b4e0`; no conflicts, check.py all green, 883 tests passed; adds role-snippet command and regenerated lab/network-analyser-lab.yaml (already in the ticket).
+- 2026-11-19: merged #51 at `e71587c`; no conflicts, check.py all green, 970 tests passed; allow-list changed and the ticket already carried the regenerated lab/network-analyser-lab.yaml.
