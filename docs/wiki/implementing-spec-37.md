@@ -40,3 +40,4 @@ How [spec #37](https://github.com/b-git-hub/network-analyser/issues/37) (Network
 - 2026-11-19: merged #52 at `c7324fa`; no conflicts, check.py all green, 1076 tests passed; adds topology core, topology.json and docs/topology-json.md.
 - 2026-11-19: wave 5 started: #59, #60, #63 after #52 merged (#61, #62 held back to limit concurrency against the usage limit).
 - 2026-11-19: merged #57 at `f7d09fd`; no conflicts, check.py all green, 1102 tests passed; adds show-backup command (backup_store/show.py, cli/cmd_show_backup.py).
+- 2026-11-19: merged #50 at `22c66a5`; no conflicts, check.py all green, 1209 tests passed; branch already carried the regenerated lab/network-analyser-lab.yaml (step 4 needed no extra commit).
