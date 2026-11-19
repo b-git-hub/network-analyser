@@ -9,10 +9,9 @@ guess. Only parsed values leave here: no reply, and no line of one, is kept.
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from ipaddress import IPv4Address, IPv4Interface, IPv4Network, IPv6Address, ip_address
+from ipaddress import IPv4Address, IPv4Interface, IPv4Network
 
 from network_analyser.platforms.nxos.json_reply import (
-    TEXT_LIMIT,
     NotUnderstood,
     Row,
     ipv4,
@@ -26,7 +25,6 @@ from network_analyser.platforms.nxos.json_reply import (
     rows,
     tables,
     text,
-    texts,
     vlan_set,
 )
 from network_analyser.records.collected import (
@@ -37,7 +35,6 @@ from network_analyser.records.collected import (
     FhrpProtocol,
     InterfaceIp,
     MacEntry,
-    Neighbour,
     PortChannel,
     RoutingNeighbour,
     RoutingProtocol,
@@ -49,9 +46,6 @@ from network_analyser.records.collected import (
 )
 from network_analyser.records.interface_names import InterfaceName
 from network_analyser.records.unknown import Unknown
-
-_NOT_ADVERTISED = "not advertised"
-
 
 # -- Features ------------------------------------------------------------------------------
 
@@ -268,7 +262,7 @@ def vpc_keepalive(data: Row) -> Keepalive:
     )
 
 
-# -- VRFs and neighbours ----------------------------------------------------------------------
+# -- VRFs ----------------------------------------------------------------------
 
 
 def vrfs(data: Row) -> tuple[Vrf, ...]:
@@ -277,75 +271,6 @@ def vrfs(data: Row) -> tuple[Vrf, ...]:
     if not names:
         raise NotUnderstood
     return tuple(Vrf(name, management=name in MANAGEMENT_VRFS) for name in names)
-
-
-def cdp(data: Row) -> tuple[Neighbour, ...]:
-    """`show cdp neighbors detail`: each entry, every address kept, management ones first."""
-    found: list[Neighbour] = []
-    for row in rows(data, "cdp_neighbor_detail_info"):
-        addresses = _ips([*texts(row, "v4mgmtaddr"), *texts(row, "v4addr")])
-        ipv6 = _ips([*texts(row, "v6mgmtaddr"), *texts(row, "v6addr")])
-        native = text(row, "nativevlan")
-        found.append(
-            Neighbour(
-                local_port=port(required(row, "intf_id")),
-                name=_advertised(text(row, "device_id"), "device ID"),
-                remote_port=_remote_port(text(row, "port_id")),
-                addresses=tuple(a for a in addresses if isinstance(a, IPv4Address)),
-                platform=_cdp_platform(text(row, "platform_id"), text(row, "version")),
-                ipv6_addresses=tuple(a for a in ipv6 if isinstance(a, IPv6Address)),
-                native_vlan=int(native) if native is not None and native.isdigit() else None,
-            )
-        )
-    return tuple(found)
-
-
-def lldp(data: Row) -> tuple[Neighbour, ...]:
-    """`show lldp neighbors detail`: each entry with its chassis ID."""
-    found: list[Neighbour] = []
-    for row in rows(data, "nbor_detail"):
-        addresses = _ips([*texts(row, "mgmt_addr"), *texts(row, "mgmt_addr_ipv6")])
-        chassis = _advertised(text(row, "chassis_id"), "chassis ID")
-        found.append(
-            Neighbour(
-                local_port=port(required(row, "l_port_id")),
-                name=_advertised(text(row, "sys_name"), "system name"),
-                remote_port=_remote_port(text(row, "port_id")),
-                addresses=tuple(a for a in addresses if isinstance(a, IPv4Address)),
-                platform=_advertised(text(row, "sys_desc"), "system description"),
-                ipv6_addresses=tuple(a for a in addresses if isinstance(a, IPv6Address)),
-                chassis_id=None if isinstance(chassis, Unknown) else chassis,
-            )
-        )
-    return tuple(found)
-
-
-def _advertised(value: str | None, what: str) -> str | Unknown:
-    shown = label(value) if value is not None else ""
-    if not shown or _NOT_ADVERTISED in shown.lower() or shown.lower() == "null":
-        return Unknown(f"{what} not advertised")
-    return shown
-
-
-def _remote_port(value: str | None) -> InterfaceName | Unknown:
-    shown = _advertised(value, "remote port")
-    return shown if isinstance(shown, Unknown) else port(shown)
-
-
-def _cdp_platform(platform: str | None, version: str | None) -> str | Unknown:
-    parts = [label(v) for v in (platform, version) if v is not None and label(v)]
-    return ", ".join(parts)[:TEXT_LIMIT] if parts else Unknown("platform not advertised")
-
-
-def _ips(values: list[str]) -> tuple[IPv4Address | IPv6Address, ...]:
-    """Advertised addresses, in order, without repeats; one that does not parse is dropped."""
-    found: list[IPv4Address | IPv6Address] = []
-    for value in values:
-        try:
-            found.append(ip_address(value.strip()))
-        except ValueError:
-            continue  # "not advertised" and the like: dropped, never guessed at
-    return tuple(dict.fromkeys(found))
 
 
 # -- ARP and MAC ---------------------------------------------------------------------------------

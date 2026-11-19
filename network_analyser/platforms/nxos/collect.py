@@ -7,7 +7,10 @@ reason `<command>: <why>`, and is handed back as a `Problem` for the Audit log; 
 ends the visit. A reply of `Unknown` (the session was dropped) leaves that data unknown
 with the gateway's reason, which the gateway has already recorded.
 
-`show feature` comes first: a command for a feature that is off (LLDP, vPC, OSPF, EIGRP,
+The CDP and LLDP tables are not read here: the crawl reads them before the Backup (#50)
+and the gateway puts its readings in their place.
+
+`show feature` comes first: a command for a feature that is off (vPC, OSPF, EIGRP,
 BGP, HSRP, VRRP) is not sent, and its data is "none", with `show feature` as the evidence.
 When `show feature` itself gives nothing, every command is sent.
 
@@ -29,6 +32,7 @@ from network_analyser.platforms.nxos.json_reply import (
     read,
 )
 from network_analyser.records.collected import (
+    NOT_COLLECTED,
     Collected,
     Interface,
     InterfaceIp,
@@ -76,8 +80,8 @@ class _Collector:
         collected = Collected(
             stack_members=_stack(version),
             interfaces=interfaces,
-            cdp=self.reading(c.SHOW_CDP_NEIGHBORS_DETAIL, readers.cdp),
-            lldp=self.reading(c.SHOW_LLDP_NEIGHBORS_DETAIL, readers.lldp, feature="lldp"),
+            cdp=Unknown(NOT_COLLECTED),  # the crawl's own reading goes here (#50)
+            lldp=Unknown(NOT_COLLECTED),
             vlans=self.reading(c.SHOW_VLAN_BRIEF, readers.vlans),
             port_channels=_reading(channels),
             vpc=self.vpc(interfaces),

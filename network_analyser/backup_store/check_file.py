@@ -13,6 +13,7 @@ the call into age (CODING_STANDARDS.md, "Secrets").
 
 import os
 import secrets
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,11 @@ PASSPHRASE_MIN: Final = 15
 CHECK_PHRASE: Final = b"Network Analyser check file: this passphrase locks the Backups.\n"
 _AGE_HEADER = b"age-encryption.org/v1\n"
 _READ_AT_MOST = 64 * 1024  # a check file is a few hundred bytes
+
+if sys.platform == "win32":  # binary: Windows text mode would turn age's \n into \r\n
+    _NEW_FILE = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_BINARY
+else:
+    _NEW_FILE = os.O_WRONLY | os.O_CREAT | os.O_EXCL
 
 
 class CheckFileError(Exception):
@@ -89,6 +95,17 @@ class BackupPassphrase:
         lowers it (ADR 0004). The passphrase is revealed only for the call into age.
         """
         return AGE.lock(plaintext, self.__secret.reveal())
+
+    def unlock(self, locked: bytes) -> bytes | None:
+        """Return the plaintext of an age file locked with the passphrase, else None (#58).
+
+        None also when `locked` is not an age file at all. The plaintext is for memory only:
+        the caller never writes it to disk.
+        """
+        try:
+            return AGE.unlock(locked, self.__secret.reveal())
+        except CheckFileError:  # not an age file
+            return None
 
     def add_to_scan(self, scan: SecretScan) -> None:
         """Have the secret scan look for the passphrase in everything written (#30, #48).
@@ -154,10 +171,28 @@ def create_check_file(
     return BackupPassphrase(passphrase)
 
 
+def renew_check_file(path: Path, passphrase: Secret) -> BackupPassphrase:
+    """Replace the check file with one for a new Backup Passphrase (`change-passphrase`, #58).
+
+    Only `change_pending.start_change` calls this, after keeping the old check file as the
+    previous check file. The new file is written to a temporary name, flushed and renamed
+    over the old one, so a crash leaves either the old check file or the new one.
+
+    Raises:
+        ValueError: the passphrase is too short.
+        OSError: the check file could not be written.
+    """
+    if passphrase_problem(passphrase) is not None:
+        msg = f"the Backup Passphrase must be at least {PASSPHRASE_MIN} characters"
+        raise ValueError(msg)
+    _write_new(path, AGE.lock(CHECK_PHRASE, passphrase.reveal()))
+    return BackupPassphrase(passphrase)
+
+
 def _write_new(path: Path, locked: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f"{path.name}.tmp-{secrets.token_hex(8)}")
-    handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    handle = os.open(temporary, _NEW_FILE, 0o600)
     try:
         os.write(handle, locked)
         os.fsync(handle)
@@ -196,7 +231,7 @@ def unlock_check_file(
 def change_is_pending(marker: Path) -> bool:
     """Say whether an unfinished `change-passphrase` left its marker (story 112).
 
-    `change-passphrase` (#58) writes and removes the marker; a Run is refused while it is
-    there, because Backups may be under either passphrase.
+    `change-passphrase` (#58, `change_pending.py`) writes and removes the marker; a Run is
+    refused while it is there, because Backups may be under either passphrase.
     """
     return marker.exists()

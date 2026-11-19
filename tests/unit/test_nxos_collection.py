@@ -7,7 +7,7 @@ synthetic `| json` replies (tests/support/nxos_json). Each test checks the colle
 
 import json
 from collections.abc import Mapping
-from ipaddress import IPv4Address, IPv4Interface, IPv4Network, IPv6Address
+from ipaddress import IPv4Address, IPv4Interface, IPv4Network
 
 import pytest
 
@@ -24,7 +24,6 @@ from network_analyser.records.collected import (
     Interface,
     InterfaceIp,
     MacEntry,
-    Neighbour,
     PortChannel,
     Reading,
     RoutingNeighbour,
@@ -45,6 +44,8 @@ from tests.support.nxos_json import NXOS_JSON_REPLIES
 
 VERSION = VersionFacts("nx-a", "C9300v", "9.3(8)", ("TEST0000N01",))
 FEATURES = "show feature | json"
+COLLECTED_HERE = [c for c in NXOS_JSON_REPLIES if "neighbors detail" not in c]
+"""Every reply but the CDP and LLDP tables, which the crawl reads (#50)."""
 
 
 class Device:
@@ -211,44 +212,6 @@ def test_the_vpc_domain_peer_link_keepalive_and_members_are_read() -> None:
     assert vpc.commands == ("show vpc brief | json", "show vpc peer-keepalive | json")
 
 
-def test_cdp_neighbours_keep_every_address_management_first() -> None:
-    assert _value(_collected().cdp) == (
-        Neighbour(
-            local_port=_name("Ethernet1/1"),
-            name="nx-b(TEST0000N02)",
-            remote_port=_name("Ethernet1/1"),
-            addresses=(IPv4Address("192.0.2.12"),),
-            platform=("N9K-C9300v, Cisco Nexus Operating System (NX-OS) Software, Version 9.3(8)"),
-            native_vlan=1,
-        ),
-        Neighbour(
-            local_port=_name("Ethernet1/3"),
-            name="sw-c",
-            remote_port=_name("GigabitEthernet1/0/49"),
-            addresses=(
-                IPv4Address("192.0.2.30"),
-                IPv4Address("198.51.100.20"),
-            ),
-            platform="cisco C9300-48P, Cisco IOS Software [Cupertino]",
-            native_vlan=10,
-        ),
-    )
-
-
-def test_lldp_neighbours_carry_their_chassis_id_and_ipv6_addresses() -> None:
-    assert _value(_collected().lldp) == (
-        Neighbour(
-            local_port=_name("Eth1/3"),
-            name="sw-c",
-            remote_port=_name("Gi1/0/49"),
-            addresses=(IPv4Address("192.0.2.30"),),
-            platform="Cisco IOS Software, Catalyst L3 Switch",
-            ipv6_addresses=(IPv6Address("2001:db8::30"),),
-            chassis_id="0000.5e00.5302",
-        ),
-    )
-
-
 def test_arp_entries_are_read_in_every_vrf_and_incomplete_ones_left_out() -> None:
     assert _value(_collected().arp) == (
         ArpEntry("default", IPv4Address("192.0.2.140"), "00005e005310", _name("Vlan10")),
@@ -308,10 +271,11 @@ def test_each_collection_command_is_sent_once_and_features_turned_off_are_not_as
     found = device.collect()
 
     assert device.sent[0] == FEATURES
-    assert sorted(device.sent) == sorted(NXOS_JSON_REPLIES)
+    assert sorted(device.sent) == sorted(COLLECTED_HERE)
     assert found.problems == ()
     collected = found.collected
-    assert all(not isinstance(getattr(collected, f), Unknown) for f in collected.__slots__)
+    unknown = [f for f in collected.__slots__ if isinstance(getattr(collected, f), Unknown)]
+    assert unknown == ["cdp", "lldp"]  # the crawl reads those before the Backup (#50)
 
 
 def test_a_feature_turned_off_means_none_with_show_feature_as_evidence() -> None:
@@ -348,12 +312,12 @@ def test_a_vpc_feature_with_no_domain_configured_has_no_vpc_state() -> None:
 
 def test_an_empty_reply_means_there_are_none() -> None:
     replies = dict(NXOS_JSON_REPLIES)
-    replies["show lldp neighbors detail | json"] = ""
+    replies["show mac address-table | json"] = ""
     replies["show ip arp vrf all | json"] = "\n"
 
     collected = _collected(Device(replies))
 
-    assert _value(collected.lldp) == ()
+    assert _value(collected.mac) == ()
     assert _value(collected.arp) == ()
 
 

@@ -8,6 +8,7 @@ argparse defaults: a flag left out parses as None, so the run file and the promp
 import argparse
 import re
 import sys
+import textwrap
 from collections.abc import Callable
 from typing import NoReturn, override
 
@@ -185,7 +186,8 @@ def _add_run(commands: _Commands) -> None:
         "--parallel",
         type=_int_between(1, PARALLEL_MAX),
         metavar="N",
-        help=f"devices worked on at once (default {PARALLEL_DEFAULT}, at most {PARALLEL_MAX})",
+        help=f"devices worked on at once (default {PARALLEL_DEFAULT}, at most {PARALLEL_MAX}). "
+        f"More than {PARALLEL_DEFAULT} adds load on TACACS+/RADIUS servers.",
     )
     connections.add_argument(
         "--failure-budget",
@@ -260,6 +262,11 @@ def _add_show_backup(commands: _Commands) -> None:
         "With no file named, list a Run's Backups.",
     )
     show_backup.add_argument("backup_file", metavar="BACKUP_FILE", nargs="?")
+    show_backup.add_argument(
+        "--run-folder",
+        metavar="DIR",
+        help="with no file named, list this Run folder's Backups instead of the latest Run's",
+    )
 
 
 def _add_trust_key(commands: _Commands) -> None:
@@ -299,13 +306,27 @@ def _add_role_snippet(commands: _Commands) -> None:
     )
 
 
+_MANUAL_RESET = r"""forgotten the Backup Passphrase?
+  It cannot be recovered, and there is no reset command, so Backups are never abandoned
+  by accident. To start over, delete the check file by hand:
+    %LOCALAPPDATA%\NetworkAnalyser\passphrase-check.age
+  If a change was left unfinished, also delete change-pending.json and
+  passphrase-check.previous.age beside it. The next Run then asks for a new passphrase
+  twice. Backups locked with the forgotten one stay locked for good: a later
+  change-passphrase lists them as not re-locked."""
+
+
 def _add_change_passphrase(commands: _Commands) -> None:
-    change = _command(
-        commands,
+    change = commands.add_parser(
         "change-passphrase",
-        "re-lock every Backup with a new Backup Passphrase",
-        "Re-lock every Backup and Run manifest in place under a new Backup Passphrase. "
-        f"{SECRETS_ARE_NEVER_OPTIONS}",
+        help="re-lock every Backup with a new Backup Passphrase",
+        description="Re-lock every Backup and Run manifest in place under a new Backup "
+        "Passphrase, one file\nat a time, with no plaintext on disk. If it is interrupted, "
+        "run it again to resume.\n\n" + textwrap.fill(SECRETS_ARE_NEVER_OPTIONS, 79),
+        epilog=_MANUAL_RESET,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        allow_abbrev=False,
+        color=False,
     )
     change.add_argument(
         "--run-folder",

@@ -128,15 +128,6 @@ def text(row: Row, key: str) -> str | None:
     raise NotUnderstood
 
 
-def texts(row: Row, key: str) -> list[str]:
-    """Return a field that may be one text value or a list of them."""
-    value = row.get(key)
-    if isinstance(value, list):
-        return [v for v in value if isinstance(v, str) and v.strip()]
-    one = text(row, key)
-    return [one] if one is not None else []
-
-
 def required(row: Row, key: str) -> str:
     """Return a field that must be there."""
     value = text(row, key)

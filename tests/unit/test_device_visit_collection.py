@@ -15,7 +15,7 @@ from network_analyser.credentials import CredentialSet, CredentialSets, Secret
 from network_analyser.device_gateway.gate import DROP_REASONS, CommandTimedOutError
 from network_analyser.records import Platform, ScopeRecord
 from network_analyser.records.backup import BackupCapture
-from network_analyser.records.collected import Reading
+from network_analyser.records.collected import NOT_COLLECTED, Reading
 from network_analyser.records.device import DeviceRecord, Unknown
 from network_analyser.records.events import (
     AuditEvent,
@@ -44,7 +44,7 @@ class Visit:
     def __call__(self) -> DeviceRecord:
         fence = scope.parse(["192.0.2.0/24"], [])
         assert isinstance(fence, ScopeRecord)
-        return device_gateway.visit(
+        record = device_gateway.visit(
             SEED,
             scope=fence,
             trust=trust_store.load(self.known_hosts, strict=False),
@@ -53,7 +53,10 @@ class Visit:
             failure_budget=3,
             backup_sink=self.backup_sink,
             dial=self.network.dial,
+            wait_before_retry=self.network.wait_before_retry,
         )
+        assert isinstance(record, DeviceRecord)  # no identity register: never an alias
+        return record
 
     def nexus(self, **changes: str) -> FakeDevice:
         replies = {**NXOS_REPLIES, **NXOS_JSON_REPLIES, **changes}
@@ -79,7 +82,11 @@ def test_a_nexus_is_backed_up_then_its_data_collected(visit: Visit) -> None:
     assert isinstance(record.collected.vpc, Reading)
     backup_at = device.lines.index("show running-config")
     assert device.lines[backup_at + 1] == "show feature | json"
-    assert sorted(device.lines[backup_at + 1 :]) == sorted(NXOS_JSON_REPLIES)
+    assert sorted(device.lines[backup_at + 1 :]) == sorted(
+        c for c in NXOS_JSON_REPLIES if "neighbors detail" not in c
+    )
+    assert isinstance(record.collected.cdp, Reading)  # read by the crawl, before the Backup
+    assert len(record.collected.cdp.value) == 2
     assert visit.backups == [f"{device_text.NXOS_RUNNING_CONFIG}"]
     sent = [e.command for e in visit.events if isinstance(e, CommandSent)]
     assert sent == device.lines
@@ -116,10 +123,12 @@ def test_a_dropped_session_keeps_the_backup_and_what_was_collected(visit: Visit)
     assert device.lines[-1] == "show vlan brief | json"
 
 
-def test_an_ios_xe_device_collects_nothing_yet(visit: Visit) -> None:
-    visit.network.add(str(SEED))
+def test_an_ios_xe_device_collects_only_its_neighbours_until_59(visit: Visit) -> None:
+    device = visit.network.add(str(SEED))
 
     record = visit()
 
     assert record.platform is Platform.IOS_XE
-    assert record.collected is None
+    assert record.collected is not None
+    assert record.collected.interfaces == Unknown(NOT_COLLECTED)
+    assert device.lines[-1] == "show running-config view full"

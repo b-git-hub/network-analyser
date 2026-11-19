@@ -34,9 +34,6 @@ FINGERPRINT = "SHA256:" + "A" * 43
 
 EVERY_COMMAND = [
     pytest.param(["render", "runs/2026-01-01T000000Z"], id="render"),
-    pytest.param(["show-backup", "backups/sw-a.cfg.age"], id="show-backup"),
-    pytest.param(["show-backup"], id="show-backup listing"),
-    pytest.param(["change-passphrase"], id="change-passphrase"),
 ]
 
 
@@ -51,22 +48,14 @@ def test_a_command_not_built_yet_says_so_and_exits_4(
     assert f"network-analyser {argv[0]}: not built yet\n" in err
 
 
-EVERY_FLAG = [
-    pytest.param(
-        ["change-passphrase", "--run-folder", "old/a", "--run-folder", "old/b"],
-        id="change-passphrase",
-    ),
-]
-
-
-@pytest.mark.parametrize("argv", EVERY_FLAG)
-def test_every_flag_of_the_frozen_surface_parses(
-    argv: list[str], capsys: pytest.CaptureFixture[str]
+def test_every_change_passphrase_flag_of_the_frozen_surface_parses(
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    code = main(argv)
+    code = main(["change-passphrase", "--run-folder", "old/a", "--run-folder", "old/b"])
 
-    assert code == ExitCode.INTERNAL_ERROR
-    assert "not built yet" in capsys.readouterr().err
+    # Parsed, then refused: this per-user folder has no Backup Passphrase to change.
+    assert code == ExitCode.REFUSED
+    assert "first Run sets it" in capsys.readouterr().err
 
 
 def test_every_run_flag_of_the_frozen_surface_parses(

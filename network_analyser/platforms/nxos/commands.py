@@ -20,6 +20,9 @@ SHOW_USER_ACCOUNT: Final = Template("show user-account {username}", {"username":
 """Reports the login's own roles (provisional: lab checks A5 and C10)."""
 SHOW_RUNNING_CONFIG: Final = "show running-config"
 """The Backup (#51): the running config as NX-OS shows it."""
+SHOW_CDP_NEIGHBORS_DETAIL: Final = "show cdp neighbors detail | json"
+SHOW_LLDP_NEIGHBORS_DETAIL: Final = "show lldp neighbors detail | json"
+"""The CDP and LLDP Neighbours the crawl follows (#50; the `| json` forms are provisional)."""
 
 # Collection (#60): the `| json` form of each command, every VRF at once (`vrf all`), so no
 # entry is a per-VRF template. The exact strings, and how RBAC rules match them, are
@@ -33,8 +36,6 @@ SHOW_IP_INTERFACE: Final = "show ip interface vrf all | json"
 SHOW_PORT_CHANNEL_SUMMARY: Final = "show port-channel summary | json"
 SHOW_VLAN_BRIEF: Final = "show vlan brief | json"
 SHOW_VRF: Final = "show vrf | json"
-SHOW_CDP_NEIGHBORS_DETAIL: Final = "show cdp neighbors detail | json"
-SHOW_LLDP_NEIGHBORS_DETAIL: Final = "show lldp neighbors detail | json"
 SHOW_VPC_BRIEF: Final = "show vpc brief | json"
 SHOW_VPC_PEER_KEEPALIVE: Final = "show vpc peer-keepalive | json"
 SHOW_IP_ARP: Final = "show ip arp vrf all | json"
@@ -54,8 +55,6 @@ COLLECTION: Final = (
     SHOW_PORT_CHANNEL_SUMMARY,
     SHOW_VLAN_BRIEF,
     SHOW_VRF,
-    SHOW_CDP_NEIGHBORS_DETAIL,
-    SHOW_LLDP_NEIGHBORS_DETAIL,
     SHOW_VPC_BRIEF,
     SHOW_VPC_PEER_KEEPALIVE,
     SHOW_IP_ARP,
@@ -67,7 +66,8 @@ COLLECTION: Final = (
     SHOW_HSRP_BRIEF,
     SHOW_VRRP,
 )
-"""Every collection command, in the order they are sent."""
+"""Every collection command, in the order they are sent after the Backup. The CDP and LLDP
+tables are not among them: the crawl reads those before the Backup (#50)."""
 
 ALLOW_LIST: Final = AllowList(
     (
@@ -76,6 +76,8 @@ ALLOW_LIST: Final = AllowList(
         Exact(SHOW_VERSION),
         SHOW_USER_ACCOUNT,
         Exact(SHOW_RUNNING_CONFIG),
+        Exact(SHOW_CDP_NEIGHBORS_DETAIL),
+        Exact(SHOW_LLDP_NEIGHBORS_DETAIL),
         *(Exact(command) for command in COLLECTION),
     )
 )
