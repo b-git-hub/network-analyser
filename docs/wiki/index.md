@@ -4,6 +4,7 @@ A dated, historical record kept by the coordinating (chief-of-staff) session and
 
 ## Process
 - [conventions](conventions.md): how this wiki is written and kept.
+- [spec-37-handoff-2026-11-19](spec-37-handoff-2026-11-19.md): **start here to resume spec #37**: what merged, WIP branches, what's left.
 - [implementing-spec-37](implementing-spec-37.md): how spec #37 is being built (branches, subagents, merge order), with a dated log.
 - [implementer-brief](implementer-brief.md): the standing brief every ticket implementer follows.
 - [spec-37-follow-ups](spec-37-follow-ups.md): work one ticket surfaced for a later one.

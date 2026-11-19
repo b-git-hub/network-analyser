@@ -44,3 +44,4 @@ How [spec #37](https://github.com/b-git-hub/network-analyser/issues/37) (Network
 - 2026-11-19: 03:30–07:00 UTC a third usage-limit stop paused #50, #58, #59, #60, #63; all resumed at 07:00 with SendMessage.
 - 2026-11-19: merged #58 at `9ef43d4`; no conflicts, check.py all green, 1246 tests passed; adds change-passphrase (backup_store/change_pending.py, relock.py, cli/cmd_change_passphrase.py); PassphraseFiles moved from show.py to change_pending.py, no #50/#57 work reverted.
 - 2026-11-19: merged #63 at `d74378a`; no conflicts, check.py all green, 1314 tests passed; adds render command and diagram.html (Map tab, Physical view) under network_analyser/diagram/.
+- 2026-11-19: merged #60 at `60edae7` (1362 tests). Operator asked to wrap up; stopped #54, #56, #59, #65 and pushed WIP branches wip/ticket-54, -56, -59. See [spec-37-handoff-2026-11-19](spec-37-handoff-2026-11-19.md).
