@@ -217,6 +217,20 @@ Added by [#50](https://github.com/b-git-hub/network-analyser/issues/50) (Crawl C
 | H5 | One record per device: with a node's second address in the Scope (H4, management interface up), the summary lists the node once, with `also at <address> (same host key)`, and `audit.log` shows no `login_attempted` line for the second address. | | |
 | H6 | `--parallel 2`: `audit.log` never shows more than two devices between their first `connection_attempted` and their `device_finished` at once. | | |
 
+### I. NX-OS collection
+
+From [NX-OS collection and parsers](https://github.com/b-git-hub/network-analyser/issues/60) (section H is left for the crawl, [#50](https://github.com/b-git-hub/network-analyser/issues/50)). The `| json` command strings and the JSON keys the readers use were written from documentation and memory, never seen on a device; fixtures are hand-written. Run each check on nx-sw1 and nx-sw2, logged in as `netanalyser`, and describe what you see; never paste output (nothing captured is committed).
+
+| ID | Check | Result | Date (UTC) |
+|---|---|---|---|
+| I1 | Each collection command on the NX-OS allow-list (`network-analyser role-snippet nx-os` lists them; they all end `\| json`) runs under the `NA-READ` role: none answers `% Permission denied for the role` or `% Invalid command`. Record any that fail, and the exact string the device accepts instead. | | |
+| I2 | How the role's `rule <n> permit command ...` lines match: does `show interface \| json` also permit `show interface` (no `\| json`), `show interface brief` or `show interface \| json-pretty`? Does a rule written without `\| json` permit the `\| json` form? | | |
+| I3 | `show feature \| json` lists the features under `TABLE_cfcFeatureCtrlTable` / `ROW_cfcFeatureCtrlTable` with `cfcFeatureCtrlName2` and `cfcFeatureCtrlOpStatus2`, and names the features `lldp`, `vpc`, `ospf`, `eigrp`, `bgp`, `hsrp_engine` and `vrrp`. With a feature off, its command answers `% Invalid command` (so the tool skips it). | | |
+| I4 | The JSON keys the readers use (in `network_analyser/platforms/nxos/readers.py`) are the ones the device sends, for each command. Especially: `show ip interface vrf all` (does each `TABLE_vrf` entry sit beside its `TABLE_intf` entry? secondary addresses under `TABLE_secondary_address`? an unnumbered interface's key?), `show vpc peer-keepalive` (`vpc-keepalive-dest`, `vpc-keepalive-vrf`; is a source address shown?), `show ip eigrp neighbors vrf all`, `show hsrp brief` and `show vrrp`. Record each key that differs. | | |
+| I5 | A table with no rows (for example `show ip arp vrf all \| json` in a VRF with no entries, or LLDP with no Neighbours) comes back as an empty reply, not an object with an empty table. | | |
+| I6 | After W1, nx-sw1's entry in `topology.json` has its interfaces (down ones included), VLANs, port-channels, vPC (domain, peer-link, keepalive with its source address) and the `management` VRF marked, and `skipped` lists nothing for it. Record any part listed as skipped and its reason. | | |
+| I7 | The size of `show interface \| json` on the largest Nexus you run (`bytes_received` in `audit.log`). The tool drops a session whose reply passes 1,000,000 characters. | | |
+
 ## Walkthrough of the tool
 
 Run these on every booking that tests a new build. Use only `netanalyser` Credential Sets, and give the Scope as the lab's management addresses, one `--scope` per address.

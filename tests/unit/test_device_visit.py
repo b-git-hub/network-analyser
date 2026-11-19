@@ -147,7 +147,9 @@ def test_an_nxos_seed_reports_its_roles(visit: Visit) -> None:
 
     assert record.platform is Platform.NX_OS
     assert record.landing_privilege == LandingPrivilege("roles NA-READ", too_low=False)
-    assert visit.commands()[-4:] == [
+    commands = visit.commands()
+    start = commands.index("show user-account netops-ro")
+    assert commands[start : start + 4] == [  # then the collection commands (#60)
         "show user-account netops-ro",
         "show cdp neighbors detail | json",
         "show lldp neighbors detail | json",
