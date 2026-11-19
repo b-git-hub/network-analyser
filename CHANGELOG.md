@@ -26,3 +26,4 @@ The first allow-list ([spec #37](https://github.com/b-git-hub/network-analyser/i
 ### Added
 
 - Network Analyser v1 ([spec #37](https://github.com/b-git-hub/network-analyser/issues/37)): read-only discovery of Cisco IOS/IOS-XE and NX-OS devices over SSH, encrypted Backups of their running configuration, and a Topology diagram.
+- VLAN Mismatches on each Link and Bundle in `topology.json` (#61): VLAN on one end only, differing native VLAN, trunk facing access, and differing access VLANs. A side with missing data is listed as skipped, not reported as a mismatch.

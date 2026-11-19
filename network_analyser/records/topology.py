@@ -1,8 +1,9 @@
 """The Topology record: what `topology.build` makes and `topology.json` holds (#52).
 
 Its shape is the `topology.json` schema (docs/topology-json.md): each record becomes a JSON
-object with the same field names. Later tickets add to it: VLAN Mismatches (#61), L3
-Adjacency, Subnets and inferred Links (#62). A new optional field needs no format-version bump;
+object with the same field names. VLAN Mismatches (#61) add four finding kinds and a
+`vlan_mismatch` skipped row. Later tickets add L3 Adjacency, Subnets and inferred Links (#62).
+A new optional field needs no format-version bump;
 a change an older `render` would misread does (`topology.FORMAT_VERSION`).
 
 **Stable ids** (`id` fields) are shared by `topology.json`, the diagram (`#device=<id>`,
@@ -44,6 +45,8 @@ class EvidenceSource(Enum):
     ARP = "ARP"
     INTERFACE = "interface"
     """Interface addressing. Story 124 lists no source for it; calling it routing would be false."""
+    VLAN = "VLAN"
+    """Switchport or VLAN-database output. A CDP native VLAN stays `CDP` (#61)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +56,8 @@ class Evidence:
     Attributes:
         device: the id of the device that reported it.
         command: the command, exactly as sent, whose output said so.
-        source: CDP, LLDP, routing, MAC, ARP, or interface addressing.
+        source: CDP, LLDP, routing, MAC, ARP, interface addressing, or VLAN (switchport and the
+            VLAN database).
     """
 
     device: str
@@ -273,12 +277,20 @@ class Bundle:
 
 @unique
 class FindingKind(Enum):
-    """The kinds of finding the Topology raises. Later tickets add theirs (#61, #62)."""
+    """The kinds of finding the Topology raises. Later tickets add theirs (#62)."""
 
     CONFLICTING_EVIDENCE = "conflicting evidence"
     """Reports disagree about a port: kept, flagged, never resolved silently (story 125)."""
     BUNDLE_MEMBER_MISMATCH = "Bundle member mismatch"
     """A member Link whose far end is not in a matching bundle (story 131)."""
+    VLAN_ON_ONE_END = "VLAN on one end only"
+    """An effective VLAN carried on one end of a Link or Bundle only (story 134)."""
+    DIFFERING_NATIVE_VLAN = "differing native VLAN"
+    """The two ends' native VLANs differ (story 134)."""
+    TRUNK_FACING_ACCESS = "trunk facing access"
+    """A trunk faces an access port (story 134)."""
+    DIFFERING_ACCESS_VLANS = "differing access VLANs"
+    """The two ends' access VLANs differ (story 134)."""
 
 
 @dataclass(frozen=True, slots=True)
