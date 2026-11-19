@@ -22,6 +22,7 @@ and the Run ends with a summary of every device found.
 
 import argparse
 import sys
+from dataclasses import replace
 from datetime import UTC, datetime
 from ipaddress import IPv4Address
 
@@ -52,6 +53,7 @@ from network_analyser.records.backup import BackupResults
 from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord
 from network_analyser.records.identity import Alias
+from network_analyser.records.sweep import SweepResult
 
 _CHANGE_PENDING = (
     "a change of the Backup Passphrase is unfinished, so Backups may be under either "
@@ -157,9 +159,20 @@ def _after_folder_checks(
                 identity=identity,
             )
 
+        # #55: opt-in Sweep, after the confirm and inside the audit trail. Kept in this
+        # block so a merge with the crawl stays local.
+        seeds = request.seeds.value
+        swept: SweepResult | None = None
+        if request.sweep.value:
+            swept = discovery.sweep(
+                request.scope.value,
+                inflight=request.sweep_inflight.value,
+                emit=audit.record,
+            )
+            seeds = discovery.combine_seeds(seeds, swept.login_seeds)
         try:
             result = discovery.crawl(
-                request.seeds.value,
+                seeds,
                 lambda ip, *, id_gate, identity: collected.add(
                     visit(ip, id_gate=id_gate, identity=identity)
                 ),
@@ -170,6 +183,8 @@ def _after_folder_checks(
             )
         finally:
             backups = locker.finish()
+        if swept is not None:
+            result = replace(result, sweep=swept)
         return result, backups
 
     return run_topology.then_save(

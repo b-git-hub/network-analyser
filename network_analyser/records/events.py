@@ -184,6 +184,32 @@ class ConnectionAttempted(AuditEvent):
 
 
 @dataclass(frozen=True, slots=True)
+class ProbeAttempted(AuditEvent):
+    """One Sweep probe: TCP port 22, closed before key exchange (ticket #55).
+
+    The identification string itself is not recorded. It is device text, and it is kept
+    on the Sweep result for the report instead.
+
+    Attributes:
+        ip: the address probed.
+        port: the TCP port. A Sweep always uses 22.
+        result: what came of the TCP connection.
+        banner_read: whether an SSH identification string was read before the socket closed.
+    """
+
+    ip: IPv4Address
+    port: int
+    result: ConnectionResult
+    banner_read: bool
+
+    @property
+    @override
+    def severity(self) -> Severity:
+        """A probe that did not connect needs attention."""
+        return Severity.INFO if self.result is ConnectionResult.CONNECTED else Severity.WARNING
+
+
+@dataclass(frozen=True, slots=True)
 class OutOfScopeRefused(AuditEvent):
     """A socket was not opened because the address is not inside the Scope (story 39).
 
