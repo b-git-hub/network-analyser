@@ -43,6 +43,8 @@ Every device and finding has an `id`, which `diagram.html#device=<id>`, `#findin
 | Visited Device | `dev-<first serial>`; `dev-ip-<management IP>` when no serial is known |
 | Unvisited Device | `unv-<12 hex>` from its lowest advertised address, else its LLDP chassis ID, else the one report it is known from |
 | Link, Shared Segment, Bundle, finding | `link-`, `seg-`, `bundle-`, `finding-` and 12 hex digits from its ends or subjects |
+| L3 Adjacency (#62) | `adj-` and 12 hex digits from its kind, VRF, the two device ids and, for a shared subnet, the prefix |
+| Subnet (#62) | `subnet-` and 12 hex digits from its VRF and prefix |
 
 Ids hold only letters, digits, `.`, `-` and `_`. Items point at devices by id.
 
@@ -57,6 +59,8 @@ Ids hold only letters, digits, `.`, `-` and `_`. Items point at devices by id.
 | `segments` | Shared Segments |
 | `bundles` | Bundles |
 | `findings` | things to look at (conflicts, Bundle member mismatches; later VLAN Mismatches) |
+| `adjacencies` | L3 Adjacencies (#62). Empty when there are none |
+| `subnets` | Subnets (#62): a prefix in one VRF shared by three or more devices. Empty when there are none |
 | `skipped` | data not collected, per device, so its checks were skipped (story 126) |
 | `unknown_interface_names` | interface names the table did not know (story 127) |
 
@@ -76,7 +80,9 @@ Advertisements merge into one Unvisited Device only on a shared advertised addre
 
 ### `links[]`
 
-`id`, `ends[2]` (`device`, `interface`; the interface is unknown when the far end did not advertise its port), `status` (`confirmed` when both ends report each other, else `one-sided`; #62 adds `inferred`), `evidence[]` (`device`, `command`, `source`), `role` (`vPC peer-link`, `vPC peer-keepalive` or null), `bundle` (Bundle id or null), `conflicts[]` (finding ids).
+`id`, `ends[2]` (`device`, `interface`; the interface is unknown when the far end did not advertise its port, and when an inferred Link's far port was not learned), `status` (`confirmed` when both ends report each other, else `one-sided`; #62 adds `inferred`), `evidence[]` (`device`, `command`, `source`), `role` (`vPC peer-link`, `vPC peer-keepalive` or null), `bundle` (Bundle id or null), `conflicts[]` (finding ids).
+
+`source` is `CDP`, `LLDP`, `routing`, `MAC`, `ARP`, or `interface` (#62: interface addressing is not a routing-protocol report). An `inferred` Link was placed from ARP and the MAC table on one edge port. Its status is the confidence: there is no separate score.
 
 CDP and LLDP reports of one port pair, from either end, are one Link. When reports disagree (two Links claim one port), every claim is kept and each Link names the `conflicting evidence` finding.
 
@@ -87,6 +93,16 @@ CDP and LLDP reports of one port pair, from either end, are one Link. When repor
 ### `bundles[]`
 
 `id`, `sides[2]` (`ends[]` of `device` and `port_channel`, two ends on a vPC side; `vpc` number or null), `links[]` (member Link ids), `role` (`vPC peer-link` or null), `flagged[]` (member Link ids whose far end is not in a matching bundle). A `port_channel` of `null` means the members on that device are in no port-channel (flagged); unknown means it could not be told (never flagged).
+
+### `adjacencies[]` (L3 Adjacency, #62)
+
+`id`, `ends[2]` (`device`, `interfaces[]` of interface names; empty when the protocol named none), `vrf`, `kind` (`shared subnet`, `OSPF`, `EIGRP`, `BGP`), `prefix` (the shared prefix, or null for a protocol neighbourship), `evidence[]`, `conflicts[]` (finding ids).
+
+A prefix in one VRF on exactly two devices is one adjacency of kind `shared subnet`. The same prefix on three or more devices is a Subnet instead, not a set of pairs. A protocol neighbourship is its own adjacency even when the devices also share a prefix. /32s, FHRP virtual IPs, unnumbered interfaces and the management VRFs (`management`, `Mgmt-intf`) never create a shared-subnet adjacency.
+
+### `subnets[]` (Subnet, #62)
+
+`id`, `vrf`, `prefix`, `attachments[]` (`device`, `interface`, `address` with its mask), `evidence[]`, `conflicts[]`. One prefix, one VRF, each sharing device attached.
 
 ### `findings[]`
 
@@ -103,7 +119,9 @@ CDP and LLDP reports of one port pair, from either end, are one Link. When repor
 - **#59, #60 (collection):** fill `DeviceRecord.collected` with a `Collected`. Each part is a `Reading(commands, value, gaps)` or `Unknown(reason)`; never leave a part empty for "could not tell". Build every interface name with `records.interface_names.interface_name` (add new types to its table; a new entry changes no existing short name). Set `Interface.stack_member` on stacks and `Vrf.management` for `MANAGEMENT_VRFS`. Until then every Visited Device's data is unknown with the reason "not collected by this version of the tool".
 - **#50 (crawl):** put a device's learned aliases in `DeviceRecord.aliases`. For each Neighbour address the crawl decides not to visit, hand `topology.build` a `DeviceRecord(ip, outcome=UNVISITED, unvisited_reason=...)`; it merges with the advertisements of that address. `cli/run_topology.Collector.add` must see every record (it is thread-safe), so `topology.json` after Ctrl+C holds what was found so far. Unify the crawl's neighbour record with `records.collected.Neighbour`.
 - **#61, #62:** add their rules in `topology/build.py` after Bundles, their records to `records/topology.py`, and their finding kinds to `FindingKind`; new optional fields need no `format_version` bump. VLAN checks run on the Bundle (`Link.bundle`).
+  - Built by #62 (2026-11-19): `adjacencies` and `subnets` are optional keys on format version 1. `build(records, scope=...)` records in-Scope routing neighbours and static next hops that CDP/LLDP never advertised as Unvisited Devices (`seen only in routing or ARP data (not crawled)`); it does not log into them. Inferred Links use `status: inferred` and, when several fall on one edge port, the existing Shared Segment. `render` still ignores the new keys until #64 draws them.
 - **#63, #64, #65 (diagram, render):** read this file only; ignore unknown keys; refuse `format_version` above the one you know; treat any `{"unknown": ...}` as unknown, never absent. Escape every string. Write pages with `run_output.write_scanned_text`, scanning each value before HTML or XML escaping.
   - Built by #63 (2026-11-19): `diagram.read_topology(text)` is the loader. It keeps only the fields listed in its schema (`diagram/topology_file.py`), reads a known field the file lacks as unknown, and refuses a non-plain id. A later ticket that draws a new field adds it to that schema. `diagram.place(topology)` gives every device's position, shared by all views and `diagram.drawio`. `cli/diagram_file.write_diagram` draws the page from the Run folder's file, at Run end and for `render`.
   - Built by #65 (2026-11-19): `diagram.draw_drawio(topology, redact)` draws `diagram.drawio` from the same `TopologyFile` and `place` positions, and `write_diagram` writes it beside `diagram.html`. Its Routing page draws no routing lines while this file holds no routing adjacency (#62); when a later ticket adds that to the schema, draw it in `diagram/drawio.py` too. Calls: [spec-37-implementation-calls](wiki/spec-37-implementation-calls.md), items 6-14.
+  - #62 (2026-11-19) added `adjacencies` and `subnets` to this file. They are not in the diagram schema yet, so the Routing page still draws no routing lines. #64 extends the schema and `diagram/drawio.py`.
 - **#66 (Run report):** list `skipped`, `unknown_interface_names` and `findings`; link with the ids above.
