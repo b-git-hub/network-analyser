@@ -12,6 +12,7 @@ so it reaches the Topology through its advertisements alone.
 from dataclasses import dataclass
 
 from network_analyser.records.device import DeviceRecord
+from network_analyser.records.platform import CredentialSetResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,8 +23,11 @@ class CrawlResult:
         devices: every device dialled, in the order its visit finished, aliases folded in.
         unvisited: one Unvisited record per advertised address never dialled, with its reason.
         stopped: why the crawl stopped early, as fixed text; None when it ran to the end.
+        credential_sets: how each Credential Set fared, in order, for the summary and the
+            Run report (#54); `cli` adds them once the crawl ends. Never a password.
     """
 
     devices: tuple[DeviceRecord, ...]
     unvisited: tuple[DeviceRecord, ...] = ()
     stopped: str | None = None
+    credential_sets: tuple[CredentialSetResult, ...] = ()

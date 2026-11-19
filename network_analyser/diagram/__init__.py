@@ -1,9 +1,10 @@
 """The `diagram` module: draws `diagram.html` and `diagram.drawio` from the Topology file.
 
-Reads only `topology.json`, so `render` can redraw a diagram without any device. Its
-pages load nothing from the network (security test 4).
+Reads only `topology.json`, so `render` can redraw a diagram without any device. Neither
+file loads anything from the network (security test 4).
 """
 
+from network_analyser.diagram.drawio import draw_drawio
 from network_analyser.diagram.html import draw_html
 from network_analyser.diagram.layout import AreaLabel, Layout, Point, place
 from network_analyser.diagram.topology_file import (
@@ -24,6 +25,7 @@ __all__ = [
     "Point",
     "TopologyFile",
     "TopologyFileError",
+    "draw_drawio",
     "draw_html",
     "place",
     "read_topology",

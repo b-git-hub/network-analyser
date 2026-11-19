@@ -15,6 +15,10 @@
   device is examined once, whichever of its IPs is reached first (story 73).
 - If a visit stops the Run (the Trust Store cannot be written), no new visit starts; the
   queued devices are `not attempted (Run stopped)`.
+- A Neighbour's Platform hint goes to its visit, where it decides with the SSH
+  identification string which Platform-limited Credential Sets fit (#54, story 32). Once
+  every set is retired, no new visit starts and the queued devices are `not attempted
+  (Credential Sets retired)` (story 37).
 
 Each advertised IPv4 address the crawl chooses not to dial becomes an Unvisited
 `DeviceRecord` with its reason, handed to `skipped` as soon as it is decided, so
@@ -33,7 +37,7 @@ from typing import Final, Protocol
 from network_analyser import device_gateway, platforms
 from network_analyser.device_gateway.identity import Identity
 from network_analyser.platforms import Unsupported
-from network_analyser.records import HostKey, Placement, ScopeRecord
+from network_analyser.records import HostKey, Placement, Platform, ScopeRecord
 from network_analyser.records.collected import Neighbour, Reading
 from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord, UnvisitedReason
@@ -42,6 +46,8 @@ from network_analyser.records.identity import Alias
 
 MAX_ADDRESSES: Final = 3
 """The most addresses tried for one Neighbour (story 65)."""
+ALL_SETS_RETIRED: Final = "every Credential Set is retired"
+"""Why the crawl stopped when no Credential Set is left to log in with (story 37)."""
 
 type Emit = Callable[[AuditEvent], None]
 type Skipped = Callable[[DeviceRecord], object]
@@ -51,9 +57,17 @@ class Visit(Protocol):
     """`device_gateway.visit` with the Run's Scope, Trust Store and sets bound by `cli`."""
 
     def __call__(
-        self, ip: IPv4Address, *, id_gate: bool, identity: Identity
+        self,
+        ip: IPv4Address,
+        *,
+        id_gate: bool,
+        neighbour_hint: Platform | None,
+        identity: Identity,
     ) -> DeviceRecord | Alias:
-        """Visit one address; `id_gate` for a Neighbour with no Platform hint."""
+        """Visit one address; `id_gate` for a Neighbour with no Platform hint.
+
+        `neighbour_hint` is the Platform the Neighbour advertised (None for a Seed).
+        """
         ...
 
 
@@ -64,6 +78,7 @@ class _Target:
     addresses: tuple[IPv4Address, ...]
     id_gate: bool
     reported_by: IPv4Address | None
+    hint: Platform | None = None
 
 
 class IdentityRegister:
@@ -97,6 +112,7 @@ def crawl(  # noqa: PLR0913 (the Seeds, the visit and the Run's settings, all by
     parallel: int,
     emit: Emit,
     skipped: Skipped | None = None,
+    all_retired: Callable[[], bool] | None = None,
 ) -> CrawlResult:
     """Crawl from `seeds` through CDP and LLDP; return every device found.
 
@@ -107,18 +123,34 @@ def crawl(  # noqa: PLR0913 (the Seeds, the visit and the Run's settings, all by
         parallel: devices worked on at once (10 by default, 50 at most).
         emit: takes the Audit log event of each Neighbour never dialled.
         skipped: takes each Unvisited record of an address never dialled, as it is decided.
+        all_retired: says whether every Credential Set is retired
+            (`CredentialSets.all_retired`, bound by `cli`); None never stops for that.
     """
-    return _Crawl(visit, scope, emit, skipped or (lambda _record: None)).run(seeds, parallel)
+    return _Crawl(
+        visit,
+        scope,
+        emit,
+        skipped or (lambda _record: None),
+        all_retired or (lambda: False),
+    ).run(seeds, parallel)
 
 
 class _Crawl:
     """The queue, what has been seen, and what has been found. Used by the main thread."""
 
-    def __init__(self, visit: Visit, scope: ScopeRecord, emit: Emit, skipped: Skipped) -> None:
+    def __init__(
+        self,
+        visit: Visit,
+        scope: ScopeRecord,
+        emit: Emit,
+        skipped: Skipped,
+        all_retired: Callable[[], bool],
+    ) -> None:
         self.visit = visit
         self.scope = scope
         self.emit = emit
         self.skipped = skipped
+        self.all_retired = all_retired
         self.identity = IdentityRegister()
         self.queue: deque[_Target] = deque()
         self.seen: set[IPv4Address] = set()
@@ -143,9 +175,16 @@ class _Crawl:
                 for future in done:
                     del running[future]
                     self.found(future.result())
+                if self.stopped is None and self.all_retired():
+                    self.stopped = ALL_SETS_RETIRED
+        why = (
+            UnvisitedReason.SETS_RETIRED
+            if self.stopped == ALL_SETS_RETIRED
+            else UnvisitedReason.RUN_STOPPED
+        )
         while self.queue:
             target = self.queue.popleft()
-            self.not_visited(UnvisitedReason.RUN_STOPPED, target.addresses, target.reported_by)
+            self.not_visited(why, target.addresses, target.reported_by)
         return CrawlResult(
             devices=tuple(self.with_aliases(d) for d in self.devices),
             unvisited=tuple(self.not_dialled.values()),
@@ -156,10 +195,18 @@ class _Crawl:
         """Visit one device, moving to its next address only after a connection failure."""
         *earlier, last = target.addresses
         for address in earlier:
-            result = self.visit(address, id_gate=target.id_gate, identity=self.identity)
+            result = self.visit_one(address, target)
             if not _connection_failed(result):
                 return result
-        return self.visit(last, id_gate=target.id_gate, identity=self.identity)
+        return self.visit_one(last, target)
+
+    def visit_one(self, address: IPv4Address, target: _Target) -> DeviceRecord | Alias:
+        return self.visit(
+            address,
+            id_gate=target.id_gate,
+            neighbour_hint=target.hint,
+            identity=self.identity,
+        )
 
     def found(self, result: DeviceRecord | Alias) -> None:
         if isinstance(result, Alias):
@@ -191,7 +238,12 @@ class _Crawl:
             self.not_visited(UnvisitedReason.UNSUPPORTED_ADVERTISED, tuple(inside), reported_by)
             return
         self.queue.append(
-            _Target(tuple(inside[:MAX_ADDRESSES]), id_gate=hint is None, reported_by=reported_by)
+            _Target(
+                tuple(inside[:MAX_ADDRESSES]),
+                id_gate=hint is None,
+                reported_by=reported_by,
+                hint=hint,
+            )
         )
 
     def not_visited(

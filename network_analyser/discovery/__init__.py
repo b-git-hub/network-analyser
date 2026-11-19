@@ -7,10 +7,11 @@ stopping (#56) come later.
 """
 
 from network_analyser.discovery.crawl import (
+    ALL_SETS_RETIRED,
     MAX_ADDRESSES,
     IdentityRegister,
     Visit,
     crawl,
 )
 
-__all__ = ["MAX_ADDRESSES", "IdentityRegister", "Visit", "crawl"]
+__all__ = ["ALL_SETS_RETIRED", "MAX_ADDRESSES", "IdentityRegister", "Visit", "crawl"]
