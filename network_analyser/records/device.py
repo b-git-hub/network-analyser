@@ -11,20 +11,13 @@ from dataclasses import dataclass
 from enum import Enum, unique
 from ipaddress import IPv4Address
 
+from network_analyser.records.collected import Collected
 from network_analyser.records.events import DeviceOutcome
 from network_analyser.records.host_keys import HostKeyCheck
 from network_analyser.records.platform import CredentialSetView, Platform
+from network_analyser.records.unknown import Unknown
 
-
-@dataclass(frozen=True, slots=True)
-class Unknown:
-    """A value the tool tried to learn and could not. Never read it as "none".
-
-    Attributes:
-        reason: why, as fixed text, such as `show version not understood`.
-    """
-
-    reason: str
+__all__ = ["DeviceRecord", "LandingPrivilege", "Unknown", "UnvisitedReason", "VersionFacts"]
 
 
 @unique
@@ -91,6 +84,11 @@ class DeviceRecord:
         platform: the Platform identified after login; None when not identified.
         landing_privilege: the privilege the login landed with; None when not reached.
         version: what `show version` said; None when not reached.
+        aliases: the device's other addresses, learned this Run (host-key alias or serial,
+            #50); the Topology folds Neighbours advertising any of them into this device.
+        collected: what the device's commands told the tool (`records.collected`, #52;
+            filled by #59 and #60); None when the visit never got that far, or before the
+            collection tickets, in which case the Topology lists every part as unknown.
     """
 
     ip: IPv4Address
@@ -103,3 +101,5 @@ class DeviceRecord:
     platform: Platform | None = None
     landing_privilege: LandingPrivilege | Unknown | None = None
     version: VersionFacts | None = None
+    aliases: tuple[IPv4Address, ...] = ()
+    collected: Collected | None = None
