@@ -261,6 +261,11 @@ def _add_show_backup(commands: _Commands) -> None:
         "With no file named, list a Run's Backups.",
     )
     show_backup.add_argument("backup_file", metavar="BACKUP_FILE", nargs="?")
+    show_backup.add_argument(
+        "--run-folder",
+        metavar="DIR",
+        help="with no file named, list this Run folder's Backups instead of the latest Run's",
+    )
 
 
 def _add_trust_key(commands: _Commands) -> None:

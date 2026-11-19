@@ -4,7 +4,7 @@ import argparse
 import sys
 from collections.abc import Callable
 
-from network_analyser.cli import cmd_role_snippet, cmd_run, cmd_trust_key
+from network_analyser.cli import cmd_role_snippet, cmd_run, cmd_show_backup, cmd_trust_key
 from network_analyser.cli.exit_codes import ExitCode
 from network_analyser.cli.parser import PROG
 from network_analyser.cli.run_folder import (
@@ -37,7 +37,7 @@ def _change_passphrase(args: argparse.Namespace) -> ExitCode:
 COMMANDS: dict[str, Command] = {
     "run": cmd_run.run,
     "render": _not_built_yet,
-    "show-backup": _not_built_yet,
+    "show-backup": cmd_show_backup.show_backup,
     "trust-key": cmd_trust_key.trust_key,
     "role-snippet": cmd_role_snippet.role_snippet,
     "change-passphrase": _change_passphrase,
