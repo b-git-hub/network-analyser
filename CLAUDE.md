@@ -27,6 +27,14 @@ gh api repos/b-git-hub/network-analyser/issues/<blocked number>/dependencies/blo
 - Say which ticket blocks which, and why, beside the commands.
 - Also note "Waits on: <ticket name>" in the blocked ticket's body, so the dependency is readable before the operator runs the command.
 
+## Code
+
+Before writing code, read [CODING_STANDARDS.md](CODING_STANDARDS.md): its rules are enforced by tests, and `uv run --locked python scripts/check.py` must pass.
+
+## Wiki
+
+[docs/wiki/index.md](docs/wiki/index.md) holds dated decisions, process notes and lessons from earlier sessions. Read it before planning or implementation work, and follow [its conventions](docs/wiki/conventions.md) when you add to it.
+
 ## Security comes first
 
 Security outranks convenience, speed and features. When a choice trades security for anything else, take the secure option or stop and ask.

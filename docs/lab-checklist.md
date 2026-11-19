@@ -1,0 +1,264 @@
+# Lab checklist
+
+v1 is tested by hand on a booked DevNet *Cisco Modeling Labs* (CML) sandbox. Every booking starts from the same lab, [`lab/network-analyser-lab.yaml`](../lab/network-analyser-lab.yaml), and records its results here. This page gathers every lab check still open on the decision tickets, then walks through the tool.
+
+Decided on [Get devices to test against](https://github.com/b-git-hub/network-analyser/issues/8) and [Testing against recorded device output](https://github.com/b-git-hub/network-analyser/issues/28). Checks were added by [Device-side read-only roles per Platform](https://github.com/b-git-hub/network-analyser/issues/14), [Expected network size and Run limits](https://github.com/b-git-hub/network-analyser/issues/27) and [Release pipeline, signing and versioning](https://github.com/b-git-hub/network-analyser/issues/32).
+
+Sandbox results confirm protocols and command forms, not every hardware model. CML nodes are virtual, so stacks, vPC and platform-specific `show` output may differ on real kit.
+
+## Rules for every booking
+
+- **The Scope is only the CML management addresses seen through the sandbox VPN.** List the lab nodes' management addresses one by one. Never put in the whole sandbox subnet, which also holds the sandbox's own servers, and never any address from your own network.
+- **Nothing captured from the lab is committed** (CLAUDE.md: real device data never goes into the repo). A result is a short conclusion in your own words, such as "pass", "lands in the view" or "needs a trailing `*`". Never paste device output, configs, host keys or fingerprints, serial numbers, sandbox addresses or Run folder files into this page, an issue or a commit. Two kinds of text may be quoted, because the code needs them and they identify no device: an SSH identification string, and a command's syntax.
+- **Passwords never leave your password manager.** The sandbox credentials stay on the reservation page. The lab file sets every password to `CHANGE_ME`. You set the real lab passwords by hand at the console after boot. They never go into this page, an issue, a commit, a run file or a copy of the lab file. The tool takes them only at its hidden prompts.
+- **One Backup Passphrase per Windows account.** Lab Runs use the same check file as real Runs, so lab Backups are locked with your usual Backup Passphrase. Give lab Runs `--label lab` so they are easy to tell apart.
+- **Record every result.** Fill in *Result* and *Date (UTC)*. When a result changes code or a decision, also comment on the ticket named in that section's heading.
+
+## Booking log
+
+Check the sandbox's CML version on every booking. The lab file uses the CML 2.7 lab format (`version: 0.2.2`) and the IOL-L2 node, so it needs CML 2.7 or later. Community reports describe a missing Import button, and imports failing after a sandbox change.
+
+| Date (UTC) | CML version | Node images (IOL-L2, Cat8000v, NX-OS 9000v) | Tool version or commit | Notes |
+|---|---|---|---|---|
+| | | | | |
+
+## Set up the lab
+
+The lab has five nodes, all IOS-XE or NX-OS:
+
+| Node | CML node type | Platform | Management interface | Placeholder address |
+|---|---|---|---|---|
+| xe-rtr1 | `cat8000v` (Catalyst 8000V) | IOS-XE | GigabitEthernet1, VRF `Mgmt-intf` | 192.0.2.11 |
+| xe-sw1 | `ioll2-xe` (IOL-L2) | IOS-XE | Ethernet0/0, VRF `Mgmt-intf` | 192.0.2.12 |
+| xe-sw2 | `ioll2-xe` (IOL-L2) | IOS-XE | Ethernet0/0, VRF `Mgmt-intf` | 192.0.2.13 |
+| nx-sw1 | `nxosv9000` (NX-OS 9000v) | NX-OS | mgmt0, VRF `management` | 192.0.2.14 |
+| nx-sw2 | `nxosv9000` (NX-OS 9000v) | NX-OS | mgmt0, VRF `management` | 192.0.2.15 |
+
+**Synthetic address ranges.** The lab file uses only the RFC 5737 documentation ranges: 192.0.2.0/24 for management placeholders, and 198.51.100.0/24 and 203.0.113.0/24 for the data plane. Its other IPv4 literals are netmasks and the `0.0.0.0` default route. Any other address in `lab/` is a mistake.
+
+The management gateway placeholder is 192.0.2.1. The management interfaces join an unmanaged switch and the external connector `mgmt-bridge`, with CDP and LLDP turned off on them. The data plane uses 198.51.100.0/24 and 203.0.113.0/24, which never leave the lab:
+
+- **Bundles:** Port-channel1 (LACP trunk, VLANs 10 and 20) between xe-sw1 and xe-sw2, and port-channel1 between nx-sw1 and nx-sw2.
+- **VLAN Mismatch, on purpose:** the trunk xe-sw1 Ethernet0/3 ↔ nx-sw1 Ethernet1/3. xe-sw1 allows 10, 20 and 30 with native VLAN 1; nx-sw1 allows 10, 20 and 99 with native VLAN 99.
+- **OSPF** area 0, with an HMAC-SHA-256 key chain, on three routed /31 links (xe-rtr1–xe-sw1, xe-rtr1–nx-sw1, xe-sw2–nx-sw2) and on VLAN 10.
+- **Shared subnet:** 198.51.100.0/25 on VLAN 10 across all four switches, with HSRP address 198.51.100.1 on the two IOS-XE switches. 198.51.100.128/25 on VLAN 20 is shared by xe-sw2 and nx-sw2 only, with no routing protocol.
+- **The tool's account** `netanalyser`, with the Device Role `network-analyser role-snippet` prints ([#53](https://github.com/b-git-hub/network-analyser/issues/53)): CLI view `NA-READ` on IOS-XE and custom role `NA-READ` on NX-OS ([ADR 0005](adr/0005-device-roles-cut-exactly-to-the-allow-list.md)). It permits exactly the allow-list of the commit you test, so a command added later is refused until the role is regenerated: `python -m scripts.lab_roles` rewrites the lab file, and a test fails while it is out of step. On a booked lab, re-apply the role from `role-snippet` output after upgrading the tool.
+
+Steps:
+
+1. Book the CML sandbox from the DevNet Sandbox catalogue and connect its VPN. Record the CML version in the booking log.
+2. Copy the lab file to a folder outside the repo. In the copy, replace `192.0.2.1` and `192.0.2.11` to `192.0.2.15` with the gateway and free addresses from the sandbox's management subnet, as listed on the reservation page. If that subnet is not a /24, also change the masks (`255.255.255.0` on IOS-XE, `/24` on NX-OS). Never commit the copy.
+3. In CML, use **Import Lab** with the copy. Check that `mgmt-bridge` is set to the bridge that reaches the sandbox management network (the file says *System Bridge*).
+4. Start the lab. NX-OS 9000v takes several minutes to boot. If the sandbox can't start every node, delete xe-rtr1. The lab still has two IOS-XE and two NX-OS nodes, but loses the Catalyst 8000V checks and two OSPF links.
+5. At each node's console, log in as `admin` with `CHANGE_ME`. Set new passwords, then bring the management interface up. Management interfaces boot shut down so that nothing answers SSH while a password is still `CHANGE_ME`.
+
+   IOS-XE (the enable secret is `CHANGE_ME` until you change it; `enable view` is needed to edit a view):
+
+   ```
+   enable view
+   configure terminal
+    enable algorithm-type scrypt secret <new enable secret>
+    username admin privilege 15 algorithm-type scrypt secret <new admin password>
+    username netanalyser view NA-READ algorithm-type scrypt secret <new tool password>
+    parser view NA-READ
+     secret <new view secret>
+     exit
+    interface <management interface>
+     no shutdown
+    end
+   ```
+
+   NX-OS (the strength check is on again, so the new passwords must be strong):
+
+   ```
+   configure terminal
+    username admin password <new admin password>
+    username netanalyser password <new tool password>
+    interface mgmt0
+     no shutdown
+    end
+   ```
+
+   The OSPF key chain and the HSRP key also hold `CHANGE_ME`. They protect only links inside the lab, which nothing outside the lab can reach. Change them on every node if you wish, using the same value on each end.
+6. From the PC, check that each management address answers on TCP 22, for example with `Test-NetConnection <address> -Port 22`.
+7. **Host keys are new on every booking.** The lab is rebuilt, so a sandbox address that is already in your Trust Store now offers a different key, and the Run records it as `host key changed`. Read each node's fingerprint at its console (check A8), then accept it with `network-analyser trust-key <address> --fingerprint SHA256:…`.
+8. Check that the lab came up as designed:
+
+| ID | Check | Result | Date (UTC) |
+|---|---|---|---|
+| T1 | CDP and LLDP list the expected Neighbour on every data Link (`show cdp neighbors`, `show lldp neighbors`). | | |
+| T2 | Both Port-channel1 bundles are up with two members each (`show etherchannel summary`, `show port-channel summary`). | | |
+| T3 | OSPF is FULL on all three /31 links and on VLAN 10, including the IOS-XE ↔ NX-OS ones with the HMAC-SHA-256 key chain. If a cross-platform adjacency stays down, record it and remove authentication from that link for this booking only. | | |
+| T4 | The VLAN Mismatch trunk is up and the native VLAN mismatch is reported (CDP logs it on xe-sw1 and nx-sw1). | | |
+| T5 | HSRP group 10 on VLAN 10 is active on xe-sw1 and standby on xe-sw2 (`show standby brief`). | | |
+
+## Lab checks
+
+### A. Identification and SSH
+
+From [Identifying the Platform on first login](https://github.com/b-git-hub/network-analyser/issues/3), [Connection safety policy](https://github.com/b-git-hub/network-analyser/issues/7) and [Discovery and crawl](https://github.com/b-git-hub/network-analyser/issues/10). Results feed [#49](https://github.com/b-git-hub/network-analyser/issues/49) (identification), [#46](https://github.com/b-git-hub/network-analyser/issues/46) (Trust Store) and [#55](https://github.com/b-git-hub/network-analyser/issues/55) (Sweep).
+
+| ID | Check | Result | Date (UTC) |
+|---|---|---|---|
+| A1 | The exact SSH identification string each node type presents: IOL-L2, Catalyst 8000V and NX-OS 9000v (for example from `ssh -v`, the "remote software version" line). | | |
+| A2 | The NX-OS Sweep pattern: does the NX-OS string match the provisional `OpenSSH_* FIPS`, and do both IOS-XE strings match `Cisco-*`? If not, give the pattern that does. Ticket #55 logs a Sweep host in only when the string matches `SSH-2.0-Cisco-*` or this provisional NX-OS pattern (`SSH-2.0-OpenSSH_* FIPS`). Confirm or correct it before relying on a Sweep. | | |
+| A3 | The error text when a command for the wrong Platform is sent (for example `show port-channel summary` on IOS-XE, `show etherchannel summary` on NX-OS). | | |
+| A4 | Does NX-OS show its copyright header on every login? | | |
+| A5 | Can the `netanalyser` account, under its Device Role, run every identification command (`terminal length 0`, `show version`) on each Platform? | | |
+| A6 | Does each Platform accept the client string `SSH-2.0-NetworkAnalyser_<version>`, and does it appear in syslog or AAA accounting? | | |
+| A7 | Does each node negotiate with Paramiko 5.0 defaults (no SHA-1 key exchange, no `ssh-rsa` signatures)? Which host key types does each offer? | | |
+| A8 | The console command that shows the host key fingerprint on each Platform (for example `show ip ssh`, `show crypto key mypubkey rsa`, `show ssh key rsa`). Does it print a SHA-256 fingerprint or only the raw key? | | |
+| A9 | Regenerate one node's host key at the console. The next Run records it as `host key changed` and sends no password; `trust-key` accepts the new key only with its matching fingerprint. | | |
+| A10 | Seeds only ([#49](https://github.com/b-git-hub/network-analyser/issues/49), before the crawl exists): `run` with every node as a `--seed`. Each IOS-XE node is identified as IOS/IOS-XE and each NX-OS node as NX-OS, with hostname, model, software version and every serial in the summary. In `audit.log`, each device shows only `terminal length 0`, `terminal width 511`, `show version` and its privilege command, and no `exit`. Record any node whose prompt was not found or whose `show version` facts show as unknown (`parse_failed` lines). | | |
+| A11 | Landing privilege, IOS-XE ([#49](https://github.com/b-git-hub/network-analyser/issues/49), with C6): as `netanalyser` in view `NA-READ`, what does `show privilege` print, and does the summary say `view, level N`? Does the output name the view? If not, record whether `show parser view` should be added to the allow-list to name it. Also log in once as a user at level 1 (`username lowpriv privilege 1 ...`): the summary warns the privilege is too low; at level 15 it does not. | | |
+| A12 | Landing privilege, NX-OS ([#49](https://github.com/b-git-hub/network-analyser/issues/49), with C10): does role `NA-READ`'s `rule permit command show user-account` allow `show user-account netanalyser` (the name as an argument)? Does the summary say `roles NA-READ`? | | |
+| A13 | Algorithms ([#49](https://github.com/b-git-hub/network-analyser/issues/49), with A7): the tool also refuses CBC ciphers and SHA-1 and MD5 MACs. Does every node still negotiate? On IOS-XE, `show ssh` during a session shows the cipher and MAC in use; record them. Any node that fails is recorded as `SSH algorithms too old`: record which. | | |
+| A14 | Key-type pinning ([#49](https://github.com/b-git-hub/network-analyser/issues/49), story 44): a second Run against the same nodes logs in again (each is asked only for the key type stored on the first Run). `trust-key` finds the key of each node, including one that holds only an RSA key. | | |
+| A15 | Platform-limited sets ([#49](https://github.com/b-git-hub/network-analyser/issues/49), provisional until [#54](https://github.com/b-git-hub/network-analyser/issues/54)): a set limited to NX-OS is tried only where the SSH identification string matches the provisional NX-OS pattern (A2), and one limited to IOS/IOS-XE only where it starts `SSH-2.0-Cisco-`. With only an NX-OS-limited set, the IOS-XE nodes are `authentication failed (every eligible set tried)` with no login attempt in `audit.log`. | | |
+| A16 | Optional, config-mode drop ([#49](https://github.com/b-git-hub/network-analyser/issues/49), story 55): on one IOS-XE node, add a test user whose line lands in configuration mode (`autocommand configure terminal` with `autocommand-options nohangup`). A Run with that set is left partial, "a configuration-mode prompt appeared", and `audit.log` shows no `command_sent` line for it. Remove the user afterwards. | | |
+| A17 | Opt-in Sweep ([#55](https://github.com/b-git-hub/network-analyser/issues/55)): `run --sweep` against the lab. Each IOS-XE node and each NX-OS node is logged into. Any other host that answers on TCP 22 is listed and never offered a password. The tool sends no ICMP. The identification strings match A1 and A2; the NX-OS pattern is still provisional until A2 is filled in. | | |
+
+### B. Commands and the allow-list
+
+From [Read-only command catalogue per Platform](https://github.com/b-git-hub/network-analyser/issues/4) and [#14](https://github.com/b-git-hub/network-analyser/issues/14). Results feed [#59](https://github.com/b-git-hub/network-analyser/issues/59) and [#60](https://github.com/b-git-hub/network-analyser/issues/60) (collection and parsers) and [#53](https://github.com/b-git-hub/network-analyser/issues/53) (`role-snippet`).
+
+| ID | Check | Result | Date (UTC) |
+|---|---|---|---|
+| B1 | The exact allow-list strings: every command in the catalogue runs as written on each Platform, including the per-VRF forms. List any that need a different form. | | |
+| B2 | The exact NX-OS `\| json` command strings: which allow-listed NX-OS commands accept `\| json`. | | |
+| B3 | The default privilege level of each allow-listed IOS-XE `show` command (check with `show privilege` and `show parser`). | | |
+
+### C. Device Roles
+
+From [#14](https://github.com/b-git-hub/network-analyser/issues/14) and [ADR 0005](adr/0005-device-roles-cut-exactly-to-the-allow-list.md). Results feed [#53](https://github.com/b-git-hub/network-analyser/issues/53) (`role-snippet`) and [#59](https://github.com/b-git-hub/network-analyser/issues/59) and [#60](https://github.com/b-git-hub/network-analyser/issues/60) (landing privilege). Try the IOS-XE file checks on xe-rtr1 too: the Catalyst 8000V has a real bootflash, and IOL's file system may behave differently.
+
+| ID | Check | Result | Date (UTC) |
+|---|---|---|---|
+| C1 | IOS-XE: does a **local** user land in a CLI view at SSH login, with no `enable`? (Log in as `netanalyser`.) If not, local-only sites use the privilege-level fallback. | | |
+| C2 | IOS-XE: does `show running-config view full`, inside a view or at a custom level, need `file privilege N`? | | |
+| C3 | IOS-XE: if it does, does `file privilege N` let that level `delete`, `copy`, `format` or `rename` files? If it does, it is never recommended (ADR 0005). | | |
+| C4 | IOS-XE: does `show running-config view full` work unchanged at priv 15, with the same output as `show running-config`? | | |
+| C5 | IOS-XE fallback: after `privilege exec level 7 …`, does `show` stay usable at level 1 once the snippet puts it back? (Try on one switch and reload it afterwards.) | | |
+| C6 | IOS-XE: which command reports the landing privilege or view (`show privilege`, `show parser view`), and what must the role permit for it to run? | | |
+| C7 | NX-OS: how are RBAC rules matched against `\| json` and arguments such as `vrf all`? Is a trailing `*` needed? | | |
+| C8 | NX-OS: does `show running-config` under the custom role return the full config, with hashes and keys? | | |
+| C9 | NX-OS: is any allow-listed command restricted to network-admin only? | | |
+| C10 | NX-OS: which command reports the user's own roles (`show user-account <name>`, `show role`), and what must the role permit for it to run? | | |
+| C11 | IOS-XE (`role-snippet`, [#53](https://github.com/b-git-hub/network-analyser/issues/53)): does the view keep `commands exec include terminal length 0` and `terminal width 511` with their values, and does the fallback take `privilege exec level 7 terminal length 0`? If the device refuses or drops the value, record the form it keeps; Netmiko's session set-up must still pass. | | |
+| C12 | NX-OS (`role-snippet`): does a new account get `network-operator` by default, and does `no username netanalyser role network-operator` remove it, so that `show user-account netanalyser` lists only `NA-READ`? | | |
+| C13 | TACACS+, only if a TACACS+ server is available (`role-snippet --tacacs`): does `cli-view-name=NA-READ` in the profile place the IOS-XE account in the view, and `shell:roles="NA-READ"` give the NX-OS account only that role? Does an anchored ISE row (`show`, `^version$`) permit `show version` and refuse `show version detail`? | | |
+| C14 | IOS-XE per-VRF commands ([#59](https://github.com/b-git-hub/network-analyser/issues/59)): the view names each per-VRF form by its words before the VRF (`commands exec include show ip arp vrf`, `show ip eigrp vrf`, `show ip bgp vpnv4 vrf`, `show ip route vrf`). Does that let `show ip arp vrf BLUE`, `show ip eigrp vrf BLUE neighbors`, `show ip bgp vpnv4 vrf BLUE summary` and `show ip route vrf BLUE static` run under `NA-READ`? Does `commands exec include show interfaces` also permit `show interfaces switchport` and `show interfaces trunk` (record whether the separate lines are needed)? With `--tacacs`, does the ISE row's VRF pattern permit a VRF name and refuse `BLUE \| redirect ...`? | | |
+
+### D. Backups
+
+From [Encrypting Backups and handling secrets in configs](https://github.com/b-git-hub/network-analyser/issues/5) and [#14](https://github.com/b-git-hub/network-analyser/issues/14). Results feed [#51](https://github.com/b-git-hub/network-analyser/issues/51) (capture and lock Backups). Write a secret line's form with its value replaced, for example `key-string 7 <value>`.
+
+| ID | Check | Result | Date (UTC) |
+|---|---|---|---|
+| D1 | Does a default config always print a `hostname` line, on both Platforms? | | |
+| D2 | What does a truncated low-privilege config look like, and what error appears when `view full` is not permitted? (Describe it; don't paste it.) | | |
+| D3 | The exact IOS-XE secret-line forms: routing protocol (the lab's OSPF key chain), keychain, NTP (add an `ntp authentication-key` by hand to see it) and the HSRP key. | | |
+
+### E. Credentials and lockout
+
+From [How Credential Sets are supplied and tried](https://github.com/b-git-hub/network-analyser/issues/6). Results feed [#54](https://github.com/b-git-hub/network-analyser/issues/54) (failure budget).
+
+| ID | Check | Result | Date (UTC) |
+|---|---|---|---|
+| E1 | How many AAA failures does one wrong SSH password count as, on IOS-XE and on NX-OS? Paramiko sends exactly one password attempt per connect. (IOS-XE: the `%SEC_LOGIN-4-LOGIN_FAILED` log lines, or `show aaa local user lockout` with `aaa local authentication attempts max-fail` set; NX-OS: `show accounting log` or `show logging`.) | | |
+
+### F. Run time and locking
+
+From [Expected network size and Run limits](https://github.com/b-git-hub/network-analyser/issues/27). The CML lab can't hold 1,000 devices, so the Run-time targets are worked out from per-device times measured here.
+
+Estimated Run time ≈ N × *t* ÷ parallelism + N × 1 s, where N is the device count, *t* the per-device time, and 1 s the pause each Backup lock causes. At the default parallelism of 10, the targets hold when:
+
+- a typical Run of 300 devices finishes within 30 minutes: *t* ≤ 50 s;
+- the largest Run of 1,000 devices finishes within 2 hours: *t* ≤ 62 s.
+
+| ID | Check | Result | Date (UTC) |
+|---|---|---|---|
+| F1 | Per-device time, from login to Backup locked, for each node (from the Run report or `audit.log`). Record the slowest per Platform. | | |
+| F2 | Using the slowest *t* from F1, are both targets met? | | |
+| F3 | The scrypt level pyrage picks on your real PC, from the Run report. It should be 2^18 or above. | | |
+
+### G. The exe on Windows
+
+From [Python network automation libraries and packaging as a Windows exe](https://github.com/b-git-hub/network-analyser/issues/2), [Code signing and Python version](https://github.com/b-git-hub/network-analyser/issues/29) and [#32](https://github.com/b-git-hub/network-analyser/issues/32). These need no device. Results feed [#44](https://github.com/b-git-hub/network-analyser/issues/44) (`build.ps1`) and [#43](https://github.com/b-git-hub/network-analyser/issues/43) (masked prompt).
+
+| ID | Check | Result | Date (UTC) |
+|---|---|---|---|
+| G1 | The zip size (target under 100 MB; a miss is a warning, not a blocker) and the unpacked folder size, as `build.ps1` prints them. | | |
+| G2 | Cold start to the first prompt, with Defender on, on a PC at the smallest supported spec (Windows 11 64-bit, 8 GiB, 4 cores). Target under 5 s; a miss is a warning. | | |
+| G3 | Long paths: a Run folder path over 260 characters (a deep `--runs-dir`) works through `\\?\` paths, without relying on the Windows `LongPathsEnabled` setting. With [#42](https://github.com/b-git-hub/network-analyser/issues/42) alone, check that `run --runs-dir <a path over 260 characters>` gets past the folder check (it creates the folder and prints no "cannot be created" refusal). | | |
+| G4 | Does the unsigned build run at all? Record whether Smart App Control is on (Windows Security → App & browser control) and whether any IT policy blocks the exe, a `.pyd` or a DLL. A block is the trigger to bring signing forward. | | |
+| G5 | Masked prompt, paste: a password pasted from your password manager arrives whole, with one `*` per character. Try Ctrl+V and right-click paste, in both Windows Terminal and the classic console host (`conhost.exe`). | | |
+| G6 | Masked prompt, keys: Ctrl+C at any secret prompt cancels cleanly, with no traceback, nothing saved and exit code 3. Backspace removes a character; arrow and function keys (try Left, Up, Home, Delete, F1 and F11) put nothing into the password. Also type a test password containing `à`: the reader is expected to drop it and the key after it, because `msvcrt.getwch()` sends `à` as the same code that starts an arrow key. Record what happens. | | |
+| G7 | Masked prompt, redirected input: with input piped in (for example `"answer" \| network-analyser ...`), the prompt says input is not a console and reads one line; nothing typed or piped is printed. | | |
+| G8 | Crash-dump guard, clean PC: with no `LocalDumps` key and no AeDebug `Debugger` value (check with `reg query "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps"` and `reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AeDebug"`), no warning is shown before the first secret prompt. Record whether AeDebug holds a `Debugger` value on a clean PC. | | |
+| G9 | Crash-dump guard, dumps on: on a test PC where you (not the tool) have created the `LocalDumps` key, the warning names LocalDumps; `YES` carries on, and anything else stops with exit code 2 before any secret prompt. Check with Process Monitor or `reg query` that the tool wrote nothing to the registry. Remove the key afterwards. | | |
+| G10 | Run folder permissions ([#42](https://github.com/b-git-hub/network-analyser/issues/42)): `network-analyser run` with the default Runs folder prints no permissions warning. With `--runs-dir D:\na-test` (or any folder where Authenticated Users or Users have Modify), it prints one warning line naming those accounts and the tampering risk, then carries on. The tool changes no permissions (compare the folder's Security tab before and after). | | |
+| G11 | Location notice ([#42](https://github.com/b-git-hub/network-analyser/issues/42)): `--runs-dir` on a mapped network drive, on a `\\server\share` path, inside your OneDrive folder and on a USB stick each print one notice line naming the kind of place, and the Run goes on. The default Runs folder prints none. | | |
+| G12 | One Run at a time ([#42](https://github.com/b-git-hub/network-analyser/issues/42)): while one `run` waits at a prompt, a second `run` or `change-passphrase` in another window is refused with exit code 2. End the first one from Task Manager (a crash); a new `run` then starts normally. | | |
+| G13 | `build.ps1` on your PC (added by [#44](https://github.com/b-git-hub/network-analyser/issues/44); its Windows-only steps were only reviewed, never run, when it was written). From a clean clone, in Windows PowerShell 5.1: `powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1`. Record: it finds python.org Python on its own (or which `-Python` path you passed); it refuses uv's own Python and a dirty checkout; the build ends `BUILD SUCCEEDED` with the commit and version; `dist\network-analyser\_internal` holds `paramiko\` and `scp.py` as plain `.py` files; the exe's Properties → Details show the same version as `--version`; `THIRD-PARTY-NOTICES.txt` is in the zip; `Get-FileHash` of the zip matches its line in `SHA256SUMS.txt`. | | |
+| G14 | Trust Store folder permissions ([#69](https://github.com/b-git-hub/network-analyser/issues/69); decided on [#7](https://github.com/b-git-hub/network-analyser/issues/7)). (a) Before any Run has made `%LOCALAPPDATA%\NetworkAnalyser\trust\`, `network-analyser run` prints no Trust Store line and reaches the Scope prompt. (b) Create `trust\` by hand (it inherits the default permissions), run again: still no Trust Store line. (c) On `trust\`'s Security tab, give `Users` Read only: `run` is refused with exit code 2 before the Scope prompt, naming `BUILTIN\Users` and the folder. (d) Change that to Modify: refused the same way. (e) Remove `Users` from `trust\` and instead give a second local account Read on `trust\known_hosts` only (create an empty file first): refused, naming that account. (f) Remove the extra entries: `run` reaches the Scope prompt again. Compare the Security tabs before and after each `run`: the tool changes no permissions. Record whether the default `%LOCALAPPDATA%` permissions hold any account besides you, SYSTEM and Administrators. | | |
+| G15 | The first tag release (added by [#47](https://github.com/b-git-hub/network-analyser/issues/47); the workflow was only validated offline when it was written). After the first tag push ([docs/releasing.md](releasing.md)), record: the run's `build` job found the pinned Python and `build.ps1` ended `BUILD SUCCEEDED` with the tagged commit; the run summary shows the zip's SHA-256; the release is marked Latest with the zip and `SHA256SUMS.txt`, and its notes open with Breaking changes; `Get-FileHash` of the downloaded zip matches the run summary; the unzipped exe's `--version` prints the tag's version. Also record whether immutable releases were available and turned on, and that two-factor sign-in is on. | | |
+| G16 | `audit.log` on Windows ([#48](https://github.com/b-git-hub/network-analyser/issues/48); only run on Linux when it was written). Start a Run and confirm it. Open `<Run folder>\audit.log` in Notepad: one JSON object per line, the first `run_started` and the last `run_ended`, lines ending LF only (no blank lines between), times ending `Z`. Record that `windows_account` shows `DOMAIN\you` and `pc_name` your PC's name. Search the file and the console output for your Backup Passphrase and each password typed: none appears. (The stop when `audit.log` can no longer be written is checked once the crawl exists: pull out a USB stick holding `--runs-dir` mid-Run; the Run stops as with Ctrl+C, exit code 3.) | | |
+| G17 | `diagram.html` on Windows ([#63](https://github.com/b-git-hub/network-analyser/issues/63); only checked in headless Chrome on Linux when it was written). From the exe, run `network-analyser render <Run folder>` (this also proves the build carries the diagram's JavaScript and CSS). With the network cable unplugged, open `diagram.html` by double-click in Edge, then in any other installed browser. Record: the Map draws (not the "needs JavaScript" line); DevTools → Console shows no Content-Security-Policy error; DevTools → Network shows no request at all; clicking a device, a Link, a Bundle and the "?" Shared Segment shows its details below the drawing; Unvisited Devices' lines appear only when one of them, or the device that reported it, is selected; interface names hide when zoomed far out; `diagram.html#device=<an id from the details panel>` opens that device. | | |
+
+### H. The crawl
+
+Added by [#50](https://github.com/b-git-hub/network-analyser/issues/50) (Crawl CDP/LLDP Neighbours in parallel), whose command forms, JSON keys and Platform-hint patterns were written from documentation and synthetic text only. Scope: the lab's management addresses, one `--scope` per address.
+
+| ID | Check | Result | Date (UTC) |
+|---|---|---|---|
+| H1 | The crawl reaches every node from one Seed: `run` with only `--seed <xe-rtr1 address>`. Record each node not reached and the reason the summary gives (`outside Scope` means its Neighbours advertise only addresses outside the management Scope: record which address CDP and LLDP advertise, and whether `cdp source-interface` / `lldp management-address` on the management interface fixes it). | | |
+| H2 | Command forms: `show cdp neighbors detail` and `show lldp neighbors detail` on IOS-XE, `show cdp neighbors detail \| json` and `show lldp neighbors detail \| json` on NX-OS, all run under the Device Role. Any `parse_failed` line in `audit.log` for them means the format differs: record the field names (NX-OS JSON: the tool reads `TABLE_cdp_neighbor_detail_info`/`ROW_cdp_neighbor_detail_info` with `intf_id`, `port_id`, `device_id`, `platform_id`, `version`, `nativevlan`, `v4mgmtaddr`, `v4addr`; and `TABLE_nbor_detail`/`ROW_nbor_detail` with `l_port_id`, `port_id`, `chassis_id`, `sys_name`, `sys_desc`, `mgmt_addr`). Describe differences; don't paste output. | | |
+| H3 | Platform hints: no lab node is recorded as `unsupported Platform (advertised)`. If one is, record its CDP Platform and Version lines, or its LLDP System Description, as it shows them. | | |
+| H4 | Multi-homed address choice: give a node a second in-Scope address CDP advertises (for example a loopback inside the Scope, added to `--scope`), then shut its management interface. In `audit.log`, the management address is tried first, twice (`retry` true the second time, 30 s later), then the other address; and after a wrong password (W2) no other address is ever tried. | | |
+| H5 | One record per device: with a node's second address in the Scope (H4, management interface up), the summary lists the node once, with `also at <address> (same host key)`, and `audit.log` shows no `login_attempted` line for the second address. | | |
+| H6 | `--parallel 2`: `audit.log` never shows more than two devices between their first `connection_attempted` and their `device_finished` at once. | | |
+
+### I. NX-OS collection
+
+From [NX-OS collection and parsers](https://github.com/b-git-hub/network-analyser/issues/60) (section H is left for the crawl, [#50](https://github.com/b-git-hub/network-analyser/issues/50)). The `| json` command strings and the JSON keys the readers use were written from documentation and memory, never seen on a device; fixtures are hand-written. Run each check on nx-sw1 and nx-sw2, logged in as `netanalyser`, and describe what you see; never paste output (nothing captured is committed).
+
+| ID | Check | Result | Date (UTC) |
+|---|---|---|---|
+| I1 | Each collection command on the NX-OS allow-list (`network-analyser role-snippet nx-os` lists them; they all end `\| json`) runs under the `NA-READ` role: none answers `% Permission denied for the role` or `% Invalid command`. Record any that fail, and the exact string the device accepts instead. | | |
+| I2 | How the role's `rule <n> permit command ...` lines match: does `show interface \| json` also permit `show interface` (no `\| json`), `show interface brief` or `show interface \| json-pretty`? Does a rule written without `\| json` permit the `\| json` form? | | |
+| I3 | `show feature \| json` lists the features under `TABLE_cfcFeatureCtrlTable` / `ROW_cfcFeatureCtrlTable` with `cfcFeatureCtrlName2` and `cfcFeatureCtrlOpStatus2`, and names the features `lldp`, `vpc`, `ospf`, `eigrp`, `bgp`, `hsrp_engine` and `vrrp`. With a feature off, its command answers `% Invalid command` (so the tool skips it). | | |
+| I4 | The JSON keys the readers use (in `network_analyser/platforms/nxos/readers.py`) are the ones the device sends, for each command. Especially: `show ip interface vrf all` (does each `TABLE_vrf` entry sit beside its `TABLE_intf` entry? secondary addresses under `TABLE_secondary_address`? an unnumbered interface's key?), `show vpc peer-keepalive` (`vpc-keepalive-dest`, `vpc-keepalive-vrf`; is a source address shown?), `show ip eigrp neighbors vrf all`, `show hsrp brief` and `show vrrp`. Record each key that differs. | | |
+| I5 | A table with no rows (for example `show ip arp vrf all \| json` in a VRF with no entries, or LLDP with no Neighbours) comes back as an empty reply, not an object with an empty table. | | |
+| I6 | After W1, nx-sw1's entry in `topology.json` has its interfaces (down ones included), VLANs, port-channels, vPC (domain, peer-link, keepalive with its source address) and the `management` VRF marked, and `skipped` lists nothing for it. Record any part listed as skipped and its reason. | | |
+| I7 | The size of `show interface \| json` on the largest Nexus you run (`bytes_received` in `audit.log`). The tool drops a session whose reply passes 1,000,000 characters. | | |
+
+### J. IOS/IOS-XE collection
+
+From [IOS/IOS-XE collection and parsers](https://github.com/b-git-hub/network-analyser/issues/59). The command strings were written from documentation (B1 covers them in general); the replies the parsers read are hand-written, shaped like Catalyst output, and read with ntc-templates `cisco_ios` or the tool's own readers. Run each check on xe-sw1, xe-sw2 and xe-rtr1, logged in as `netanalyser`, and describe what you see; never paste output.
+
+| ID | Check | Result | Date (UTC) |
+|---|---|---|---|
+| J1 | Each collection command on the IOS/IOS-XE allow-list (`network-analyser role-snippet ios-xe` lists them) runs under the `NA-READ` view. After W1, `audit.log` has no `parse_failed` line with reason `denied` for an IOS/IOS-XE node, except for features the node lacks (IOL has no `show etherchannel summary` without a port-channel? record what each answers). | | |
+| J2 | The error texts `ios_xe/replies.py` classifies: a command outside the view (`% Invalid input` with a caret?), a feature that is off (`show ip bgp summary` with no BGP: `% BGP not active`? `show glbp brief` and `show vrrp brief` with none configured: empty, or a `%` line?). Record each first line's form, with any value replaced. | | |
+| J3 | After W1, each IOS/IOS-XE node's entry in `topology.json` has its interfaces (down ones included, with VRF, masks and secondaries), VLANs, port-channels, VRFs (`Mgmt-intf` marked) and stack members, and `skipped` lists nothing for it. Record any part listed as skipped and its reason; `not understood` means a template or reader misread the device's text. | | |
+| J4 | Stack member numbers: on a stack (or StackWise Virtual pair, if any is available), `show version` lists each member with its model and serial, and interfaces on member 2 carry member 2. On a lone switch, interfaces carry no member number. | | |
+
+## Walkthrough of the tool
+
+Run these on every booking that tests a new build. Use only `netanalyser` Credential Sets, and give the Scope as the lab's management addresses, one `--scope` per address.
+
+| ID | Do this | Expect | Result | Date (UTC) |
+|---|---|---|---|---|
+| W1 | **A normal Run.** `network-analyser run --scope <each management address> --seed <each management address> --label lab`, with the right `netanalyser` password. | The Ready-to-start block lists the Scope, Seeds and each set's username, with passwords shown only as "held in memory". All five nodes become Visited Devices, each with its landing privilege recorded and a locked Backup (record any Backup not taken, with the reason the Run report gives). The Topology shows both Bundles; the VLAN Mismatch on xe-sw1 Ethernet0/3 ↔ nx-sw1 Ethernet1/3 (native VLAN 1 against 99 as a red `!`; VLANs 30 and 99 on one end only as amber `~`); the Subnet 198.51.100.0/25 with four devices; 198.51.100.128/25 as a line between xe-sw2 and nx-sw2; and OSPF L3 Adjacencies. HSRP address 198.51.100.1, the loopback /32s and the management VRFs create no L3 Adjacency. `diagram.html` and `run-report.html` open with the network cable unplugged. Record the exit code. | | |
+| W1b | **The crawl from one Seed.** Repeat W1 with only `--seed <nx-sw1 address>`. | Record which nodes the crawl reached. For each one it didn't, record the reason the Run report gives (for example `outside Scope`, when its Neighbours advertise only data-plane addresses). | | |
+| W2 | **A wrong password.** Start a Run with one Credential Set: `netanalyser` with a wrong password. | One login attempt per device, and one at a time while the set is on probation. After the failure budget (3 by default), the set is retired, and the console names its number and username. Devices tried are recorded as `authentication failed (every eligible set tried)`; the rest as `not attempted (Credential Sets retired)`. Compare each device's AAA failure count with check E1. | | |
+| W3 | **Ctrl+C.** Start W1 again and press Ctrl+C once while devices are queued. Then do it again, pressing Ctrl+C twice. | Once: no new logins, the console says how many sessions it is waiting on, queued devices are recorded as `not attempted (Run stopped)`, the Topology, diagram and Run report are still written, and the exit code is 3. Twice: sessions close at once, identified devices become partial Visited Devices, and `backups\` holds no partial Backup. | | |
+| W4 | **`show-backup`.** `network-analyser show-backup` with no file, then `network-analyser show-backup <Run folder>\backups\<file>.cfg.age`. | With no file, it lists the Run's Backups. With a file, it asks for the Backup Passphrase and prints the config to the console only: no new file appears in the Run folder or in `%TEMP%`. A wrong passphrase is refused. | | |
+| W5 | **`render`.** Disconnect the sandbox VPN, then `network-analyser render <Run folder>`. | `diagram.html` and `diagram.drawio` are redrawn from `topology.json` and no device is contacted. `run-report.html` is unchanged. `diagram.drawio` opens in draw.io Desktop with Physical and Routing pages. | | |
+
+## After the booking
+
+- Leave Run folders on your PC. They hold lab data and are never committed.
+- The sandbox wipes the lab when the booking ends. Nothing needs undoing on the devices.
+- If a result changed a decision, comment on the ticket named in that section's heading.
