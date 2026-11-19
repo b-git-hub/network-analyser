@@ -83,6 +83,8 @@ class FakeDevice:
     """The timeout each line in `lines` was sent with."""
     open_links: int = 0
     gate: Callable[[str], bool] | None = None
+    on_login: Callable[[], None] | None = None
+    """Called inside each password attempt, before the device answers (to hold it open)."""
 
 
 class _FakeShell:
@@ -128,6 +130,8 @@ class _FakeLink:
         self._logged_in = True
         value = password.reveal()
         self._device.passwords_received.append(value)
+        if self._device.on_login is not None:
+            self._device.on_login()
         return LoginResult.SUCCEEDED if value == self._device.password else LoginResult.FAILED
 
     def open_shell(self, permits: Callable[[str], bool]) -> Shell | ErrorRaised:
