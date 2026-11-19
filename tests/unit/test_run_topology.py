@@ -12,6 +12,7 @@ import pytest
 from network_analyser import device_gateway, run_output
 from network_analyser.cli import ExitCode
 from network_analyser.records.device import DeviceRecord
+from network_analyser.records.identity import Alias
 from tests.support import fake_age
 from tests.support.run_driver import FLAGS, Runner, data_folder, first_run
 
@@ -51,7 +52,7 @@ def test_a_run_stopped_by_ctrl_c_still_writes_topology_json(
     run.network.add("192.0.2.2")
     real_visit = device_gateway.visit
 
-    def stop_at_the_second(ip: IPv4Address, **kwargs: object) -> DeviceRecord:
+    def stop_at_the_second(ip: IPv4Address, **kwargs: object) -> DeviceRecord | Alias:
         if ip == IPv4Address("192.0.2.2"):
             raise KeyboardInterrupt
         return real_visit(ip, **kwargs)  # type: ignore[arg-type]  # the cli's own arguments

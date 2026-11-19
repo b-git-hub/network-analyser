@@ -42,7 +42,8 @@ class ScannedStream(io.TextIOBase):
         if self._pending:
             pending, self._pending = self._pending, ""
             self._inner.write(self._scan.contains_secret(pending)[0])
-        self._inner.flush()
+        if not self._inner.closed:  # finalised late (an exception's traceback kept it alive)
+            self._inner.flush()
 
     @override
     def writable(self) -> bool:

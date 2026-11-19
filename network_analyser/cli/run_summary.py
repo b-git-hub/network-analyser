@@ -1,23 +1,24 @@
-"""The basic end-of-Run summary: each Seed's outcome, and what needs attention (ticket #49).
+"""The basic end-of-Run summary: each device's outcome, and what needs attention (#49, #50).
 
 The full summary and the Run report come later (#56, #66). This one lists every device the
-Run tried, then a "Needs your attention" list with a next step for each item (story 88):
-the exact `trust-key` line for a changed host key, and a note for a landing privilege too low
-for the tool's commands. Device text is escaped before it is printed (story 81); no device
-output is ever shown.
+Run tried (with the other IPs it was found at), every device it only heard of, then a
+"Needs your attention" list with a next step for each item (story 88): the exact
+`trust-key` line for a changed host key, a note for a landing privilege too low for the
+tool's commands, and why the Run stopped early, if it did. Device text is escaped before
+it is printed (story 81); no device output is ever shown.
 """
-
-from collections.abc import Sequence
 
 from network_analyser.cli.parser import PROG
 from network_analyser.cli.text import escape_controls
 from network_analyser.records import HostKeyVerdict
+from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord, LandingPrivilege, UnvisitedReason
 from network_analyser.records.events import DeviceOutcome
 
 
-def summary(records: Sequence[DeviceRecord]) -> str:
+def summary(result: CrawlResult) -> str:
     """Return the summary block for the devices of one Run."""
+    records = result.devices
     counts = {o: sum(1 for r in records if r.outcome is o) for o in DeviceOutcome}
     lines = [
         (
@@ -25,8 +26,11 @@ def summary(records: Sequence[DeviceRecord]) -> str:
             f"{counts[DeviceOutcome.VISITED]} visited, {counts[DeviceOutcome.PARTIAL]} partial, "
             f"{counts[DeviceOutcome.UNVISITED]} unvisited."
         ),
-        *(f"  {_line(r)}" for r in records),
+        *(line for r in records for line in _lines(r)),
     ]
+    if result.unvisited:
+        lines.append(f"Known but never logged into: {len(result.unvisited)}.")
+        lines.extend(f"  {_unvisited_line(u)}" for u in result.unvisited)
     new_keys = sum(
         1 for r in records if r.host_key is not None and r.host_key.verdict is HostKeyVerdict.NEW
     )
@@ -35,16 +39,39 @@ def summary(records: Sequence[DeviceRecord]) -> str:
             f"New host keys trusted on first use: {new_keys}. Check each fingerprint on the "
             "device console."
         )
-    attention = [item for r in records for item in _attention(r)]
+    attention = _all_attention(result)
     if attention:
         lines.append("Needs your attention:")
         lines.extend(f"  {item}" for item in attention)
     return "\n".join(lines)
 
 
-def needs_attention(records: Sequence[DeviceRecord]) -> bool:
+def needs_attention(result: CrawlResult) -> bool:
     """Say whether anything in the Run needs the operator (exit code 1, story 90)."""
-    return any(_attention(r) for r in records)
+    return bool(_all_attention(result))
+
+
+def _all_attention(result: CrawlResult) -> list[str]:
+    items = [item for r in result.devices for item in _attention(r)]
+    if result.stopped:
+        items.append(
+            f"The Run stopped early: {result.stopped}. No further login was started. Check "
+            "the disk holding the per-user data folder, then run again."
+        )
+    return items
+
+
+def _lines(record: DeviceRecord) -> list[str]:
+    """The device's line, then one line per other IP it was found at (story 73)."""
+    return [
+        f"  {_line(record)}",
+        *(f"  {'':<15}  also at {alias}" for alias in record.aliases),
+    ]
+
+
+def _unvisited_line(record: DeviceRecord) -> str:
+    reason = record.unvisited_reason.value if record.unvisited_reason else "no reason recorded"
+    return f"{record.ip!s:<15}  unvisited  {reason}"
 
 
 def _line(record: DeviceRecord) -> str:

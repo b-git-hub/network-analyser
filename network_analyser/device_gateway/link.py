@@ -9,11 +9,12 @@ A failure the library reports never crosses this seam as an exception: `ssh` map
 plain outcome holding a fixed message (story 166), so no exception text can travel on.
 """
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, unique
 from ipaddress import IPv4Address
-from typing import Protocol
+from typing import Final, Protocol
 
 from network_analyser.credentials import Secret
 from network_analyser.records import HostKey, ScopeRecord
@@ -106,6 +107,15 @@ class Link(Protocol):
     def close(self) -> None:
         """Close the connection."""
         ...
+
+
+CONNECT_RETRY_DELAY_S: Final = 30
+"""How long to wait before the one retry of a failed connection (story 51)."""
+
+
+def wait_before_retry() -> None:
+    """Wait before the one connection retry. A seam: tests replace it, so none waits."""
+    time.sleep(CONNECT_RETRY_DELAY_S)
 
 
 class Dial(Protocol):
