@@ -1,4 +1,4 @@
-# Calls made while implementing spec #37
+﻿# Calls made while implementing spec #37
 
 Decisions the coordinating session made on 2026-11-18 while the operator was AFK (see [operator-wants-cml-build](operator-wants-cml-build.md)), resolving gaps the [exploration notes](spec-37-notes/guardrails.md) found. Each is reversible and was raised on [spec #37](https://github.com/b-git-hub/network-analyser/issues/37) as the spec asks.
 
@@ -15,3 +15,16 @@ Decisions the coordinating session made on 2026-11-18 while the operator was AFK
    - **CDP and LLDP are not collected by #59.** The gateway reads them before the Backup (#50) and puts them in `Collected.cdp`/`lldp`; the WIP's `ios_xe/neighbours.py` is removed.
    - **Header guards.** Lenient templates only read a reply that shows the table's own header; `show vrf` needs `Name  Default RD  Protocols`, so a reply of another shape is `not understood`, never "no VRFs". An empty reply is still "none".
    - The per-VRF role form (words before the VRF name in the view; the VRF pattern in the ISE row) and the command strings are provisional until lab checks B1, C14 and section J.
+
+## #54 Credential Set order, failure budget and probation (2026-11-19)
+
+Gaps the ticket leaves open, each settled on the conservative side; all await the operator.
+
+1. **The password handover is a lease.** `CredentialSets.try_lease(number, failure_budget=)` returns a `LoginLease`, the only way to a password (`lease.password_for_login()`); `password_for_login(number)` and `record_login` are gone. A lease is finished once with the outcome, or given back unused (`release`, or leaving its `with` block), which spends nothing. `visit` always gives it back in a `finally`. A set number outside 1..N is refused (`ValueError`), so 0 or -1 can't wrap round to the last set.
+2. **Budget holds in parallel too.** After probation, no more logins with a set are in flight than its failure budget has left (failures + in flight < budget), so logins failing together can never overspend it.
+3. **No SSH link open while waiting.** On a device's first connection the set is chosen only once the identification string is read; if it may not log in now, the link is closed before waiting. On later connections the set is leased (waiting if need be) before dialling. A wait for a turn may cost one extra connection that sends no password.
+4. **A connection lost after the password was sent counts as a failed login** (it spends the budget and can retire the set), because the device's AAA may have counted it. It is audited as `login_attempted` with result `lost`, and the device is `unreachable`.
+5. **Unvisited reasons.** Once any set was tried on a device and none is left, the reason is `authentication failed (every eligible set tried)`, even if the last failure retired the set. A device on which nothing was tried because every set that fits it is retired is `not attempted (Credential Sets retired)`; one with no set that fits it at all stays `authentication failed` (as #49 had it).
+6. **All sets retired stops the Run like the Trust Store stop:** no new visit starts, queued devices are `not attempted (Credential Sets retired)`, `CrawlResult.stopped` is `every Credential Set is retired`, `run_ended` says `stopped`, and the exit code is 3. Exit 1 ("needs attention") was the other reading of story 90.
+7. **Platform hints.** A Platform-limited set fits where the SSH identification string's hint or the Neighbour's advertised hint is its Platform (story 32); the crawl hands the Neighbour's hint to `visit(neighbour_hint=)`. A Seed has no Neighbour hint. If a device presents a different identification string on a later connection and the leased set no longer fits, that set counts as used on that device.
+8. **Retirement notice** goes to the (scanned) console the moment a set is retired, from the worker thread under a lock: `Credential Set N (username) is retired after K failed login(s) ... A mistyped password is the usual cause.` The summary lists each set's successes, failures and retirement, and a "Needs your attention" step per Retired Credential Set (check the password and each device's AAA lockout counter). Per-set results ride on `CrawlResult.credential_sets` for the Run report (#66).
