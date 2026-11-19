@@ -21,10 +21,15 @@ from ipaddress import IPv4Address
 
 from network_analyser import scope
 from network_analyser.cli.exit_codes import ExitCode
-from network_analyser.cli.parser import FAILURE_BUDGET_DEFAULT, PARALLEL_DEFAULT
+from network_analyser.cli.parser import (
+    FAILURE_BUDGET_DEFAULT,
+    PARALLEL_DEFAULT,
+    SWEEP_INFLIGHT_MAX,
+)
 from network_analyser.cli.prompts import Prompter
 from network_analyser.cli.run_file import RunFile
 from network_analyser.cli.text import escape_controls
+from network_analyser.discovery.sweep import ADDRESS_LIMIT, ADDRESS_WARNING
 from network_analyser.records import RunRequest, ScopeRecord, Source, Sourced
 from network_analyser.records.run_request import Timeouts
 from network_analyser.scope import Refusal, ScopeRefused
@@ -42,6 +47,10 @@ def scope_and_seeds(
     if isinstance(fence, ExitCode):
         return fence
     _show_scope(fence.value, args, from_file)
+    swept = _option(args.sweep, from_file.sweep, default=False)
+    if _refuse_oversized_sweep(fence.value, enabled=swept.value):
+        return ExitCode.REFUSED
+    _warn_large_sweep(fence.value, enabled=swept.value)
     seeds = _seeds(args, from_file, fence.value, ask)
     if isinstance(seeds, ExitCode):
         return seeds
@@ -54,7 +63,8 @@ def scope_and_seeds(
         failure_budget=_option(
             args.failure_budget, from_file.failure_budget, FAILURE_BUDGET_DEFAULT
         ),
-        sweep=_option(args.sweep, from_file.sweep, default=False),
+        sweep=swept,
+        sweep_inflight=_option(args.sweep_inflight, None, SWEEP_INFLIGHT_MAX),
         timeouts=_timeouts(args),
     )
 
@@ -130,6 +140,31 @@ def _exclusions_source(
         return None
     given = _given(args.exclude, from_file.exclude)
     return given.source if given else Source.PROMPT
+
+
+def _refuse_oversized_sweep(fence: ScopeRecord, *, enabled: bool) -> bool:
+    """Refuse a Sweep of more than 65,536 addresses. Return whether it was refused.
+
+    The count is the Scope's address count, exclusions already removed (story 72). A Run
+    that is not sweeping is not limited: the crawl only follows advertisements.
+    """
+    if not enabled or fence.address_count <= ADDRESS_LIMIT:
+        return False
+    count = f"{fence.address_count:,}"
+    limit = f"{ADDRESS_LIMIT:,}"
+    print(
+        f"Refused: a Sweep of {count} addresses is larger than {limit}.\n"
+        f"{NOTHING_CONTACTED} Narrow the Scope, or run without --sweep.",
+        file=sys.stderr,
+    )
+    return True
+
+
+def _warn_large_sweep(fence: ScopeRecord, *, enabled: bool) -> None:
+    """Warn when a Sweep covers more than 4,096 addresses. It still runs (story 72)."""
+    count = fence.address_count
+    if enabled and ADDRESS_WARNING < count <= ADDRESS_LIMIT:
+        print(f"Warning: Sweep covers {count:,} addresses (more than {ADDRESS_WARNING:,}).")
 
 
 def _show_scope(fence: ScopeRecord, args: argparse.Namespace, from_file: RunFile) -> None:
