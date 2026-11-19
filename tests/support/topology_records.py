@@ -9,17 +9,23 @@ from ipaddress import IPv4Address, IPv4Interface
 
 from network_analyser.records import CredentialSetView, Platform
 from network_analyser.records.collected import (
+    ArpEntry,
     BundleMember,
     Collected,
+    FhrpGroup,
     Interface,
     InterfaceIp,
+    MacEntry,
     Neighbour,
     PortChannel,
     Reading,
+    RoutingNeighbour,
+    StaticRoute,
     SwitchportMode,
     VpcKeepalive,
     VpcPortChannel,
     VpcState,
+    Vrf,
 )
 from network_analyser.records.device import DeviceRecord, UnvisitedReason, VersionFacts
 from network_analyser.records.events import DeviceOutcome
@@ -31,6 +37,12 @@ LLDP = "show lldp neighbors detail"
 INTERFACES = "show interfaces"
 PORT_CHANNELS = "show etherchannel summary"
 VPC = "show vpc brief | json"
+ARP = "show ip arp"
+MAC = "show mac address-table"
+ROUTING = "show ip ospf neighbor"
+STATIC = "show ip route static"
+FHRP = "show standby brief"
+VRFS = "show vrf"
 NOT_IN_TEST = "not collected in this test"
 
 
@@ -69,17 +81,25 @@ def port(  # noqa: PLR0913 (an interface's settings, by name)
     ips: Iterable[str] = (),
     vrf: str = "default",
     stack_member: int | None = None,
+    unnumbered: bool = False,
+    admin_up: bool | Unknown = True,
+    line_up: bool | Unknown = True,
 ) -> Interface:
-    """Return one up interface."""
+    """Return one interface, up unless `admin_up` or `line_up` says otherwise."""
     addresses = tuple(IPv4Interface(a) for a in ips)
+    ip_settings = (
+        InterfaceIp(vrf=vrf, addresses=addresses, unnumbered=unnumbered)
+        if addresses or unnumbered
+        else None
+    )
     return Interface(
         name=interface_name(name),
         description="uplink",
-        admin_up=True,
-        line_up=True,
+        admin_up=admin_up,
+        line_up=line_up,
         speed="1000Mb/s",
         mode=mode,
-        ip=InterfaceIp(vrf=vrf, addresses=addresses) if addresses else None,
+        ip=ip_settings,
         bundle=bundle,
         stack_member=stack_member,
     )
@@ -120,8 +140,18 @@ def visited(  # noqa: PLR0913 (a device's collected data, by name)
     vpc_state: VpcState | None = None,
     aliases: Iterable[str] = (),
     outcome: DeviceOutcome = DeviceOutcome.VISITED,
+    arp: Iterable[ArpEntry] | None = None,
+    mac: Iterable[MacEntry] | None = None,
+    routing: Iterable[RoutingNeighbour] | None = None,
+    static: Iterable[StaticRoute] | None = None,
+    fhrp: Iterable[FhrpGroup] | None = None,
+    vrfs: Iterable[Vrf] | None = None,
 ) -> DeviceRecord:
-    """Return a Visited Device's record; any data not given is unknown."""
+    """Return a Visited Device's record; any data not given is unknown.
+
+    An empty tuple means the command was read and there were none. `None` means the command
+    was not collected.
+    """
     unknown = Unknown(NOT_IN_TEST)
 
     def reading[T](command: str, value: T | None) -> Reading[T] | Unknown:
@@ -138,12 +168,12 @@ def visited(  # noqa: PLR0913 (a device's collected data, by name)
             PORT_CHANNELS, None if port_channels is None else tuple(port_channels)
         ),
         vpc=None if vpc_state is None else Reading((VPC,), vpc_state),
-        vrfs=nothing.vrfs,
-        arp=nothing.arp,
-        mac=nothing.mac,
-        routing_neighbours=nothing.routing_neighbours,
-        static_routes=nothing.static_routes,
-        fhrp=nothing.fhrp,
+        vrfs=reading(VRFS, None if vrfs is None else tuple(vrfs)),
+        arp=reading(ARP, None if arp is None else tuple(arp)),
+        mac=reading(MAC, None if mac is None else tuple(mac)),
+        routing_neighbours=reading(ROUTING, None if routing is None else tuple(routing)),
+        static_routes=reading(STATIC, None if static is None else tuple(static)),
+        fhrp=reading(FHRP, None if fhrp is None else tuple(fhrp)),
     )
     serials: tuple[str, ...] | Unknown = (
         (serial,) if serial is not None else Unknown("serial not found in show version")

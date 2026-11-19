@@ -20,6 +20,7 @@ from network_analyser.cli.exit_codes import ExitCode
 from network_analyser.credentials import SecretScan
 from network_analyser.records.device import DeviceRecord
 from network_analyser.records.identity import Alias
+from network_analyser.records.scope import ScopeRecord
 
 TOPOLOGY_FILE: Final = diagram_file.TOPOLOGY_FILE
 NOT_WRITTEN: Final = (
@@ -67,11 +68,14 @@ def then_save(
     collector: Collector,
     scan: SecretScan,
     run: Callable[[], ExitCode],
+    *,
+    scope: ScopeRecord | None = None,
 ) -> ExitCode:
     """Run the Run, then write `topology.json` and draw the diagram from it, Ctrl+C included.
 
-    A Topology or diagram that could not be written makes the Run need attention (exit 1
-    at least).
+    `scope` is the Run's Scope, passed into the Topology so in-Scope routing neighbours are
+    recorded (#62). A Topology or diagram that could not be written makes the Run need
+    attention (exit 1 at least).
 
     Raises:
         KeyboardInterrupt: Ctrl+C during the Run, once the files are written.
@@ -79,28 +83,38 @@ def then_save(
     try:
         code = run()
     except KeyboardInterrupt:  # write what was found so far, then stop (exit 3)
-        _save(folder, collector, scan)
+        _save(folder, collector, scan, scope)
         raise
-    if not _save(folder, collector, scan):
+    if not _save(folder, collector, scan, scope):
         return max(code, ExitCode.NEEDS_ATTENTION)
     return code
 
 
-def _save(folder: run_output.RunFolder, collector: Collector, scan: SecretScan) -> bool:
+def _save(
+    folder: run_output.RunFolder,
+    collector: Collector,
+    scan: SecretScan,
+    scope: ScopeRecord | None,
+) -> bool:
     """Write `topology.json`, then `diagram.html` from it; False if either failed."""
-    return save_topology(folder, collector.records(), scan) and diagram_file.save_diagram(
-        folder, scan
-    )
+    return save_topology(
+        folder, collector.records(), scan, scope=scope
+    ) and diagram_file.save_diagram(folder, scan)
 
 
 def save_topology(
-    folder: run_output.RunFolder, records: tuple[DeviceRecord, ...], scan: SecretScan
+    folder: run_output.RunFolder,
+    records: tuple[DeviceRecord, ...],
+    scan: SecretScan,
+    *,
+    scope: ScopeRecord | None = None,
 ) -> bool:
     """Build the Topology from `records` and write `topology.json` through the scan.
 
-    Returns False, after a fixed warning, if the file could not be written.
+    `scope` is the Run's Scope, so in-Scope routing neighbours CDP never advertised are
+    recorded (#62). Returns False, after a fixed warning, if the file could not be written.
     """
-    document = topology.to_document(topology.build(records))
+    document = topology.to_document(topology.build(records, scope=scope))
     try:
         run_output.write_scanned_json(folder, TOPOLOGY_FILE, document, scan)
     except OSError:

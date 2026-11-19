@@ -177,6 +177,7 @@ def _after_folder_checks(
         collected,
         scan,
         lambda: run_trail.run_with_audit_trail(request, sets, folder, scan, crawl),
+        scope=request.scope.value,
     )
 
 
