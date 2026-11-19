@@ -67,7 +67,36 @@ if sys.platform == "win32":
         mode = wintypes.DWORD()
         return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
 
+    _ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+
+    def enable_console_redraw() -> bool:
+        """Let the live progress panel redraw in place (#56); False if it cannot.
+
+        True only when the process's standard output is a console window that takes cursor
+        codes (virtual terminal processing, switched on here if it was off).
+        """
+        stream = sys.__stdout__
+        if stream is None:
+            return False
+        try:
+            handle = msvcrt.get_osfhandle(stream.fileno())
+        except OSError, ValueError:
+            return False
+        mode = wintypes.DWORD()
+        kernel32 = ctypes.windll.kernel32
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return False
+        if mode.value & _ENABLE_VIRTUAL_TERMINAL_PROCESSING:
+            return True
+        wanted = mode.value | _ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        return bool(kernel32.SetConsoleMode(handle, wanted))
+
 else:
+
+    def enable_console_redraw() -> bool:
+        """Say whether the live progress panel can redraw in place: on a terminal (#56)."""
+        stream = sys.__stdout__
+        return stream is not None and stream.isatty()
 
     def stdout_is_console() -> bool:
         """Say whether standard output is a terminal, not a file or pipe (#57)."""

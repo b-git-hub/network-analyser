@@ -11,7 +11,7 @@ escaped before they are printed (story 81); no device output is ever shown.
 
 from network_analyser.cli.parser import PROG
 from network_analyser.cli.text import escape_controls
-from network_analyser.discovery import ALL_SETS_RETIRED
+from network_analyser.discovery import ALL_SETS_RETIRED, STOPPED_BY_CTRL_C
 from network_analyser.records import CredentialSetResult, HostKeyVerdict
 from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord, LandingPrivilege, UnvisitedReason
@@ -43,8 +43,8 @@ def summary(result: CrawlResult) -> str:
         )
     if result.credential_sets:
         lines.append("Credential Sets:")
-        lines.extend(f"  {_set_line(s)}" for s in result.credential_sets)
-    attention = _all_attention(result)
+        lines.extend(f"  {set_line(s)}" for s in result.credential_sets)
+    attention = attention_items(result)
     if attention:
         lines.append("Needs your attention:")
         lines.extend(f"  {item}" for item in attention)
@@ -53,7 +53,7 @@ def summary(result: CrawlResult) -> str:
 
 def needs_attention(result: CrawlResult) -> bool:
     """Say whether anything in the Run needs the operator (exit code 1, story 90)."""
-    return bool(_all_attention(result))
+    return bool(attention_items(result))
 
 
 def retirement_notice(event: CredentialSetRetired) -> str:
@@ -65,11 +65,21 @@ def retirement_notice(event: CredentialSetRetired) -> str:
     )
 
 
-def _all_attention(result: CrawlResult) -> list[str]:
+def attention_items(result: CrawlResult) -> list[str]:
+    """What needs the operator about the devices, the sets and any stop, each with its step."""
     items = [item for r in result.devices for item in _attention(r)]
     items.extend(_retired_step(s) for s in result.credential_sets if s.retired)
     if result.stopped == ALL_SETS_RETIRED:
         items.append(f"The Run stopped early: {result.stopped}. No further login was started.")
+    elif result.stopped == STOPPED_BY_CTRL_C:
+        queued = sum(
+            1 for u in result.unvisited if u.unvisited_reason is UnvisitedReason.RUN_STOPPED
+        )
+        items.append(
+            f"The Run was stopped with Ctrl+C before it finished; {queued} queued "
+            f"address{'' if queued == 1 else 'es'} {'was' if queued == 1 else 'were'} not "
+            "attempted. Run again to crawl the rest."
+        )
     elif result.stopped:
         items.append(
             f"The Run stopped early: {result.stopped}. No further login was started. Check "
@@ -78,7 +88,8 @@ def _all_attention(result: CrawlResult) -> list[str]:
     return items
 
 
-def _set_line(result: CredentialSetResult) -> str:
+def set_line(result: CredentialSetResult) -> str:
+    """One Credential Set's results: its number, username, limit, successes and failures."""
     view = result.view
     limit = f", {view.platform_limit.value} only" if view.platform_limit else ""
     retired = ", retired" if result.retired else ""
@@ -127,8 +138,12 @@ def _line(record: DeviceRecord) -> str:
     if record.credential_set is not None:
         parts.append(f"as {escape_controls(record.credential_set.username, limit=64)}")
     if record.partial_reason is not None:
-        parts.append(f"({record.partial_reason})")
+        parts.append(f"({_reason(record.partial_reason)})")
     return f"{head}  {'  '.join(parts)}"
+
+
+def _reason(reason: str | None) -> str:
+    return escape_controls(reason or "no reason recorded", limit=200)
 
 
 def _attention(record: DeviceRecord) -> list[str]:
@@ -147,7 +162,7 @@ def _attention(record: DeviceRecord) -> list[str]:
     if reason is not None:
         return [f"{ip}: {reason.value}."]
     if record.outcome is DeviceOutcome.PARTIAL:
-        return [f"{ip}: partial: {record.partial_reason}."]
+        return [f"{ip}: partial: {_reason(record.partial_reason)}."]
     privilege = record.landing_privilege
     if isinstance(privilege, LandingPrivilege) and privilege.too_low:
         return [

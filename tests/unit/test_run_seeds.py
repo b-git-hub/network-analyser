@@ -46,10 +46,8 @@ def test_a_run_visits_its_seed_audits_every_step_and_ends_clean(run: Runner) -> 
     got = run(*FLAGS, typed=first_run())
 
     assert got.code == ExitCode.CLEAN
-    assert "Run summary: 1 device tried: 1 visited, 0 partial, 0 unvisited." in got.out
-    assert "192.0.2.1        visited    IOS/IOS-XE  sw-a  privilege level 15  as netops-ro" in (
-        got.out
-    )
+    assert "Run finished: nothing needs your attention." in got.out
+    assert "Visited: 1 (Backups locked: 1, partial: 0, Backup not taken: 0)" in got.out
     assert "New host keys trusted on first use: 1." in got.out
     events = [line["event"] for line in _audit()]
     # The locking worker writes its event as soon as the Backup is on disk, so it may come
@@ -96,7 +94,8 @@ def test_a_changed_key_needs_attention_with_the_exact_trust_key_line(run: Runner
     got = run(*FLAGS, typed=first_run())
 
     assert got.code == ExitCode.NEEDS_ATTENTION
-    assert "192.0.2.1        unvisited  host key changed" in got.out
+    assert "Unvisited: 1\n  !! host key changed: 1" in got.out
+    assert "  !! 192.0.2.1: host key changed" in got.out
     line = f"network-analyser trust-key 192.0.2.1 --fingerprint {run.seed.host_key.fingerprint}"
     assert line in got.out
     assert run.seed.passwords_received == []
@@ -161,5 +160,5 @@ def test_a_second_seed_is_visited_too_and_one_out_of_reach_is_unreachable(run: R
     got = run(*FLAGS, "--seed", "192.0.2.2", "--seed", "192.0.2.3", typed=first_run())
 
     assert got.code == ExitCode.NEEDS_ATTENTION
-    assert "3 devices tried: 2 visited, 0 partial, 1 unvisited." in got.out
-    assert "192.0.2.3        unvisited  unreachable" in got.out
+    assert "Visited: 2 (" in got.out
+    assert "Unvisited: 1\n  !! unreachable: 1" in got.out

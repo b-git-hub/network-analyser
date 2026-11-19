@@ -7,7 +7,12 @@ any OS (or says it cannot) so callers can run, and inject fakes, in tests on Lin
 nothing from the package. `ctypes`, `msvcrt` and `winreg` are imported only here.
 """
 
-from network_analyser._winsys.console import Console, open_console, stdout_is_console
+from network_analyser._winsys.console import (
+    Console,
+    enable_console_redraw,
+    open_console,
+    stdout_is_console,
+)
 from network_analyser._winsys.elevation import is_elevated
 from network_analyser._winsys.folders import (
     DriveKind,
@@ -41,6 +46,7 @@ __all__ = [
     "RegistryView",
     "current_user_sid",
     "drive_kind",
+    "enable_console_redraw",
     "extended_length",
     "is_elevated",
     "local_app_data",

@@ -23,14 +23,14 @@ and the Run ends with a summary of every device found.
 import argparse
 import dataclasses
 import sys
-import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
 from ipaddress import IPv4Address
 
-from network_analyser import backup_store, device_gateway, discovery, run_output
+from network_analyser import _winsys, backup_store, device_gateway, discovery, run_output
 from network_analyser._version import __version__
 from network_analyser.cli import (
+    progress,
     ready,
     run_file,
     run_secrets,
@@ -38,6 +38,8 @@ from network_analyser.cli import (
     run_summary,
     run_topology,
     run_trail,
+    signals,
+    summary,
 )
 from network_analyser.cli.console import scanned_console
 from network_analyser.cli.crash_dump_guard import guard_crash_dumps
@@ -59,10 +61,10 @@ from network_analyser.cli.trust_folder import check_trust_folder
 from network_analyser.cli.trust_keys import load_trust_store
 from network_analyser.credentials import CredentialSets, SecretScan
 from network_analyser.records import Platform, RunRequest, Source, Sourced
-from network_analyser.records.backup import BackupResults
+from network_analyser.records.backup import BackupCapture, BackupResults
 from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord
-from network_analyser.records.events import AuditEvent, CredentialSetRetired
+from network_analyser.records.events import AuditEvent, CredentialSetRetired, CtrlCPressed
 from network_analyser.records.identity import Alias
 
 _CHANGE_PENDING = (
@@ -73,6 +75,9 @@ _LABEL_IS_A_SECRET = (
     "Refused: the label is the same as a password or the Backup Passphrase you typed. The "
     "label goes\ninto the Run folder name and the Run register, so it must never be a "
     f"secret. {run_secrets.NOTHING_CONTACTED}"
+)
+_LOCKING_THE_REST = (
+    "Locking any Backups still waiting, then manifest.age: the display may pause for a few seconds."
 )
 _FOLDER_HOLDS_A_SECRET = (
     "Refused: the Run folder's path would hold text that is a password or the Backup "
@@ -137,24 +142,30 @@ def _after_folder_checks(
     print(f"Run folder created: {console_text(str(folder.path))}")
 
     collected = run_topology.Collector()  # kept as they come, for topology.json (#52)
+    stop = device_gateway.RunStop()  # #56: Ctrl+C, shared by the crawl and every visit
+    mode = progress.choose_mode(args.progress, is_console=_console_redraws())
+    shown = progress.Progress(sys.stdout, mode, sets=sets.views())
 
     def crawl(audit: run_output.AuditLog) -> tuple[CrawlResult, BackupResults]:
         # #50: the crawl. `check.notices` and the Credential Sets' views go to the Run
         # report (#66); each set's results ride on the crawl result (#54). #51: each
         # running config goes from the gateway straight to the locking worker, which locks
         # whatever was taken even on Ctrl+C. #52: every record is kept as it comes back,
-        # for topology.json.
+        # for topology.json. #56: every event also feeds the progress shown.
+        emit = _shown_and_recorded(audit.record, shown)
         locker = backup_store.BackupLocker(
             folder.io_path,
             shown=folder.path,
             passphrase=passphrase,
             capacity=request.parallel.value,
-            emit=audit.record,
+            emit=emit,
             scan=scan,
             tool_version=__version__,
         )
 
-        emit = _announcing_retirements(audit.record)
+        def backup_sink(capture: BackupCapture, config: str, /) -> None:
+            shown.locking(capture.ip)  # pyrage holds the GIL while it locks (story 80)
+            locker.take(capture, config)
 
         def visit(
             ip: IPv4Address,
@@ -171,34 +182,49 @@ def _after_folder_checks(
                     sets=sets,
                     emit=emit,
                     failure_budget=request.failure_budget.value,
-                    backup_sink=locker.take,
+                    backup_sink=backup_sink,
                     timeouts=request.timeouts,
                     id_gate=id_gate,
                     neighbour_hint=neighbour_hint,
                     identity=identity,
+                    stop=stop,
                 )
             )
 
-        try:
-            result = discovery.crawl(
-                request.seeds.value,
-                visit,
-                scope=request.scope.value,
-                parallel=request.parallel.value,
-                emit=audit.record,
-                skipped=collected.add,
-                all_retired=sets.all_retired,
-            )
-        finally:
-            backups = locker.finish()
+        with signals.ctrl_c_presses(stop):  # no KeyboardInterrupt while visits run
+            try:
+                result = discovery.crawl(
+                    request.seeds.value,
+                    visit,
+                    scope=request.scope.value,
+                    parallel=request.parallel.value,
+                    emit=emit,
+                    skipped=collected.add,
+                    all_retired=sets.all_retired,
+                    stop=stop,
+                    tick=shown.tick,
+                )
+            finally:
+                shown.finish()
+                print(_LOCKING_THE_REST, flush=True)
+                backups = locker.finish()
+                for press in stop.presses_to_audit():  # pressed while the last were locked
+                    emit(CtrlCPressed(press=press, sessions_running=0))
         return dataclasses.replace(result, credential_sets=sets.results()), backups
 
-    return run_topology.then_save(
+    code = run_topology.then_save(
         folder,
         collected,
         scan,
         lambda: run_trail.run_with_audit_trail(request, sets, folder, scan, crawl),
     )
+    print(summary.output_paths(folder))
+    return code
+
+
+def _console_redraws() -> bool:
+    """Whether output is a console the live panel can redraw on (story 79)."""
+    return sys.stdout.isatty() and _winsys.enable_console_redraw()
 
 
 def _secrets(
@@ -224,18 +250,19 @@ def _secrets(
     return passphrase, sets
 
 
-def _announcing_retirements(record: Callable[[AuditEvent], None]) -> Callable[[AuditEvent], None]:
-    """Record each event; tell the operator at once when a set is retired (story 36).
+def _shown_and_recorded(
+    record: Callable[[AuditEvent], None], shown: progress.Progress
+) -> Callable[[AuditEvent], None]:
+    """Record each event, then show it; tell the operator at once when a set is retired.
 
-    Visits run on the pool's threads, so the console line is printed under a lock.
+    Visits run on the pool's threads; `Progress` writes under its own lock (story 36, #56).
     """
-    lock = threading.Lock()
 
     def emit(event: AuditEvent) -> None:
         record(event)
+        shown.event(event)
         if isinstance(event, CredentialSetRetired):
-            with lock:
-                print(run_summary.retirement_notice(event), flush=True)
+            shown.notice(run_summary.retirement_notice(event))
 
     return emit
 
