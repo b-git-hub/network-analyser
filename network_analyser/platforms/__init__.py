@@ -14,7 +14,9 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Final
 
+from network_analyser.platforms import neighbours
 from network_analyser.platforms.allowlist import AllowList, Exact, Template
+from network_analyser.platforms.hints import neighbour_hint
 from network_analyser.platforms.identify import (
     Hint,
     Unsupported,
@@ -28,6 +30,7 @@ from network_analyser.platforms.nxos import commands as nxos_commands
 from network_analyser.platforms.nxos import identify as nxos
 from network_analyser.records import Platform
 from network_analyser.records.device import LandingPrivilege, Unknown, VersionFacts
+from network_analyser.records.neighbour import NeighbourProtocol, NeighbourRecord
 
 ALLOW_LISTS: Final[Mapping[Platform, AllowList]] = MappingProxyType(
     {
@@ -74,8 +77,47 @@ def read_privilege(platform: Platform, text: str) -> LandingPrivilege | Unknown:
     return reader(text)
 
 
+_NEIGHBOUR_COMMANDS: Final[Mapping[Platform, tuple[tuple[NeighbourProtocol, str], ...]]] = (
+    MappingProxyType(
+        {
+            Platform.IOS_XE: (
+                (NeighbourProtocol.CDP, ios_xe_commands.SHOW_CDP_NEIGHBORS_DETAIL),
+                (NeighbourProtocol.LLDP, ios_xe_commands.SHOW_LLDP_NEIGHBORS_DETAIL),
+            ),
+            Platform.NX_OS: (
+                (NeighbourProtocol.CDP, nxos_commands.SHOW_CDP_NEIGHBORS_DETAIL),
+                (NeighbourProtocol.LLDP, nxos_commands.SHOW_LLDP_NEIGHBORS_DETAIL),
+            ),
+        }
+    )
+)
+_NEIGHBOUR_READERS: Final = MappingProxyType(
+    {
+        (Platform.IOS_XE, NeighbourProtocol.CDP): neighbours.read_ios_cdp,
+        (Platform.IOS_XE, NeighbourProtocol.LLDP): neighbours.read_ios_lldp,
+        (Platform.NX_OS, NeighbourProtocol.CDP): neighbours.read_nxos_cdp,
+        (Platform.NX_OS, NeighbourProtocol.LLDP): neighbours.read_nxos_lldp,
+    }
+)
+NEIGHBOUR_PARSER: Final = "Network Analyser neighbour reader"
+"""The parser's name in a `parse_failed` Audit log event for a CDP or LLDP table."""
+
+
+def neighbour_commands(platform: Platform) -> tuple[tuple[NeighbourProtocol, str], ...]:
+    """Return the CDP then LLDP neighbour-detail command for `platform` (#50)."""
+    return _NEIGHBOUR_COMMANDS[platform]
+
+
+def read_neighbours(
+    platform: Platform, protocol: NeighbourProtocol, text: str
+) -> tuple[NeighbourRecord, ...] | Unknown:
+    """Read a CDP or LLDP neighbour-detail table; unknown when refused or not understood."""
+    return _NEIGHBOUR_READERS[platform, protocol](text)
+
+
 __all__ = [
     "ALLOW_LISTS",
+    "NEIGHBOUR_PARSER",
     "SESSION_SETUP",
     "SHOW_VERSION",
     "AllowList",
@@ -85,8 +127,11 @@ __all__ = [
     "Unsupported",
     "identify",
     "is_config_prompt",
+    "neighbour_commands",
+    "neighbour_hint",
     "permits",
     "privilege_command",
+    "read_neighbours",
     "read_privilege",
     "read_version",
     "ssh_id_hint",

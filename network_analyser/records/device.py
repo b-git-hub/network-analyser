@@ -13,18 +13,18 @@ from ipaddress import IPv4Address
 
 from network_analyser.records.events import DeviceOutcome
 from network_analyser.records.host_keys import HostKeyCheck
+from network_analyser.records.identity import Alias
+from network_analyser.records.neighbour import NeighbourRecord
 from network_analyser.records.platform import CredentialSetView, Platform
+from network_analyser.records.unknown import Unknown
 
-
-@dataclass(frozen=True, slots=True)
-class Unknown:
-    """A value the tool tried to learn and could not. Never read it as "none".
-
-    Attributes:
-        reason: why, as fixed text, such as `show version not understood`.
-    """
-
-    reason: str
+__all__ = [
+    "DeviceRecord",
+    "LandingPrivilege",
+    "Unknown",
+    "UnvisitedReason",
+    "VersionFacts",
+]
 
 
 @unique
@@ -91,6 +91,9 @@ class DeviceRecord:
         platform: the Platform identified after login; None when not identified.
         landing_privilege: the privilege the login landed with; None when not reached.
         version: what `show version` said; None when not reached.
+        cdp_neighbours: the CDP table's Neighbours; None when not reached (#50).
+        lldp_neighbours: the LLDP table's Neighbours; None when not reached (#50).
+        aliases: the other IPs this device was found at this Run (story 73, #50).
     """
 
     ip: IPv4Address
@@ -103,3 +106,6 @@ class DeviceRecord:
     platform: Platform | None = None
     landing_privilege: LandingPrivilege | Unknown | None = None
     version: VersionFacts | None = None
+    cdp_neighbours: tuple[NeighbourRecord, ...] | Unknown | None = None
+    lldp_neighbours: tuple[NeighbourRecord, ...] | Unknown | None = None
+    aliases: tuple[Alias, ...] = ()

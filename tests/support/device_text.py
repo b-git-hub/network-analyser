@@ -77,3 +77,153 @@ user:netops-ro
         this user account has no expiry date
         roles:NA-READ
 """
+
+# -- CDP and LLDP neighbour detail (ticket #50) ---------------------------------------------
+
+IOS_XE_CDP_DETAIL = """\
+-------------------------
+Device ID: sw-b.example.test
+Entry address(es):
+  IP address: 198.51.100.2
+  IPv6 address: 2001:DB8::2  (global unicast)
+Platform: cisco C9300-48P,  Capabilities: Switch IGMP
+Interface: GigabitEthernet1/0/1,  Port ID (outgoing port): GigabitEthernet1/0/24
+Holdtime : 150 sec
+
+Version :
+Cisco IOS Software [Cupertino], Catalyst L3 Switch Software (CAT9K_IOSXE), Version 17.9.4a
+Copyright (c) 1986-2023 by Cisco Systems, Inc.
+
+advertisement version: 2
+Native VLAN: 1
+Duplex: full
+Management address(es):
+  IP address: 192.0.2.2
+
+-------------------------
+Device ID: SEP00AABBCCDDEE
+Entry address(es):
+  IP address: 192.0.2.50
+Platform: Cisco IP Phone 8865,  Capabilities: Host Phone Two-port Mac Relay
+Interface: GigabitEthernet1/0/5,  Port ID (outgoing port): Port 1
+Holdtime : 160 sec
+
+Version :
+sip8845_65.14-1-1MN-36
+
+advertisement version: 2
+Duplex: full
+Management address(es):
+
+
+Total cdp entries displayed : 2
+"""
+
+IOS_XE_LLDP_DETAIL = """\
+------------------------------------------------
+Local Intf: Gi1/0/2
+Chassis id: 5254.0012.3401
+Port id: Eth1/1
+Port Description: Ethernet1/1
+System Name: nx-a
+
+System Description:
+Cisco Nexus Operating System (NX-OS) Software 9.3(8)
+Copyright (c) 2002-2021, Cisco Systems, Inc. All rights reserved.
+
+Time remaining: 99 seconds
+System Capabilities: B,R
+Enabled Capabilities: B,R
+Management Addresses:
+    IP: 192.0.2.12
+    IPV6: 2001:DB8::12
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+------------------------------------------------
+Local Intf: Gi1/0/3
+Chassis id: 5254.0012.3402
+Port id: ens3
+Port Description - not advertised
+System Name - not advertised
+System Description - not advertised
+
+Time remaining: 110 seconds
+System Capabilities - not advertised
+Enabled Capabilities - not advertised
+Management Addresses - not advertised
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+
+
+Total entries displayed: 2
+"""
+
+NXOS_CDP_DETAIL_JSON = """\
+{
+  "TABLE_cdp_neighbor_detail_info": {
+    "ROW_cdp_neighbor_detail_info": [
+      {
+        "ifindex": "83886080",
+        "device_id": "sw-a(TEST0000A01)",
+        "sysname": "sw-a",
+        "numaddr": "1",
+        "v4addr": "198.51.100.1",
+        "platform_id": "cisco C9300-48P",
+        "capability": ["router", "switch", "IGMP_cnd_filtering"],
+        "intf_id": "Ethernet1/1",
+        "port_id": "GigabitEthernet1/0/2",
+        "ttl": "150",
+        "version": "Cisco IOS Software [Cupertino], Catalyst L3 Switch Software, Version 17.9.4a",
+        "nativevlan": "1",
+        "duplexmode": "full",
+        "nummgmtaddr": "1",
+        "v4mgmtaddr": "192.0.2.1"
+      },
+      {
+        "ifindex": "83886081",
+        "device_id": "nx-b(TEST0000N02)",
+        "sysname": "nx-b",
+        "numaddr": "1",
+        "v6addr": "2001:db8::22",
+        "platform_id": "N9K-C9300v",
+        "capability": ["router", "switch"],
+        "intf_id": "Ethernet1/2",
+        "port_id": "Ethernet1/2",
+        "ttl": "170",
+        "version": "Cisco Nexus Operating System (NX-OS) Software, Version 9.3(8)"
+      }
+    ]
+  }
+}
+"""
+
+NXOS_LLDP_DETAIL_JSON = """\
+{
+  "neigh_hdr": "neigh_hdr",
+  "TABLE_nbor_detail": {
+    "ROW_nbor_detail": {
+      "chassis_type": "Mac Address",
+      "chassis_id": "5254.0012.3403",
+      "port_type": "Interface Name",
+      "port_id": "Gi1/0/2",
+      "l_port_id": "Eth1/1",
+      "port_desc": "GigabitEthernet1/0/2",
+      "sys_name": "sw-a",
+      "sys_desc": "Cisco IOS Software [Cupertino], Catalyst L3 Switch Software, Version 17.9.4a",
+      "ttl": "110",
+      "system_capability": "B, R",
+      "enabled_capability": "B, R",
+      "mgmt_addr_type": "IPV4",
+      "mgmt_addr": "192.0.2.1",
+      "mgmt_addr_ipv6_type": "IPV6",
+      "mgmt_addr_ipv6": "not advertised",
+      "vlan_id": "1"
+    }
+  }
+}
+"""

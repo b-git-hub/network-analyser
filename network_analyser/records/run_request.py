@@ -38,11 +38,15 @@ class Timeouts:
         connect: opening the TCP connection.
         login: from the SSH handshake to the end of the password login.
         command: one command's output.
+        backup: the running-config command's output (#51).
+        device: everything done with one device, from the first connection (#50).
     """
 
     connect: float = 10
     login: float = 20
     command: float = 60
+    backup: float = 300
+    device: float = 15 * 60
 
 
 @dataclass(frozen=True, slots=True)

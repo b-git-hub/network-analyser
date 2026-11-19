@@ -22,13 +22,22 @@ pytestmark = pytest.mark.security
 DEVICE = IPv4Address("192.0.2.10")
 
 ALLOWED = {
-    Platform.IOS_XE: ["terminal length 0", "terminal width 511", "show version", "show privilege"],
+    Platform.IOS_XE: [
+        "terminal length 0",
+        "terminal width 511",
+        "show version",
+        "show privilege",
+        "show cdp neighbors detail",
+        "show lldp neighbors detail",
+    ],
     Platform.NX_OS: [
         "terminal length 0",
         "terminal width 511",
         "show version",
         "show user-account netops-ro",
         "show user-account svc.nexus_2",
+        "show cdp neighbors detail | json",
+        "show lldp neighbors detail | json",
     ],
 }
 
@@ -64,6 +73,14 @@ NEAR_MISSES = [
     "reload",
     "show running-config",
     "show privilege\x1b[A",
+    "show cdp neighbors",
+    "show cdp neighbors detail | json ",
+    "show cdp neighbors detail | json | redirect bootflash:x",
+    "show cdp neighbors detail | json-pretty",
+    "show cdp neighbors detail | include IP",
+    "show cdp neighbors GigabitEthernet1/0/1 detail",
+    "show lldp neighbors detail | json\nconfigure terminal",
+    "show lldp neighbors",
 ]
 
 BAD_PARAMETERS = [
@@ -152,6 +169,26 @@ def test_before_identification_only_commands_every_platform_allows_pass(command:
         session.send(None, command)
 
     assert shell.lines == ["terminal length 0", "terminal width 511", "show version"]
+
+
+@pytest.mark.parametrize(
+    ("platform", "command"),
+    [
+        (Platform.IOS_XE, "show cdp neighbors detail | json"),
+        (Platform.IOS_XE, "show lldp neighbors detail | json"),
+        (Platform.NX_OS, "show cdp neighbors detail"),
+        (Platform.NX_OS, "show lldp neighbors detail"),
+    ],
+)
+def test_each_platform_takes_only_its_own_form_of_the_neighbour_commands(
+    platform: Platform, command: str
+) -> None:
+    session, shell, _ = _session(platform)
+
+    with pytest.raises(CommandRefusedError):
+        session.send(platform, command)
+
+    assert shell.lines == []
 
 
 def test_a_command_meant_for_another_platform_is_refused() -> None:

@@ -74,7 +74,7 @@ class Visit:
         return trust_store.load(self.known_hosts, strict=self.strict)
 
     def __call__(self, ip: IPv4Address = SEED, *, store: TrustStore | None = None) -> DeviceRecord:
-        return device_gateway.visit(
+        record = device_gateway.visit(
             ip,
             scope=_scope(),
             trust=store or self.trust(),
@@ -82,7 +82,10 @@ class Visit:
             emit=self.events.append,
             failure_budget=3,
             dial=self.network.dial,
+            wait_before_retry=self.network.wait_before_retry,
         )
+        assert isinstance(record, DeviceRecord)  # no identity register: never an alias
+        return record
 
     def of(self, kind: type[AuditEvent]) -> list[AuditEvent]:
         return [e for e in self.events if isinstance(e, kind)]
@@ -119,6 +122,8 @@ def test_a_seed_is_logged_into_identified_and_left(visit: Visit) -> None:
         "terminal width 511",
         "show version",
         "show privilege",
+        "show cdp neighbors detail",
+        "show lldp neighbors detail",
     ]
     assert device.passwords_received == [DEVICE_CANARY]
     assert device.open_links == 0
@@ -134,7 +139,7 @@ def test_an_nxos_seed_reports_its_roles(visit: Visit) -> None:
 
     assert record.platform is Platform.NX_OS
     assert record.landing_privilege == LandingPrivilege("roles NA-READ", too_low=False)
-    assert visit.commands()[-1] == "show user-account netops-ro"
+    assert visit.commands()[-3] == "show user-account netops-ro"
 
 
 def test_every_step_is_audited_in_order_without_device_output(visit: Visit) -> None:
@@ -152,11 +157,13 @@ def test_every_step_is_audited_in_order_without_device_output(visit: Visit) -> N
         CommandSent,
         CommandSent,
         DeviceIdentified,
+        CommandSent,
+        CommandSent,
         DeviceFinished,
     ]
     assert visit.events[0] == ConnectionAttempted(SEED, 22, ConnectionResult.CONNECTED, retry=False)
     assert visit.events[2] == LoginAttempted(SEED, 1, "netops-ro", LoginResult.SUCCEEDED)
-    assert visit.events[-2] == DeviceIdentified(SEED, Platform.IOS_XE, "level 15")
+    assert visit.events[-4] == DeviceIdentified(SEED, Platform.IOS_XE, "level 15")
     assert visit.events[-1] == DeviceFinished(SEED, DeviceOutcome.VISITED, None)
     assert all(DEVICE_CANARY not in repr(e) for e in visit.events)
     assert all("uptime" not in repr(e) for e in visit.events)

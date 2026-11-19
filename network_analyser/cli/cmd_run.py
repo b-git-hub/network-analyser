@@ -16,8 +16,8 @@ Run's start and end (`cli.run_trail`).
 
 The Trust Store (and any `--known-hosts` file) is read before the first secret prompt, so a
 bad `--known-hosts` refuses the Run with exit 2 before anything is typed. Once the Run folder
-is created, each Seed is logged into, identified and left (#49; the crawl is #50), and the
-Run ends with a summary of each Seed's outcome.
+is created, the crawl spreads from the Seeds through CDP and LLDP inside the Scope (#50),
+and the Run ends with a summary of every device found.
 """
 
 import argparse
@@ -47,7 +47,9 @@ from network_analyser.cli.trust_folder import check_trust_folder
 from network_analyser.cli.trust_keys import load_trust_store
 from network_analyser.credentials import CredentialSets, SecretScan
 from network_analyser.records import RunRequest, Source, Sourced
+from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord
+from network_analyser.records.identity import Alias
 
 _CHANGE_PENDING = (
     "a change of the Backup Passphrase is unfinished, so Backups may be under either "
@@ -119,11 +121,13 @@ def _after_folder_checks(
     folder = create_and_register(data, check, started, request.label.value, scan)
     print(f"Run folder created: {console_text(str(folder.path))}")
 
-    def crawl(audit: run_output.AuditLog) -> tuple[DeviceRecord, ...]:
-        # #49: the Seeds only. The crawl (#50) and Backups (#51, the Backup Passphrase to
-        # backup_store's locking worker) come next; `check.notices` and the Credential
-        # Sets' views go to the Run report (#66).
-        def visit(ip: IPv4Address) -> DeviceRecord:
+    def crawl(audit: run_output.AuditLog) -> CrawlResult:
+        # #50: the crawl. Backups (#51, the Backup Passphrase to backup_store's locking
+        # worker) come next; `check.notices` and the Credential Sets' views go to the Run
+        # report (#66).
+        def visit(
+            ip: IPv4Address, *, id_gate: bool, identity: device_gateway.Identity
+        ) -> DeviceRecord | Alias:
             return device_gateway.visit(
                 ip,
                 scope=request.scope.value,
@@ -132,9 +136,17 @@ def _after_folder_checks(
                 emit=audit.record,
                 failure_budget=request.failure_budget.value,
                 timeouts=request.timeouts,
+                id_gate=id_gate,
+                identity=identity,
             )
 
-        return discovery.visit_seeds(request.seeds.value, visit)
+        return discovery.crawl(
+            request.seeds.value,
+            visit,
+            scope=request.scope.value,
+            parallel=request.parallel.value,
+            emit=audit.record,
+        )
 
     return run_trail.run_with_audit_trail(request, sets, folder, scan, crawl)
 

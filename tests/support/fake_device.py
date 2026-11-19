@@ -15,7 +15,7 @@ from ipaddress import IPv4Address
 import pytest
 
 from network_analyser.credentials import Secret
-from network_analyser.device_gateway import ssh
+from network_analyser.device_gateway import link, ssh
 from network_analyser.device_gateway.link import DialFailed, Link, LoginResult, Reply, Shell
 from network_analyser.records import HostKey, ScopeRecord
 from network_analyser.records.events import CommandResult, ConnectionResult, ErrorRaised
@@ -41,12 +41,16 @@ IOS_XE_REPLIES = {
     "terminal width 511": "",
     "show version": device_text.IOS_XE_SHOW_VERSION,
     "show privilege": device_text.IOS_XE_PRIVILEGE_15,
+    "show cdp neighbors detail": "",
+    "show lldp neighbors detail": "",
 }
 NXOS_REPLIES = {
     "terminal length 0": "",
     "terminal width 511": "",
     "show version": device_text.NXOS_SHOW_VERSION,
     "show user-account netops-ro": device_text.NXOS_USER_ACCOUNT,
+    "show cdp neighbors detail | json": "",
+    "show lldp neighbors detail | json": "",
 }
 
 
@@ -138,6 +142,8 @@ class FakeNetwork:
 
     devices: dict[IPv4Address, FakeDevice] = field(default_factory=dict)
     dialled: list[IPv4Address] = field(default_factory=list)
+    waits: int = 0
+    """How often the gateway waited before a connection retry (it never really waits)."""
 
     def add(self, ip: str, device: FakeDevice | None = None) -> FakeDevice:
         added = device or FakeDevice()
@@ -169,5 +175,13 @@ class FakeNetwork:
         return _FakeLink(device)
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Make this network the one `device_gateway` dials, in place of real SSH."""
+        """Make this network the one `device_gateway` dials, in place of real SSH.
+
+        The 30 s wait before a connection retry is counted instead of waited.
+        """
         monkeypatch.setattr(ssh, "dial", self.dial)
+        monkeypatch.setattr(link, "wait_before_retry", self.wait_before_retry)
+
+    def wait_before_retry(self) -> None:
+        """Count a wait before a connection retry, at once."""
+        self.waits += 1

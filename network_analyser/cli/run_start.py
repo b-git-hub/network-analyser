@@ -66,6 +66,8 @@ def _timeouts(args: argparse.Namespace) -> Timeouts:
         connect=args.connect_timeout or default.connect,
         login=args.login_timeout or default.login,
         command=args.command_timeout or default.command,
+        backup=args.backup_timeout or default.backup,
+        device=args.device_timeout * 60 if args.device_timeout else default.device,
     )
 
 
