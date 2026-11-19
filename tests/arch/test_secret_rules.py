@@ -201,6 +201,11 @@ WRITE_OWNERS: frozenset[str] = frozenset(
         # value and every line passes through the secret scan; only schema fields of plain
         # data are written, never device output.
         "run_output/audit.py",
+        # #51: Backups and manifest.age, temp-then-rename, never replacing a file. Only age
+        # ciphertext is written: each config is locked in memory first, so no plaintext
+        # config ever reaches the disk. Ciphertext cannot hold a typed secret to scan for,
+        # and a file name that holds one is never used.
+        "backup_store/locker.py",
     }
 )
 _WRITE_CALLS = frozenset({"write_text", "write_bytes", "symlink_to", "hardlink_to", "touch"})

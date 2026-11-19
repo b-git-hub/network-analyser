@@ -82,6 +82,14 @@ class BackupPassphrase:
         """Say, in constant time, whether `secret` is the Backup Passphrase (story 27)."""
         return self.__secret.same_as(secret)
 
+    def lock(self, plaintext: bytes) -> bytes:
+        """Return `plaintext` locked with the passphrase in standard age (scrypt), #51.
+
+        The work factor is pyrage's own choice, about a second on this PC; the tool never
+        lowers it (ADR 0004). The passphrase is revealed only for the call into age.
+        """
+        return AGE.lock(plaintext, self.__secret.reveal())
+
     def add_to_scan(self, scan: SecretScan) -> None:
         """Have the secret scan look for the passphrase in everything written (#30, #48).
 

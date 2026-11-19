@@ -22,8 +22,10 @@ from network_analyser.platforms.identify import (
     is_config_prompt,
     ssh_id_hint,
 )
+from network_analyser.platforms.ios_xe import backup as ios_xe_backup
 from network_analyser.platforms.ios_xe import commands as ios_xe_commands
 from network_analyser.platforms.ios_xe import identify as ios_xe
+from network_analyser.platforms.nxos import backup as nxos_backup
 from network_analyser.platforms.nxos import commands as nxos_commands
 from network_analyser.platforms.nxos import identify as nxos
 from network_analyser.records import Platform
@@ -74,6 +76,25 @@ def read_privilege(platform: Platform, text: str) -> LandingPrivilege | Unknown:
     return reader(text)
 
 
+def backup_command(platform: Platform) -> str:
+    """Return the command whose reply is the Backup (#51; story 96)."""
+    if platform is Platform.IOS_XE:
+        return ios_xe_commands.SHOW_RUNNING_CONFIG
+    return nxos_commands.SHOW_RUNNING_CONFIG
+
+
+def backup_problem(platform: Platform, text: str) -> str | None:
+    """Return why a reply to `backup_command` is not a Backup, as fixed text; None if it is.
+
+    It is one only if no error came back, its framing is right and it has a `hostname`
+    line (story 95). The reason never quotes the reply.
+    """
+    check = (
+        ios_xe_backup.backup_problem if platform is Platform.IOS_XE else nxos_backup.backup_problem
+    )
+    return check(text)
+
+
 __all__ = [
     "ALLOW_LISTS",
     "SESSION_SETUP",
@@ -83,6 +104,8 @@ __all__ = [
     "Hint",
     "Template",
     "Unsupported",
+    "backup_command",
+    "backup_problem",
     "identify",
     "is_config_prompt",
     "permits",

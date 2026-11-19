@@ -6,7 +6,8 @@ each socket opens, checks the Trust Store before sending a password, sends every
 through one allow-list gate, drops the session on a config-mode prompt and keeps library
 session logs off. It hands back plain device records, never a live session (ADR 0003).
 
-- `visit(ip, ...)`: log into one device, identify it, leave; returns a `DeviceRecord`.
+- `visit(ip, ...)`: log into one device, identify it, capture its running config for
+  the Backup sink, leave; returns a `DeviceRecord`.
 - `trust_key(ip, fingerprint, ...)`: read a device's host key and save it only if it
   matches the fingerprint the operator checked (`trust-key`, story 45). No password.
 - `DeviceSession.send(platform, command)`: the allow-list gate itself (security test 1).
@@ -19,12 +20,13 @@ from network_analyser.device_gateway.gate import (
     SessionDroppedError,
 )
 from network_analyser.device_gateway.trust_key import NOT_A_TARGET, TrustKeyResult, trust_key
-from network_analyser.device_gateway.visit import SSH_PORT, visit
+from network_analyser.device_gateway.visit import SSH_PORT, BackupSink, visit
 
 __all__ = [
     "CONFIG_MODE",
     "NOT_A_TARGET",
     "SSH_PORT",
+    "BackupSink",
     "CommandRefusedError",
     "DeviceSession",
     "SessionDroppedError",
