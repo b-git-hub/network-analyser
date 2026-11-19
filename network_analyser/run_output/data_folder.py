@@ -29,6 +29,11 @@ class DataFolder:
         return self.root / "passphrase-check.age"
 
     @property
+    def previous_check_file(self) -> Path:
+        """The old passphrase's check file, kept while a change is pending (#22, #58)."""
+        return self.root / "passphrase-check.previous.age"
+
+    @property
     def run_register(self) -> Path:
         """The Run register: every Run folder the tool has created (#22, #26)."""
         return self.root / "run-register.txt"

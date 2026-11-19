@@ -137,6 +137,8 @@ nodes:
            commands exec include show version
            commands exec include show privilege
            commands exec include show running-config view full
+           commands exec include show cdp neighbors detail
+           commands exec include show lldp neighbors detail
           !
           username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
           !
@@ -278,6 +280,8 @@ nodes:
            commands exec include show version
            commands exec include show privilege
            commands exec include show running-config view full
+           commands exec include show cdp neighbors detail
+           commands exec include show lldp neighbors detail
           !
           username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
           !
@@ -469,6 +473,8 @@ nodes:
            commands exec include show version
            commands exec include show privilege
            commands exec include show running-config view full
+           commands exec include show cdp neighbors detail
+           commands exec include show lldp neighbors detail
           !
           username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
           !
@@ -669,6 +675,8 @@ nodes:
             rule 3 permit command show version
             rule 4 permit command show user-account netanalyser
             rule 5 permit command show running-config
+            rule 6 permit command show cdp neighbors detail | json
+            rule 7 permit command show lldp neighbors detail | json
           username netanalyser password CHANGE_ME role NA-READ
           no username netanalyser role network-operator
           password strength-check
@@ -835,6 +843,8 @@ nodes:
             rule 3 permit command show version
             rule 4 permit command show user-account netanalyser
             rule 5 permit command show running-config
+            rule 6 permit command show cdp neighbors detail | json
+            rule 7 permit command show lldp neighbors detail | json
           username netanalyser password CHANGE_ME role NA-READ
           no username netanalyser role network-operator
           password strength-check

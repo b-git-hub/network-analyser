@@ -39,3 +39,7 @@ How [spec #37](https://github.com/b-git-hub/network-analyser/issues/37) (Network
 - 2026-11-19: merged #51 at `e71587c`; no conflicts, check.py all green, 970 tests passed; allow-list changed and the ticket already carried the regenerated lab/network-analyser-lab.yaml.
 - 2026-11-19: merged #52 at `c7324fa`; no conflicts, check.py all green, 1076 tests passed; adds topology core, topology.json and docs/topology-json.md.
 - 2026-11-19: wave 5 started: #59, #60, #63 after #52 merged (#61, #62 held back to limit concurrency against the usage limit).
+- 2026-11-19: merged #57 at `f7d09fd`; no conflicts, check.py all green, 1102 tests passed; adds show-backup command (backup_store/show.py, cli/cmd_show_backup.py).
+- 2026-11-19: merged #50 at `22c66a5`; no conflicts, check.py all green, 1209 tests passed; branch already carried the regenerated lab/network-analyser-lab.yaml (step 4 needed no extra commit).
+- 2026-11-19: 03:30–07:00 UTC a third usage-limit stop paused #50, #58, #59, #60, #63; all resumed at 07:00 with SendMessage.
+- 2026-11-19: merged #58 at `9ef43d4`; no conflicts, check.py all green, 1246 tests passed; adds change-passphrase (backup_store/change_pending.py, relock.py, cli/cmd_change_passphrase.py); PassphraseFiles moved from show.py to change_pending.py, no #50/#57 work reverted.

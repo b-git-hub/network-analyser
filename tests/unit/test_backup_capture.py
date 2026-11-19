@@ -41,7 +41,7 @@ class Capture:
     def __call__(self) -> DeviceRecord:
         fence = scope.parse(["192.0.2.0/24"], [])
         assert isinstance(fence, ScopeRecord)
-        return device_gateway.visit(
+        record = device_gateway.visit(
             SEED,
             scope=fence,
             trust=trust_store.load(self.tmp_path / "known_hosts"),
@@ -51,7 +51,10 @@ class Capture:
             timeouts=TIMEOUTS,
             dial=self.network.dial,
             backup_sink=self.sink,
+            wait_before_retry=self.network.wait_before_retry,
         )
+        assert isinstance(record, DeviceRecord)  # no identity register: never an alias
+        return record
 
 
 @pytest.fixture
