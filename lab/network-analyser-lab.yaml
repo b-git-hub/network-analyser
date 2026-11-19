@@ -31,9 +31,9 @@ lab:
     - Shared subnet 198.51.100.0/25 on VLAN 10 across all four switches, with an
       HSRP address on the two IOS-XE switches. Two-device subnet
       198.51.100.128/25 on VLAN 20 (xe-sw2 and nx-sw2, no routing protocol).
-    - The tool's dedicated account `netanalyser`, with a provisional Device Role
-      (IOS-XE CLI view NA-READ, NX-OS role NA-READ). Replace it with the output
-      of `network-analyser role-snippet` once that command exists.
+    - The tool's dedicated account `netanalyser`, with the Device Role that
+      `network-analyser role-snippet` prints (IOS-XE CLI view NA-READ, NX-OS
+      role NA-READ). `python -m scripts.lab_roles` regenerates it.
   title: Network Analyser v1 lab
   version: 0.2.2
 nodes:
@@ -126,36 +126,16 @@ nodes:
           !
           username admin privilege 15 algorithm-type scrypt secret CHANGE_ME
           !
-          ! Device Role for the tool's dedicated account (ADR 0005): a CLI view
-          ! that permits only the commands the tool sends. PROVISIONAL: written by
-          ! hand from the spec's command catalogue (#37). Replace it with the
-          ! output of `network-analyser role-snippet ios-xe` once that exists (#53).
+          ! Device Role for the tool's dedicated account (ADR 0005): the CLI view
+          ! printed by `network-analyser role-snippet ios-xe --username netanalyser`
+          ! (#53), with the lab secret. After an allow-list change, regenerate it
+          ! with `python -m scripts.lab_roles`.
           parser view NA-READ
            secret CHANGE_ME
-           commands exec include terminal length
-           commands exec include terminal width
+           commands exec include terminal length 0
+           commands exec include terminal width 511
            commands exec include show version
-           commands exec include show running-config view full
-           commands exec include show cdp neighbors detail
-           commands exec include show lldp neighbors detail
-           commands exec include show interfaces
-           commands exec include show interfaces switchport
-           commands exec include show interfaces trunk
-           commands exec include show vlan brief
-           commands exec include show etherchannel summary
-           commands exec include show ip interface
-           commands exec include show vrf
-           commands exec include show ip arp
-           commands exec include show mac address-table
-           commands exec include show ip ospf neighbor
-           commands exec include show ip eigrp neighbors
-           commands exec include show ip bgp summary
-           commands exec include show ip route static
-           commands exec include show standby brief
-           commands exec include show vrrp brief
-           commands exec include show glbp brief
            commands exec include show privilege
-           commands exec include show parser view
           !
           username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
           !
@@ -286,36 +266,16 @@ nodes:
           !
           username admin privilege 15 algorithm-type scrypt secret CHANGE_ME
           !
-          ! Device Role for the tool's dedicated account (ADR 0005): a CLI view
-          ! that permits only the commands the tool sends. PROVISIONAL: written by
-          ! hand from the spec's command catalogue (#37). Replace it with the
-          ! output of `network-analyser role-snippet ios-xe` once that exists (#53).
+          ! Device Role for the tool's dedicated account (ADR 0005): the CLI view
+          ! printed by `network-analyser role-snippet ios-xe --username netanalyser`
+          ! (#53), with the lab secret. After an allow-list change, regenerate it
+          ! with `python -m scripts.lab_roles`.
           parser view NA-READ
            secret CHANGE_ME
-           commands exec include terminal length
-           commands exec include terminal width
+           commands exec include terminal length 0
+           commands exec include terminal width 511
            commands exec include show version
-           commands exec include show running-config view full
-           commands exec include show cdp neighbors detail
-           commands exec include show lldp neighbors detail
-           commands exec include show interfaces
-           commands exec include show interfaces switchport
-           commands exec include show interfaces trunk
-           commands exec include show vlan brief
-           commands exec include show etherchannel summary
-           commands exec include show ip interface
-           commands exec include show vrf
-           commands exec include show ip arp
-           commands exec include show mac address-table
-           commands exec include show ip ospf neighbor
-           commands exec include show ip eigrp neighbors
-           commands exec include show ip bgp summary
-           commands exec include show ip route static
-           commands exec include show standby brief
-           commands exec include show vrrp brief
-           commands exec include show glbp brief
            commands exec include show privilege
-           commands exec include show parser view
           !
           username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
           !
@@ -496,36 +456,16 @@ nodes:
           !
           username admin privilege 15 algorithm-type scrypt secret CHANGE_ME
           !
-          ! Device Role for the tool's dedicated account (ADR 0005): a CLI view
-          ! that permits only the commands the tool sends. PROVISIONAL: written by
-          ! hand from the spec's command catalogue (#37). Replace it with the
-          ! output of `network-analyser role-snippet ios-xe` once that exists (#53).
+          ! Device Role for the tool's dedicated account (ADR 0005): the CLI view
+          ! printed by `network-analyser role-snippet ios-xe --username netanalyser`
+          ! (#53), with the lab secret. After an allow-list change, regenerate it
+          ! with `python -m scripts.lab_roles`.
           parser view NA-READ
            secret CHANGE_ME
-           commands exec include terminal length
-           commands exec include terminal width
+           commands exec include terminal length 0
+           commands exec include terminal width 511
            commands exec include show version
-           commands exec include show running-config view full
-           commands exec include show cdp neighbors detail
-           commands exec include show lldp neighbors detail
-           commands exec include show interfaces
-           commands exec include show interfaces switchport
-           commands exec include show interfaces trunk
-           commands exec include show vlan brief
-           commands exec include show etherchannel summary
-           commands exec include show ip interface
-           commands exec include show vrf
-           commands exec include show ip arp
-           commands exec include show mac address-table
-           commands exec include show ip ospf neighbor
-           commands exec include show ip eigrp neighbors
-           commands exec include show ip bgp summary
-           commands exec include show ip route static
-           commands exec include show standby brief
-           commands exec include show vrrp brief
-           commands exec include show glbp brief
            commands exec include show privilege
-           commands exec include show parser view
           !
           username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
           !
@@ -715,37 +655,18 @@ nodes:
           feature interface-vlan
           feature ospf
           #
-          # Device Role for the tool's dedicated account (ADR 0005): one custom
-          # role that permits only the commands the tool sends; no network-operator
-          # and no "rule permit read". PROVISIONAL: written by hand from the spec's
-          # command catalogue (#37). Replace it with the output of
-          # `network-analyser role-snippet nx-os` once that exists (#53).
+          # Device Role for the tool's dedicated account (ADR 0005): the custom
+          # role printed by `network-analyser role-snippet nx-os --username
+          # netanalyser` (#53). After an allow-list change, regenerate it with
+          # `python -m scripts.lab_roles`.
           role name NA-READ
-            description Network Analyser provisional role
-            rule 26 permit command terminal length 0
-            rule 25 permit command terminal width 511
-            rule 24 permit command show version
-            rule 23 permit command show running-config
-            rule 22 permit command show cdp neighbors detail
-            rule 21 permit command show lldp neighbors detail
-            rule 20 permit command show interface
-            rule 19 permit command show interface switchport
-            rule 18 permit command show interface trunk
-            rule 17 permit command show vlan brief
-            rule 16 permit command show port-channel summary
-            rule 15 permit command show vpc
-            rule 14 permit command show ip interface vrf all
-            rule 13 permit command show vrf
-            rule 12 permit command show ip arp vrf all
-            rule 11 permit command show mac address-table
-            rule 10 permit command show ip ospf neighbors vrf all
-            rule 9 permit command show ip eigrp neighbors vrf all
-            rule 8 permit command show ip bgp summary vrf all
-            rule 7 permit command show ip route static vrf all
-            rule 6 permit command show hsrp brief
-            rule 5 permit command show vrrp
-            rule 4 permit command show user-account
+            description Network Analyser read-only Device Role
+            rule 1 permit command terminal length 0
+            rule 2 permit command terminal width 511
+            rule 3 permit command show version
+            rule 4 permit command show user-account netanalyser
           username netanalyser password CHANGE_ME role NA-READ
+          no username netanalyser role network-operator
           password strength-check
           #
           ip domain-name example.net
@@ -899,37 +820,18 @@ nodes:
           feature interface-vlan
           feature ospf
           #
-          # Device Role for the tool's dedicated account (ADR 0005): one custom
-          # role that permits only the commands the tool sends; no network-operator
-          # and no "rule permit read". PROVISIONAL: written by hand from the spec's
-          # command catalogue (#37). Replace it with the output of
-          # `network-analyser role-snippet nx-os` once that exists (#53).
+          # Device Role for the tool's dedicated account (ADR 0005): the custom
+          # role printed by `network-analyser role-snippet nx-os --username
+          # netanalyser` (#53). After an allow-list change, regenerate it with
+          # `python -m scripts.lab_roles`.
           role name NA-READ
-            description Network Analyser provisional role
-            rule 26 permit command terminal length 0
-            rule 25 permit command terminal width 511
-            rule 24 permit command show version
-            rule 23 permit command show running-config
-            rule 22 permit command show cdp neighbors detail
-            rule 21 permit command show lldp neighbors detail
-            rule 20 permit command show interface
-            rule 19 permit command show interface switchport
-            rule 18 permit command show interface trunk
-            rule 17 permit command show vlan brief
-            rule 16 permit command show port-channel summary
-            rule 15 permit command show vpc
-            rule 14 permit command show ip interface vrf all
-            rule 13 permit command show vrf
-            rule 12 permit command show ip arp vrf all
-            rule 11 permit command show mac address-table
-            rule 10 permit command show ip ospf neighbors vrf all
-            rule 9 permit command show ip eigrp neighbors vrf all
-            rule 8 permit command show ip bgp summary vrf all
-            rule 7 permit command show ip route static vrf all
-            rule 6 permit command show hsrp brief
-            rule 5 permit command show vrrp
-            rule 4 permit command show user-account
+            description Network Analyser read-only Device Role
+            rule 1 permit command terminal length 0
+            rule 2 permit command terminal width 511
+            rule 3 permit command show version
+            rule 4 permit command show user-account netanalyser
           username netanalyser password CHANGE_ME role NA-READ
+          no username netanalyser role network-operator
           password strength-check
           #
           ip domain-name example.net

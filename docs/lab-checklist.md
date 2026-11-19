@@ -42,7 +42,7 @@ The management gateway placeholder is 192.0.2.1. The management interfaces join 
 - **VLAN Mismatch, on purpose:** the trunk xe-sw1 Ethernet0/3 ↔ nx-sw1 Ethernet1/3. xe-sw1 allows 10, 20 and 30 with native VLAN 1; nx-sw1 allows 10, 20 and 99 with native VLAN 99.
 - **OSPF** area 0, with an HMAC-SHA-256 key chain, on three routed /31 links (xe-rtr1–xe-sw1, xe-rtr1–nx-sw1, xe-sw2–nx-sw2) and on VLAN 10.
 - **Shared subnet:** 198.51.100.0/25 on VLAN 10 across all four switches, with HSRP address 198.51.100.1 on the two IOS-XE switches. 198.51.100.128/25 on VLAN 20 is shared by xe-sw2 and nx-sw2 only, with no routing protocol.
-- **The tool's account** `netanalyser`, with a provisional Device Role: CLI view `NA-READ` on IOS-XE and custom role `NA-READ` on NX-OS ([ADR 0005](adr/0005-device-roles-cut-exactly-to-the-allow-list.md)). They are written by hand from the spec's command catalogue. Once `network-analyser role-snippet` exists ([#53](https://github.com/b-git-hub/network-analyser/issues/53)), replace them with its output and update the lab file.
+- **The tool's account** `netanalyser`, with the Device Role `network-analyser role-snippet` prints ([#53](https://github.com/b-git-hub/network-analyser/issues/53)): CLI view `NA-READ` on IOS-XE and custom role `NA-READ` on NX-OS ([ADR 0005](adr/0005-device-roles-cut-exactly-to-the-allow-list.md)). It permits exactly the allow-list of the commit you test, so a command added later is refused until the role is regenerated: `python -m scripts.lab_roles` rewrites the lab file, and a test fails while it is out of step. On a booked lab, re-apply the role from `role-snippet` output after upgrading the tool.
 
 Steps:
 
@@ -143,6 +143,9 @@ From [#14](https://github.com/b-git-hub/network-analyser/issues/14) and [ADR 000
 | C8 | NX-OS: does `show running-config` under the custom role return the full config, with hashes and keys? | | |
 | C9 | NX-OS: is any allow-listed command restricted to network-admin only? | | |
 | C10 | NX-OS: which command reports the user's own roles (`show user-account <name>`, `show role`), and what must the role permit for it to run? | | |
+| C11 | IOS-XE (`role-snippet`, [#53](https://github.com/b-git-hub/network-analyser/issues/53)): does the view keep `commands exec include terminal length 0` and `terminal width 511` with their values, and does the fallback take `privilege exec level 7 terminal length 0`? If the device refuses or drops the value, record the form it keeps; Netmiko's session set-up must still pass. | | |
+| C12 | NX-OS (`role-snippet`): does a new account get `network-operator` by default, and does `no username netanalyser role network-operator` remove it, so that `show user-account netanalyser` lists only `NA-READ`? | | |
+| C13 | TACACS+, only if a TACACS+ server is available (`role-snippet --tacacs`): does `cli-view-name=NA-READ` in the profile place the IOS-XE account in the view, and `shell:roles="NA-READ"` give the NX-OS account only that role? Does an anchored ISE row (`show`, `^version$`) permit `show version` and refuse `show version detail`? | | |
 
 ### D. Backups
 
