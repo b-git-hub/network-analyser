@@ -1,9 +1,10 @@
-"""The Backups' lines in the end-of-Run summary (ticket #51; stories 98, 101).
+"""The Backups' lines in the final summary (ticket #51; stories 98, 101).
 
 How many configs were locked and written, how long locking took in all, and what needs the
 operator: a Backup or the manifest that could not be written, and a Backup locked below
 scrypt level 2^18 (#27). Only addresses and fixed text: never a hash of a plaintext or any
-device output. The Run report (#66) takes the same records.
+device output. The Run report (#66) takes the same records; `cli.summary` (#56) puts these
+lines in the final summary.
 """
 
 from network_analyser.records.backup import BackupResults
@@ -15,29 +16,18 @@ def written(results: BackupResults) -> int:
     return sum(1 for b in results.backups if b.path is not None)
 
 
-def summary(results: BackupResults) -> str:
-    """Return the Backups' summary lines."""
+def headline(results: BackupResults) -> str:
+    """Return the Backups' one summary line."""
     total = len(results.backups)
     manifest = "with" if results.manifest_path is not None else "but no"
-    lines = [
-        (
-            f"Backups: {written(results)} of {total} locked and written (locking took "
-            f"{results.lock_seconds:.1f} s in all), {manifest} manifest.age."
-        )
-    ]
-    attention = _attention(results)
-    if attention:
-        lines.append("Backups needing your attention:")
-        lines.extend(f"  {item}" for item in attention)
-    return "\n".join(lines)
+    return (
+        f"Backups: {written(results)} of {total} locked and written (locking took "
+        f"{results.lock_seconds:.1f} s in all), {manifest} manifest.age."
+    )
 
 
-def needs_attention(results: BackupResults) -> bool:
-    """Say whether anything about the Backups needs the operator (exit code 1)."""
-    return bool(_attention(results))
-
-
-def _attention(results: BackupResults) -> list[str]:
+def attention(results: BackupResults) -> list[str]:
+    """Return what about the Backups needs the operator, each with its next step."""
     items: list[str] = []
     for backup in results.backups:
         if backup.problem is not None:

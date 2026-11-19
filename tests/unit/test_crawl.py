@@ -88,6 +88,8 @@ class Lab:
         self.count = 0
         self.budget = 3
         self.backups = Backups()
+        self.stop = device_gateway.RunStop()
+        self.ticks: list[int] = []
         fence = scope.parse(["192.0.2.0/24"], ["192.0.2.200-192.0.2.210"])
         assert isinstance(fence, ScopeRecord)
         self.scope = fence
@@ -127,6 +129,7 @@ class Lab:
             neighbour_hint=neighbour_hint,
             identity=identity,
             wait_before_retry=self.network.wait_before_retry,
+            stop=self.stop,
         )
 
     def crawl(self, *seeds: str, parallel: int = 10) -> CrawlResult:
@@ -136,6 +139,8 @@ class Lab:
             scope=self.scope,
             parallel=parallel,
             emit=self.events.append,
+            stop=self.stop,
+            tick=self.ticks.append,
             all_retired=self.sets.all_retired,
         )
 
@@ -451,6 +456,64 @@ def test_a_trust_store_that_cannot_be_written_stops_new_logins(lab: Lab, tmp_pat
             unvisited_reason=UnvisitedReason.RUN_STOPPED,
         ),
     )
+
+
+# -- Ctrl+C (#56; stories 82-83) -----------------------------------------------------------
+
+
+def test_the_first_ctrl_c_starts_no_new_visit_and_records_the_queue_as_stopped(
+    lab: Lab,
+) -> None:
+    seed = lab.device(
+        str(SEED),
+        entry("sw-b", management=("192.0.2.2",)),
+        entry("sw-c", management=("192.0.2.3",)),
+    )
+    seed.when_sent["show running-config view full"] = lab.stop.stop_gracefully
+    lab.device("192.0.2.2")
+    lab.device("192.0.2.3")
+
+    result = lab.crawl()
+
+    assert result.stopped == discovery.STOPPED_BY_CTRL_C
+    assert lab.network.dialled == [SEED]
+    assert result.devices[0].outcome is DeviceOutcome.VISITED  # its session finished
+    stopped = _unvisited(result, UnvisitedReason.RUN_STOPPED)
+    assert sorted(str(u.ip) for u in stopped) == ["192.0.2.2", "192.0.2.3"]
+    reasons = [e.reason for e in lab.events if isinstance(e, NeighbourNotVisited)]
+    assert reasons == ["not attempted (Run stopped)"] * 2
+
+
+def test_seeds_still_queued_at_the_first_ctrl_c_are_recorded_as_stopped(lab: Lab) -> None:
+    lab.device(str(SEED)).when_sent["show version"] = lab.stop.stop_gracefully
+    lab.device("192.0.2.2")
+
+    result = lab.crawl(str(SEED), "192.0.2.2", parallel=1)
+
+    assert lab.network.dialled == [SEED]
+    assert [str(u.ip) for u in _unvisited(result, UnvisitedReason.RUN_STOPPED)] == ["192.0.2.2"]
+
+
+def test_the_crawl_ticks_with_how_many_devices_are_queued(lab: Lab) -> None:
+    lab.device(str(SEED))
+    lab.device("192.0.2.2")
+
+    lab.crawl(str(SEED), "192.0.2.2", parallel=1)
+
+    assert lab.ticks
+    assert lab.ticks[0] == 1  # one Seed waits while the first is visited
+    assert lab.ticks[-1] == 0
+
+
+def test_a_trust_store_that_cannot_be_written_also_stops_visits_under_way(
+    lab: Lab, tmp_path: Path
+) -> None:
+    lab.device(str(SEED))
+    (tmp_path / "trust").write_text("", encoding="utf-8")
+
+    lab.crawl(str(SEED), parallel=1)
+
+    assert lab.stop.requested
 
 
 # -- Credential Sets (#54; stories 32, 37) -------------------------------------------------

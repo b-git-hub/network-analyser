@@ -20,7 +20,7 @@ from typing import Any, cast
 import pytest
 
 from network_analyser import scope
-from network_analyser.cli import ExitCode, run_summary
+from network_analyser.cli import ExitCode, summary
 from network_analyser.cli.parser import SWEEP_INFLIGHT_MAX
 from network_analyser.cli.prompts import Prompter
 from network_analyser.cli.run_file import RunFile
@@ -38,6 +38,7 @@ from network_analyser.discovery.sweep import (
 )
 from network_analyser.platforms.hints import sweep_platform
 from network_analyser.records import Placement, Platform, ScopeRecord, Source
+from network_analyser.records.backup import BackupResults
 from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.events import (
     AuditEvent,
@@ -569,13 +570,13 @@ def test_a_confirmed_sweep_logs_in_only_to_matching_banners(
     run.network.add("192.0.2.11")
     run.network.add("192.0.2.12")
     held: list[CrawlResult] = []
-    real_summary = run_summary.summary
+    real_summary = summary.final_summary
 
-    def grab(result: CrawlResult) -> str:
+    def grab(result: CrawlResult, backups: BackupResults, *, elapsed_s: float) -> str:
         held.append(result)
-        return real_summary(result)
+        return real_summary(result, backups, elapsed_s=elapsed_s)
 
-    monkeypatch.setattr(run_summary, "summary", grab)
+    monkeypatch.setattr(summary, "final_summary", grab)
 
     got = run(
         "--scope",

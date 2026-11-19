@@ -57,3 +57,14 @@ Where the ticket left a choice, the conservative one was taken:
 - No `--no-sweep` flag. A run file `sweep = true` cannot be turned off from the command line. That remains an operator decision (from #41).
 - The Sweep runs only after the operator confirms, inside the audit trail. It does not watch a stop token; that belongs to #56.
 - `socket` may be imported from `device_gateway/probe.py` as well as `ssh.py`, because the probe must not use Paramiko (Paramiko's handshake is the key exchange).
+
+## Ticket #56 (live progress, Ctrl+C, final summary), 2026-11-19
+
+Calls made by #56's implementer where the ticket left something open. Each is the conservative option and reversible. Code: `cli/progress.py`, `cli/signals.py`, `cli/summary.py` (replaces `cli/run_summary.py`), `device_gateway/stop.py`.
+
+1. **Ctrl+C never raises through the worker pool.** The SIGINT handler only counts the press and sets a plain flag (`RunStop.stop_gracefully` takes no lock, so it is safe from a signal handler). The main thread handles the press on its next crawl tick: the first press stops new logins, and the second closes every open session (`RunStop.close_now`, where one `close()` failing does not stop the rest). A third press does nothing more. The crawl waits in 0.2 s slices, because on Windows a `wait()` with no timeout holds back SIGINT.
+2. **A Ctrl+C stop is not a Trust Store stop.** `run_stopped` from a device counts as `trust store unwritable` only when the Run was not already stopping; Ctrl+C gives the fixed reason `the operator pressed Ctrl+C` and exit 3. A device closed during collection is partial (`closed by operator`), not a crash.
+3. **What needs attention** (marked `!!`, listed first, exit 1): unreachable, algorithms too old, host key changed, host key not trusted, authentication failed, Credential Sets retired, a Backup not taken, a secret-scan hit, and a stop the tool made. An unsupported Platform and a device closed by Ctrl+C are not attention items, so a Run whose only oddity is an unsupported Seed exits 0.
+4. **Console detail.** Log mode (and a redirected console) prints device-level events only, one line each, never cut to the width; the live panel lists every device in progress and fits lines to the width. There are no per-device lines in the final summary: those are left to the Run report (#66).
+5. **Where to look** prints full paths, and lists `diagram.html` and `run-report.html` only if the file exists.
+6. **Lab checks.** Confirm the ANSI panel on a plain conhost (VT mode is switched on via `SetConsoleMode`; if that fails the tool falls back to log mode), and that `Link.close` from the main thread while a worker is mid-command ends the session cleanly (paramiko's `Transport.close` is meant to be callable from another thread).

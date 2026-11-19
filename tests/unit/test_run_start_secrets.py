@@ -75,7 +75,7 @@ def test_a_first_run_sets_the_passphrase_takes_a_set_confirms_and_creates_the_ru
     assert folder.name.endswith("_site-a")
     assert f"Run folder created: {folder}\n" in got.out
     assert backup_store.registered_run_folders(data_folder().run_register) == (folder,)
-    assert "192.0.2.1        visited" in got.out
+    assert "Visited      1   Backups locked 1" in got.out
     _assert_no_secret_shown(got)
     for secret in (BACKUP_CANARY, DEVICE_CANARY):
         assert _files_hold(data_folder().root, secret) == []

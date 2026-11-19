@@ -8,11 +8,12 @@ pressed (story 86): no login ever happens without an audit trail.
 
 import contextlib
 import sys
+import time
 from collections.abc import Callable
 
 from network_analyser import _winsys, run_output
 from network_analyser._version import __version__
-from network_analyser.cli import backup_summary, run_summary
+from network_analyser.cli import backup_summary, summary
 from network_analyser.cli.exit_codes import ExitCode
 from network_analyser.credentials import CredentialSets, SecretScan
 from network_analyser.records import RunRequest
@@ -52,6 +53,7 @@ def run_with_audit_trail(
         audit = run_output.open_audit_log(folder, scan)
     except run_output.AuditLogError:
         return _audit_stop()
+    started = time.monotonic()
     try:
         audit.record(_run_started(request, sets, folder))
         result, backups = crawl(audit)
@@ -71,14 +73,8 @@ def run_with_audit_trail(
         raise
     finally:
         audit.close()
-    print(run_summary.summary(result))
-    print(backup_summary.summary(backups))
-    if result.stopped:
-        return ExitCode.STOPPED
-    attention = run_summary.needs_attention(result) or backup_summary.needs_attention(backups)
-    if attention or scan.hits:
-        return ExitCode.NEEDS_ATTENTION
-    return ExitCode.CLEAN
+    print(summary.final_summary(result, backups, elapsed_s=time.monotonic() - started))
+    return summary.exit_code(result, backups, scan_hits=scan.hits)
 
 
 def _run_started(
