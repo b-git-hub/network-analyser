@@ -1,4 +1,6 @@
-"""`topology.json`: written at the end of every started Run, Ctrl+C included (#52).
+"""`topology.json` and `diagram.html`: written at the end of every started Run, Ctrl+C included.
+
+`topology.json` is #52's; the diagram is then drawn from that file alone (#63).
 
 `Collector` keeps each device record as the crawl hands it back, so a Run stopped part way
 still has the records gathered so far. At the end, `save_topology` builds the Topology and
@@ -13,12 +15,13 @@ from collections.abc import Callable
 from typing import Final
 
 from network_analyser import run_output, topology
+from network_analyser.cli import diagram_file
 from network_analyser.cli.exit_codes import ExitCode
 from network_analyser.credentials import SecretScan
 from network_analyser.records.device import DeviceRecord
 from network_analyser.records.identity import Alias
 
-TOPOLOGY_FILE: Final = "topology.json"
+TOPOLOGY_FILE: Final = diagram_file.TOPOLOGY_FILE
 NOT_WRITTEN: Final = (
     "Warning: topology.json could not be written in the Run folder, so the diagram cannot be "
     "drawn\nfrom this Run. Check the disk or share the Run folder is on."
@@ -65,21 +68,29 @@ def then_save(
     scan: SecretScan,
     run: Callable[[], ExitCode],
 ) -> ExitCode:
-    """Run the Run, then write `topology.json` from what `collector` kept, Ctrl+C included.
+    """Run the Run, then write `topology.json` and draw the diagram from it, Ctrl+C included.
 
-    A Topology that could not be written makes the Run need attention (exit 1 at least).
+    A Topology or diagram that could not be written makes the Run need attention (exit 1
+    at least).
 
     Raises:
-        KeyboardInterrupt: Ctrl+C during the Run, once `topology.json` is written.
+        KeyboardInterrupt: Ctrl+C during the Run, once the files are written.
     """
     try:
         code = run()
     except KeyboardInterrupt:  # write what was found so far, then stop (exit 3)
-        save_topology(folder, collector.records(), scan)
+        _save(folder, collector, scan)
         raise
-    if not save_topology(folder, collector.records(), scan):
+    if not _save(folder, collector, scan):
         return max(code, ExitCode.NEEDS_ATTENTION)
     return code
+
+
+def _save(folder: run_output.RunFolder, collector: Collector, scan: SecretScan) -> bool:
+    """Write `topology.json`, then `diagram.html` from it; False if either failed."""
+    return save_topology(folder, collector.records(), scan) and diagram_file.save_diagram(
+        folder, scan
+    )
 
 
 def save_topology(
