@@ -75,8 +75,7 @@ def place(topology: TopologyFile) -> Layout:
     """Return where each Visited, Unvisited Device and Shared Segment sits."""
     content = topology.content
     names = {d: _name(d, r) for d, r in _records(content, "devices")}
-    for segment, _ in _records(content, "segments"):
-        names[segment] = segment
+    names |= {segment: segment for segment, _ in _records(content, "segments")}
     graph = _graph(content, set(names))
     roots = _roots(graph, sorted(_ids(content, "devices")), content)
     positions: dict[str, Point] = {}
@@ -105,9 +104,7 @@ def _devices_of(record: Mapping[str, Plain], key: str) -> list[str]:
     parts = record.get(key)
     if not isinstance(parts, tuple):
         return []
-    return [
-        p["device"] for p in parts if isinstance(p, Mapping) and isinstance(p["device"], str)
-    ]
+    return [p["device"] for p in parts if isinstance(p, Mapping) and isinstance(p["device"], str)]
 
 
 def _graph(content: Mapping[str, Plain], nodes: set[str]) -> dict[str, set[str]]:
@@ -140,7 +137,9 @@ def _hops(graph: Mapping[str, set[str]], sources: Iterable[str]) -> dict[str, in
     return hops
 
 
-def _roots(graph: Mapping[str, set[str]], visited: list[str], content: Mapping[str, Plain]) -> list[str]:
+def _roots(
+    graph: Mapping[str, set[str]], visited: list[str], content: Mapping[str, Plain]
+) -> list[str]:
     best: str | None = None
     best_cost = 0
     for device in visited:
@@ -159,7 +158,9 @@ def _roots(graph: Mapping[str, set[str]], visited: list[str], content: Mapping[s
         sides = record.get("sides")
         if record.get("role") != PEER_LINK or not isinstance(sides, tuple):
             continue
-        members = [d for side in sides if isinstance(side, Mapping) for d in _devices_of(side, "ends")]
+        members = [
+            d for side in sides if isinstance(side, Mapping) for d in _devices_of(side, "ends")
+        ]
         if best in members:
             roots.update(m for m in members if m in graph)
     return sorted(roots)

@@ -16,15 +16,15 @@ from network_analyser.diagram.topology_file import (
 )
 
 __all__ = [
+    "KNOWN_FORMAT_VERSION",
     "AreaLabel",
     "Layout",
-    "Point",
-    "draw_html",
-    "place",
-    "KNOWN_FORMAT_VERSION",
     "NewerFormatError",
     "Plain",
+    "Point",
     "TopologyFile",
     "TopologyFileError",
+    "draw_html",
+    "place",
     "read_topology",
 ]

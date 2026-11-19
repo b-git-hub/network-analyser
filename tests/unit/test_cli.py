@@ -33,7 +33,6 @@ def test_version_prints_semver_0_y_z(capsys: pytest.CaptureFixture[str]) -> None
 FINGERPRINT = "SHA256:" + "A" * 43
 
 EVERY_COMMAND = [
-    pytest.param(["render", "runs/2026-01-01T000000Z"], id="render"),
     pytest.param(["show-backup", "backups/sw-a.cfg.age"], id="show-backup"),
     pytest.param(["show-backup"], id="show-backup listing"),
     pytest.param(["change-passphrase"], id="change-passphrase"),

@@ -74,7 +74,7 @@ def link(  # noqa: PLR0913 (both ends, by name)
     }
 
 
-def bundle(
+def bundle(  # noqa: PLR0913 (both sides, by name)
     ident: str,
     side_a: list[tuple[str, str]],
     side_b: list[tuple[str, str]],

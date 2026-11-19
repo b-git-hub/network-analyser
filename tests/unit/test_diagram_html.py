@@ -14,7 +14,7 @@ from typing import Any
 from network_analyser import diagram
 from tests.support.topology_documents import device, document, link, read, unvisited_device
 
-HOSTILE = "</script><img src=x onerror=alert(1)>\"'& "
+HOSTILE = "</script><img src=x onerror=alert(1)>\"'&\u2028"
 DATA_OPEN = '<script type="application/json" id="topology-data">'
 
 
@@ -50,7 +50,7 @@ def test_device_text_never_reaches_the_page_as_markup() -> None:
 
     assert "<img" not in page
     assert page.count("</script>") == 2  # the data block's and the code's own
-    assert " " not in page
+    assert "\u2028" not in page
     assert _data(page)["topology"]["devices"][1]["hostname"] == HOSTILE
 
 
@@ -86,7 +86,17 @@ def test_the_page_runs_only_its_own_script_and_style() -> None:
 def test_the_page_needs_nothing_from_outside() -> None:
     page = _page(_two_switches()).lower()
 
-    for outside in ("src=", "href=", "<link", "@import", "url(", "http:", "https:", "<iframe", "<object"):
+    for outside in (
+        "src=",
+        "href=",
+        "<link",
+        "@import",
+        "url(",
+        "http:",
+        "https:",
+        "<iframe",
+        "<object",
+    ):
         assert outside not in page
 
 

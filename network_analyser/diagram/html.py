@@ -1,4 +1,4 @@
-"""`draw_html(topology, redact)`: the self-contained `diagram.html` (#63, stories 142-153).
+r"""`draw_html(topology, redact)`: the self-contained `diagram.html` (#63, stories 142-153).
 
 The page is one file that works offline. It loads nothing: no CDN, web font, telemetry or
 third-party JavaScript, only our own plain JavaScript and CSS from `assets/`, inlined. A
@@ -12,7 +12,7 @@ escapes again wherever it draws it:
 - every string, keys included, first passes through `redact` (the Run's secret scan), so a
   secret is caught before escaping could hide it;
 - every character other than letters, digits, space and `_ . , -` is then written as a
-  `\\uXXXX` escape, so the block can hold no `<`, `&`, quote, slash or colon, and so no tag,
+  `\uXXXX` escape, so the block can hold no `<`, `&`, quote, slash or colon, and so no tag,
   no `</script>`, no URL and no call.
 
 The page is the same for the same `topology.json` and secrets.
@@ -20,6 +20,8 @@ The page is the same for the same `topology.json` and secrets.
 
 import base64
 import hashlib
+import json
+import math
 from collections.abc import Callable, Mapping
 from importlib import resources
 from typing import Final
@@ -66,7 +68,12 @@ def _layout_data(layout: Layout) -> dict[str, _Data]:
         for ident, point in sorted(layout.positions.items())
     ]
     labels: list[_Data] = [
-        {"text": label.text, "x": round(label.x, 1), "y": round(label.y, 1), "heading": label.heading}
+        {
+            "text": label.text,
+            "x": round(label.x, 1),
+            "y": round(label.y, 1),
+            "heading": label.heading,
+        }
         for label in layout.labels
     ]
     return {"positions": positions, "labels": labels}
@@ -76,14 +83,9 @@ def _encode(value: object, redact: Callable[[str], str]) -> str:
     """Return `value` as JSON whose strings hold only plain characters and escapes."""
     if isinstance(value, str):
         return f'"{_escape(redact(value))}"'
-    if value is None:
-        return "null"
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float):
-        return repr(value) if value == value and abs(value) != float("inf") else "null"
+    if value is None or isinstance(value, bool | int | float):
+        finite = not isinstance(value, float) or math.isfinite(value)
+        return json.dumps(value) if finite else "null"  # JSON has no infinity
     if isinstance(value, Mapping):
         items = (f"{_encode(str(k), redact)}:{_encode(v, redact)}" for k, v in value.items())
         return "{" + ",".join(items) + "}"
@@ -105,7 +107,11 @@ def _escape(text: str) -> str:
 
 
 def _asset(name: str) -> str:
-    return resources.files("network_analyser.diagram").joinpath("assets", name).read_text(encoding="utf-8")
+    return (
+        resources.files("network_analyser.diagram")
+        .joinpath("assets", name)
+        .read_text(encoding="utf-8")
+    )
 
 
 def _digest(text: str) -> str:

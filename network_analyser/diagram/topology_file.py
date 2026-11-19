@@ -217,9 +217,7 @@ def _record(value: dict[object, object], schema: dict[str, _Schema]) -> Mapping[
 
 def _is_unknown(value: object) -> bool:
     return (
-        isinstance(value, dict)
-        and set(value) == {"unknown"}
-        and isinstance(value["unknown"], str)
+        isinstance(value, dict) and set(value) == {"unknown"} and isinstance(value["unknown"], str)
     )
 
 

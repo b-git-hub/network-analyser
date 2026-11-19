@@ -20,7 +20,10 @@ CORE = "dev-core"
 def _star(count: int) -> object:
     """A core with `count` access switches, one Link each."""
     leaves = [device(f"dev-acc{i:02d}", f"acc-{i:02d}") for i in range(count)]
-    links = [link(f"link-{i:02d}", CORE, f"Gi1/0/{i}", f"dev-acc{i:02d}", "Gi1/1/1") for i in range(count)]
+    links = [
+        link(f"link-{i:02d}", CORE, f"Gi1/0/{i}", f"dev-acc{i:02d}", "Gi1/1/1")
+        for i in range(count)
+    ]
     return document([device(CORE, "core"), *leaves], links)
 
 
@@ -61,16 +64,44 @@ def test_the_vpc_peer_shares_the_top_row() -> None:
         device("dev-e", "dist-2"),
     ]
     links = [
-        link("link-p1", "dev-n1", "Eth1/53", "dev-n2", "Eth1/53", role="vPC peer-link", bundle="bundle-p"),
-        link("link-p2", "dev-n1", "Eth1/54", "dev-n2", "Eth1/54", role="vPC peer-link", bundle="bundle-p"),
+        link(
+            "link-p1",
+            "dev-n1",
+            "Eth1/53",
+            "dev-n2",
+            "Eth1/53",
+            role="vPC peer-link",
+            bundle="bundle-p",
+        ),
+        link(
+            "link-p2",
+            "dev-n1",
+            "Eth1/54",
+            "dev-n2",
+            "Eth1/54",
+            role="vPC peer-link",
+            bundle="bundle-p",
+        ),
         link("link-u1", "dev-d", "Te1/1/1", "dev-n1", "Eth1/1", bundle="bundle-u"),
         link("link-u2", "dev-d", "Te1/1/2", "dev-n2", "Eth1/1", bundle="bundle-u"),
         link("link-v1", "dev-e", "Te1/1/1", "dev-n1", "Eth1/2"),
         link("link-v2", "dev-e", "Te1/1/2", "dev-n2", "Eth1/2"),
     ]
     bundles = [
-        bundle("bundle-p", [("dev-n1", "Po1")], [("dev-n2", "Po1")], ["link-p1", "link-p2"], role="vPC peer-link"),
-        bundle("bundle-u", [("dev-d", "Po10")], [("dev-n1", "Po10"), ("dev-n2", "Po10")], ["link-u1", "link-u2"], vpc=10),
+        bundle(
+            "bundle-p",
+            [("dev-n1", "Po1")],
+            [("dev-n2", "Po1")],
+            ["link-p1", "link-p2"],
+            role="vPC peer-link",
+        ),
+        bundle(
+            "bundle-u",
+            [("dev-d", "Po10")],
+            [("dev-n1", "Po10"), ("dev-n2", "Po10")],
+            ["link-u1", "link-u2"],
+            vpc=10,
+        ),
     ]
 
     layout = diagram.place(read(document(devices, links, bundles=bundles)))

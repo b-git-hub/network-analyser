@@ -22,7 +22,7 @@ def test_python_m_network_analyser_prints_the_version_and_exits_0() -> None:
 
 def test_a_command_not_built_yet_exits_4_from_the_real_entry_point() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "network_analyser", "render", "runs/x"],
+        [sys.executable, "-m", "network_analyser", "show-backup"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -31,4 +31,4 @@ def test_a_command_not_built_yet_exits_4_from_the_real_entry_point() -> None:
     )
 
     assert result.returncode == 4
-    assert "network-analyser render: not built yet" in result.stderr
+    assert "network-analyser show-backup: not built yet" in result.stderr
