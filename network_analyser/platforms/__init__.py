@@ -15,6 +15,12 @@ from types import MappingProxyType
 from typing import Final
 
 from network_analyser.platforms.allowlist import AllowList, Exact, Template
+from network_analyser.platforms.collection import (
+    Collection,
+    ParseProblem,
+    Send,
+    nothing_collected,
+)
 from network_analyser.platforms.identify import (
     Hint,
     Unsupported,
@@ -23,6 +29,7 @@ from network_analyser.platforms.identify import (
     ssh_id_hint,
 )
 from network_analyser.platforms.ios_xe import backup as ios_xe_backup
+from network_analyser.platforms.ios_xe import collect as ios_xe_collect
 from network_analyser.platforms.ios_xe import commands as ios_xe_commands
 from network_analyser.platforms.ios_xe import identify as ios_xe
 from network_analyser.platforms.ios_xe import role as ios_xe_role
@@ -30,8 +37,10 @@ from network_analyser.platforms.nxos import backup as nxos_backup
 from network_analyser.platforms.nxos import commands as nxos_commands
 from network_analyser.platforms.nxos import identify as nxos
 from network_analyser.platforms.nxos import role as nxos_role
+from network_analyser.platforms.replies import is_denied
 from network_analyser.platforms.roles import RoleError, username_problem
 from network_analyser.records import Platform
+from network_analyser.records.collected import NOT_COLLECTED
 from network_analyser.records.device import LandingPrivilege, Unknown, VersionFacts
 
 ALLOW_LISTS: Final[Mapping[Platform, AllowList]] = MappingProxyType(
@@ -98,6 +107,19 @@ def backup_problem(platform: Platform, text: str) -> str | None:
     return check(text)
 
 
+def collect(platform: Platform, send: Send, show_version: str) -> Collection:
+    """Collect a Visited Device's data for the Topology through `send` (#59, #60).
+
+    `send` passes each command through the gateway's allow-list gate; `show_version` is
+    the reply identification already read. A command that is denied, fails or is not
+    understood leaves its data unknown and is never fatal; each reply not understood is
+    also a `ParseProblem` for the Audit log.
+    """
+    if platform is Platform.IOS_XE:
+        return ios_xe_collect.collect(send, show_version)
+    return nothing_collected(NOT_COLLECTED)  # NX-OS: ticket #60
+
+
 def role_snippet(platform: Platform, username: str | None, *, tacacs: bool) -> str:
     """Return the Device Role for `platform`, generated from its allow-list (ADR 0005).
 
@@ -120,15 +142,20 @@ __all__ = [
     "SESSION_SETUP",
     "SHOW_VERSION",
     "AllowList",
+    "Collection",
     "Exact",
     "Hint",
+    "ParseProblem",
     "RoleError",
+    "Send",
     "Template",
     "Unsupported",
     "backup_command",
     "backup_problem",
+    "collect",
     "identify",
     "is_config_prompt",
+    "is_denied",
     "permits",
     "privilege_command",
     "read_privilege",
