@@ -64,6 +64,8 @@ def test_records_become_objects_with_their_field_names() -> None:
         "findings",
         "skipped",
         "unknown_interface_names",
+        "adjacencies",
+        "subnets",
     }
 
 

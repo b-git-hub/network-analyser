@@ -13,7 +13,9 @@ order things were found, so the same network gives the same ids in every Run:
 - an Unvisited Device: `unv-` and 12 hex digits from the address or chassis ID it was merged
   on;
 - a Link, Shared Segment, Bundle or finding: `link-`, `seg-`, `bundle-` or `finding-` and 12
-  hex digits from its ends or subjects.
+  hex digits from its ends or subjects;
+- an L3 Adjacency (#62): `adj-` and 12 hex digits from its kind, VRF, devices and prefix;
+- a Subnet (#62): `subnet-` and 12 hex digits from its VRF and prefix.
 
 Ids use only letters, digits, `.`, `-` and `_`. Other items point to devices by id.
 No record here holds a username (story 141).
@@ -21,7 +23,7 @@ No record here holds a username (story 141).
 
 from dataclasses import dataclass
 from enum import Enum, unique
-from ipaddress import IPv4Address, IPv6Address
+from ipaddress import IPv4Address, IPv4Interface, IPv4Network, IPv6Address
 
 from network_analyser.records.collected import Interface, StackMember, VpcState
 from network_analyser.records.device import UnvisitedReason
@@ -40,6 +42,8 @@ class EvidenceSource(Enum):
     ROUTING = "routing"
     MAC = "MAC"
     ARP = "ARP"
+    INTERFACE = "interface"
+    """Interface addressing. Story 124 lists no source for it; calling it routing would be false."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +53,7 @@ class Evidence:
     Attributes:
         device: the id of the device that reported it.
         command: the command, exactly as sent, whose output said so.
-        source: CDP, LLDP, routing, MAC or ARP.
+        source: CDP, LLDP, routing, MAC, ARP, or interface addressing.
     """
 
     device: str
@@ -142,6 +146,8 @@ class LinkStatus(Enum):
     """Both ends report each other."""
     ONE_SIDED = "one-sided"
     """Only one end reports it."""
+    INFERRED = "inferred"
+    """Placed from ARP and the MAC table, on one edge port (story 130)."""
 
 
 @unique
@@ -175,7 +181,8 @@ class Link:
     Attributes:
         id: its stable id.
         ends: its two ends, in id order.
-        status: confirmed when both ends report each other, else one-sided.
+        status: confirmed when both ends report each other, one-sided when only one does,
+            inferred when ARP and the MAC table placed it.
         evidence: every report behind it.
         role: vPC peer-link or peer-keepalive; None otherwise.
         bundle: the id of the Bundle it is a member of; None when in none.
@@ -295,6 +302,97 @@ class Finding:
     evidence: tuple[Evidence, ...]
 
 
+@unique
+class AdjacencyKind(Enum):
+    """What an L3 Adjacency is (stories 136 and 147)."""
+
+    SHARED_SUBNET = "shared subnet"
+    """The two devices share one prefix in one VRF."""
+    OSPF = "OSPF"
+    EIGRP = "EIGRP"
+    BGP = "BGP"
+
+
+@dataclass(frozen=True, slots=True)
+class AdjacencyEnd:
+    """One device of an L3 Adjacency, and the interfaces it was learned on.
+
+    Attributes:
+        device: the device's id.
+        interfaces: interfaces that reported it, in short-name order. Empty when the protocol
+            named none (BGP) or this device did not report the session.
+    """
+
+    device: str
+    interfaces: tuple[InterfaceName, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class L3Adjacency:
+    """A routed relationship between two devices (stories 136 and 124).
+
+    A shared prefix on exactly two devices is one of these, labelled with the prefix. The
+    same prefix on three or more devices is a `Subnet` instead. A routing-protocol
+    neighbourship is its own adjacency, labelled with the protocol, even when the devices
+    also share a prefix.
+
+    Attributes:
+        id: its stable id.
+        ends: the two devices, in id order.
+        vrf: the VRF the prefix or the neighbourship is in.
+        kind: shared subnet, OSPF, EIGRP or BGP.
+        prefix: the shared prefix; None for a protocol neighbourship.
+        evidence: every report behind it.
+        conflicts: the ids of findings that flag a disagreement about it.
+    """
+
+    id: str
+    ends: tuple[AdjacencyEnd, AdjacencyEnd]
+    vrf: str
+    kind: AdjacencyKind
+    prefix: IPv4Network | None
+    evidence: tuple[Evidence, ...]
+    conflicts: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SubnetAttachment:
+    """One device's address on a Subnet.
+
+    Attributes:
+        device: the device's id.
+        interface: the interface that holds the address.
+        address: the address, with its mask.
+    """
+
+    device: str
+    interface: InterfaceName
+    address: IPv4Interface
+
+
+@dataclass(frozen=True, slots=True)
+class Subnet:
+    """A prefix in one VRF that three or more devices share (story 137).
+
+    It is one node each device attaches to, not a set of pairs.
+
+    Attributes:
+        id: its stable id.
+        vrf: the VRF the prefix is in.
+        prefix: the shared prefix.
+        attachments: one per address, in device, interface and address order.
+        evidence: every report behind it.
+        conflicts: the ids of findings that flag a disagreement about it.
+    """
+
+    id: str
+    vrf: str
+    prefix: IPv4Network
+    attachments: tuple[SubnetAttachment, ...]
+    evidence: tuple[Evidence, ...]
+    conflicts: tuple[str, ...]
+
+
 @dataclass(frozen=True, slots=True)
 class SkippedCheck:
     """Data that was not collected from a device, so the checks needing it were skipped.
@@ -334,3 +432,7 @@ class Topology:
     findings: tuple[Finding, ...]
     skipped: tuple[SkippedCheck, ...]
     unknown_interface_names: tuple[UnknownInterfaceName, ...]
+    adjacencies: tuple[L3Adjacency, ...]
+    """L3 Adjacencies (#62): shared prefixes of two devices, and protocol neighbourships."""
+    subnets: tuple[Subnet, ...]
+    """Prefixes in one VRF shared by three or more devices (#62)."""
