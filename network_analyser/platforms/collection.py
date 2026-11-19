@@ -93,7 +93,9 @@ class Asker:
             return off
         value = None if replies.is_error(reply) else read(reply)
         if value is None:
-            self.problems.append(ParseProblem(command, parser, NOT_UNDERSTOOD))
+            problem = ParseProblem(command, parser, NOT_UNDERSTOOD)
+            if problem not in self.problems:  # one reply read for two parts is one problem
+                self.problems.append(problem)
             return Unknown(f"{command}: {NOT_UNDERSTOOD}")
         return value
 

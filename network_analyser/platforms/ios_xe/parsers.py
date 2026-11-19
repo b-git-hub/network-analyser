@@ -27,8 +27,8 @@ from network_analyser.records.collected import (
     InterfaceIp,
     MacEntry,
     PortChannel,
-    StaticRoute,
     StackMember,
+    StaticRoute,
     SwitchportMode,
     Vlan,
     Vrf,
@@ -50,6 +50,17 @@ type Row = Mapping[str, object]
 
 def _rows(command: str, text: str) -> list[Row] | None:
     return parse(_TEMPLATES, command, text)
+
+
+def _table(command: str, text: str, header: str) -> list[Row] | None:
+    """The template's rows, only when the reply shows the table's own header.
+
+    Some templates skip lines they do not know, so a reply of another shape would read as
+    an empty table: "none" where the truth is "could not tell". A blank reply is no rows.
+    """
+    if _has_data(text) and not re.search(header, text, re.MULTILINE):
+        return None
+    return _rows(command, text)
 
 
 def _port(value: str) -> InterfaceName | None:
@@ -81,16 +92,16 @@ def stack_members(
     """
     table_at = text.find("Switch Ports Model")
     if table_at < 0:
-        serial = serials[0] if not isinstance(serials, Unknown) else serials
-        return (StackMember(1, serial, model),)
+        only = serials[0] if not isinstance(serials, Unknown) else serials
+        return (StackMember(1, only, model),)
     head = _SERIAL.search(text[:table_at])
     sections = list(_SWITCH_SECTION.finditer(text))
     found: dict[int, str] = {}
     for index, section in enumerate(sections):
         end = sections[index + 1].start() if index + 1 < len(sections) else len(text)
-        serial = _SERIAL.search(text[section.end() : end])
-        if serial:
-            found[int(section.group(1))] = serial.group(1)
+        listed = _SERIAL.search(text[section.end() : end])
+        if listed:
+            found[int(section.group(1))] = listed.group(1)
     members: list[StackMember] = []
     for row in _SWITCH_ROW.finditer(text[table_at:]):
         number = int(row.group(2))
@@ -273,7 +284,7 @@ def ip_interfaces(text: str) -> dict[str, InterfaceIp | None] | None:
 
 def port_channels(text: str) -> tuple[PortChannel, ...] | None:
     """Read `show etherchannel summary`: each port-channel, its protocol and members."""
-    rows = _rows("show etherchannel summary", text)
+    rows = _table("show etherchannel summary", text, r"^Group\s+Port-channel\s+Protocol")
     if rows is None:
         return None
     found: list[PortChannel] = []
@@ -349,7 +360,7 @@ def vrfs(text: str) -> tuple[VrfShown, ...] | None:
 
 def arp(text: str, vrf: str) -> tuple[ArpEntry, ...] | None:
     """Read `show ip arp` (or its per-VRF form): entries with a resolved MAC address."""
-    rows = _rows("show ip arp", text)
+    rows = _table("show ip arp", text, r"^Protocol\s+Address\s+Age")
     if rows is None:
         return None
     found: list[ArpEntry] = []
@@ -364,7 +375,7 @@ def arp(text: str, vrf: str) -> tuple[ArpEntry, ...] | None:
 
 def mac_table(text: str) -> tuple[MacEntry, ...] | None:
     """Read `show mac address-table`: one entry per VLAN, MAC and port."""
-    rows = _rows("show mac address-table", text)
+    rows = _table("show mac address-table", text, r"^\s*Vlan\s+Mac Address\s+Type")
     if rows is None:
         return None
     found: list[MacEntry] = []
@@ -396,7 +407,7 @@ class Peer:
 
 def ospf_neighbours(text: str) -> tuple[Peer, ...] | None:
     """Read `show ip ospf neighbor`: every process, VRFs included."""
-    rows = _rows("show ip ospf neighbor", text)
+    rows = _table("show ip ospf neighbor", text, r"^Neighbor ID\s+Pri\s+State")
     if rows is None:
         return None
     found: list[Peer] = []
@@ -437,7 +448,7 @@ def bgp_neighbours(text: str) -> tuple[Peer, ...] | None:
     """Read `show ip bgp summary` or a per-VRF summary: an established peer counts prefixes."""
     if not _has_data(text):
         return ()
-    rows = _rows("show ip bgp summary", text)
+    rows = _table("show ip bgp summary", text, r"^BGP router identifier")
     if rows is None:
         return None
     found: list[Peer] = []
@@ -456,7 +467,7 @@ def static_routes(text: str, vrf: str) -> tuple[StaticRoute, ...] | None:
     """Read `show ip route static` or its per-VRF form."""
     if not _has_data(text):
         return ()
-    rows = _rows("show ip route", text)
+    rows = _table("show ip route", text, r"^Codes:|^Gateway of last resort")
     if rows is None:
         return None
     found: list[StaticRoute] = []
@@ -480,12 +491,15 @@ def static_routes(text: str, vrf: str) -> tuple[StaticRoute, ...] | None:
 
 def hsrp(text: str) -> tuple[FhrpGroup, ...] | None:
     """Read `show standby brief`."""
-    return _fhrp(_rows("show standby brief", text), FhrpProtocol.HSRP)
+    return _fhrp(
+        _table("show standby brief", text, r"^Interface\s+Grp\s+Pri\s+P\s+State"),
+        FhrpProtocol.HSRP,
+    )
 
 
 def vrrp(text: str) -> tuple[FhrpGroup, ...] | None:
     """Read `show vrrp brief`: IPv4 groups only."""
-    rows = _rows("show vrrp brief", text)
+    rows = _table("show vrrp brief", text, r"^Interface\s+Grp\s+A-F\s+Pri")
     if rows is None:
         return None
     ipv4 = [r for r in rows if fields.text(r, "addr_family").lower() in {"", "ipv4"}]
@@ -505,9 +519,7 @@ def _fhrp(rows: list[Row] | None, protocol: FhrpProtocol) -> tuple[FhrpGroup, ..
     return tuple(found)
 
 
-_GLBP_GROUP: Final = re.compile(
-    r"^(\S+)\s+(\d+)\s+-\s+\S+\s+\S+\s+(\d+\.\d+\.\d+\.\d+)(?:\s|$)"
-)
+_GLBP_GROUP: Final = re.compile(r"^(\S+)\s+(\d+)\s+-\s+\S+\s+\S+\s+(\d+\.\d+\.\d+\.\d+)(?:\s|$)")
 _GLBP_HEADER: Final = re.compile(r"^Interface\s+Grp\s+Fwd\s+Pri\s+State")
 
 

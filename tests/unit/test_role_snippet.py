@@ -6,8 +6,6 @@ an allow-list it cannot express exactly. Each Platform's generator takes the all
 a keyword, so a future entry can be tried here without changing the compiled-in list.
 """
 
-from collections.abc import Callable
-
 import re
 
 import pytest

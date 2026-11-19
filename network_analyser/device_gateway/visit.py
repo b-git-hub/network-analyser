@@ -321,9 +321,9 @@ class _Visitor:
         reason = backup if isinstance(backup, str) else stop
         collected = collection.collected if collection else None
         if reason is not None:
-            return self.partial(view, reason, session, facts, privilege, collected)
+            return self.partial(view, reason, session, facts, privilege, collected=collected)
         return self.record(
-            ev.DeviceOutcome.VISITED, view, session.platform, facts, privilege, collected
+            ev.DeviceOutcome.VISITED, view, session.platform, facts, privilege, collected=collected
         )
 
     def capture_backup(
@@ -391,18 +391,19 @@ class _Visitor:
             credential_set=view,
         )
 
-    def partial(
+    def partial(  # noqa: PLR0913 (everything a partial record holds)
         self,
         view: CredentialSetView,
         reason: str,
         session: DeviceSession | None = None,
         facts: VersionFacts | None = None,
         privilege: LandingPrivilege | Unknown | None = None,
+        *,
         collected: Collected | None = None,
     ) -> DeviceRecord:
         platform = None if session is None else session.platform
         record = self.record(
-            ev.DeviceOutcome.PARTIAL, view, platform, facts, privilege, collected
+            ev.DeviceOutcome.PARTIAL, view, platform, facts, privilege, collected=collected
         )
         return dataclasses.replace(record, partial_reason=reason)
 
@@ -413,6 +414,7 @@ class _Visitor:
         platform: Platform | None,
         facts: VersionFacts | None,
         privilege: LandingPrivilege | Unknown | None,
+        *,
         collected: Collected | None = None,
     ) -> DeviceRecord:
         return DeviceRecord(

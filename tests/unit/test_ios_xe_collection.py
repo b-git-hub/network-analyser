@@ -513,3 +513,14 @@ def test_nx_os_is_not_collected_until_its_own_ticket() -> None:
     collection = platforms.collect(Platform.NX_OS, Device(), device_text.NXOS_SHOW_VERSION)
 
     assert collection.collected == Collected.nothing(NOT_COLLECTED)
+
+
+@pytest.mark.parametrize("command", sorted(ios_xe_text.REPLIES))
+def test_a_reply_of_the_wrong_shape_is_never_read_as_none(command: str) -> None:
+    replies = dict(ios_xe_text.REPLIES)
+    replies[command] = "CANARY-out-77e1 this is not\nwhat the command prints\n"
+
+    collection = collect(Device(replies))
+
+    assert [p.command for p in collection.parse_problems] == [command]
+    assert "CANARY-out-77e1" not in repr(collection)

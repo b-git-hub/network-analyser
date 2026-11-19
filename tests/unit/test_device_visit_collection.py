@@ -143,4 +143,4 @@ def test_a_drop_before_collection_leaves_no_collected_data(visit: Visit) -> None
 
     assert record.outcome is DeviceOutcome.PARTIAL
     assert record.collected is None
-    assert device_gateway.CONFIG_MODE != record.partial_reason
+    assert record.partial_reason != device_gateway.CONFIG_MODE

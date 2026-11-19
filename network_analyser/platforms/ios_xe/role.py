@@ -19,8 +19,8 @@ from network_analyser.platforms.roles import (
     ROLE_NAME,
     USERNAME_PLACEHOLDER,
     RoleError,
-    header,
     RoleRule,
+    header,
     ise_command_set_rows,
     role_rules,
 )
