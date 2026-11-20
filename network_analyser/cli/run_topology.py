@@ -3,9 +3,13 @@
 `topology.json` is #52's; the diagram is then drawn from that file alone (#63).
 
 `Collector` keeps each device record as the crawl hands it back, so a Run stopped part way
-still has the records gathered so far. At the end, `save_topology` builds the Topology and
-writes it through `run_output`'s scanned writer, so a typed secret is never written (story
-164). The topology module never sees the scan or a file: it turns records into plain data.
+still has the records gathered so far. At the end, `save_topology` builds the Topology, runs
+Analysis on it (#94), and writes it through `run_output`'s scanned writer, so a typed secret
+is never written (story 164). The topology module never sees the scan or a file: it turns
+records into plain data. Analysis takes the plain Topology and returns plain results.
+
+Analysis runs here, after the crawl and after Backups are locked, on Visited Devices only.
+`run_analysis.answers_for` is the offline placeholder for the Cisco step (#104).
 """
 
 import dataclasses
@@ -15,7 +19,7 @@ from collections.abc import Callable
 from typing import Final
 
 from network_analyser import run_output, topology
-from network_analyser.cli import diagram_file
+from network_analyser.cli import diagram_file, run_analysis
 from network_analyser.cli.exit_codes import ExitCode
 from network_analyser.credentials import SecretScan
 from network_analyser.records.device import DeviceRecord
@@ -112,9 +116,17 @@ def save_topology(
     """Build the Topology from `records` and write `topology.json` through the scan.
 
     `scope` is the Run's Scope, so in-Scope routing neighbours CDP never advertised are
-    recorded (#62). Returns False, after a fixed warning, if the file could not be written.
+    recorded (#62). Analysis runs on the built Topology (#94), so its Findings and advice
+    ride the same file. Returns False, after a fixed warning, if the file could not be written.
     """
-    document = topology.to_document(topology.build(records, scope=scope))
+    built = topology.build(records, scope=scope)
+    results = run_analysis.analysed(built)
+    built = dataclasses.replace(
+        built,
+        findings=results.findings,
+        analysis=results.summary,
+    )
+    document = topology.to_document(built)
     try:
         run_output.write_scanned_json(folder, TOPOLOGY_FILE, document, scan)
     except OSError:
