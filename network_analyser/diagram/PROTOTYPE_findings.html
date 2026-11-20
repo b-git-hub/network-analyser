@@ -1,0 +1,611 @@
+<title>Findings Presentation Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!--
+  PROTOTYPE for "How Findings are presented" (b-git-hub/network-analyser#82). Throwaway: never merged.
+  Three variants of how Findings read across diagram.html (Findings tab and Map markers),
+  run-report.html and findings.html, switchable from the bottom bar or the arrow keys.
+  All data is synthetic: hostnames, documentation-range IPs (192.0.2.0/24), Advisory ids
+  (cisco-sa-proto-*) and CVEs (CVE-2099-*). Advisory counts per release copy the real
+  counts measured on #78 (2026-11-20). The severity scale is a placeholder until
+  "Which configuration, lifecycle and consistency Checks ship" (#81) settles it; the hardening
+  Checks shown are examples from #76, not a decision.
+  The real run-report.html and findings.html are script-free; their variants here use only
+  what static HTML can do (anchors, <details>), even though this page draws them with script.
+-->
+<style>
+/* Layout: v1 diagram.html shell (header, tabs, list | canvas + detail) reused so variants sit inside the real page. Tokens copied from diagram.css. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --canvas:#fbfcfd; --fg:#18212c; --muted:#5a6676; --line:#d6dce4;
+  --accent:#0b6e99; --accent-bg:#e3f1f8; --link:#3b4757; --node:#ffffff; --node-stroke:#2d3a4a; --ghost:#eceff3;
+  --crit:#8f1239; --crit-bg:#f9e1e8; --high:#c42b2b; --high-bg:#fbe8e8; --med:#b5650b; --med-bg:#fbf0e1;
+  --low:#3d6a8f; --low-bg:#e5eef5; --info:#6b7685; --info-bg:#eef0f3; --ok:#2c7a4b; --ok-bg:#e3f3e9;
+  --bar:#18212c; --bar-fg:#ffffff; --proto:#6b3fa0; --proto-bg:#f0e9f8;
+  --font:"Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono:"Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0f141a; --surface:#161d26; --canvas:#121920; --fg:#e4e9ef; --muted:#97a3b3; --line:#2a3542;
+  --accent:#4fb3de; --accent-bg:#14303f; --link:#a9b6c6; --node:#1b2430; --node-stroke:#9fb0c3; --ghost:#1a2029;
+  --crit:#ff7aa2; --crit-bg:#3d1626; --high:#ff6b6b; --high-bg:#3a1c1e; --med:#f0a646; --med-bg:#3a2a14;
+  --low:#7fb2dc; --low-bg:#172a3a; --info:#9aa5b4; --info-bg:#1f2731; --ok:#5cc58a; --ok-bg:#15301f;
+  --bar:#e4e9ef; --bar-fg:#0f141a; --proto:#c7a3f0; --proto-bg:#2a1f3a; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#0f141a; --surface:#161d26; --canvas:#121920; --fg:#e4e9ef; --muted:#97a3b3; --line:#2a3542;
+  --accent:#4fb3de; --accent-bg:#14303f; --link:#a9b6c6; --node:#1b2430; --node-stroke:#9fb0c3; --ghost:#1a2029;
+  --crit:#ff7aa2; --crit-bg:#3d1626; --high:#ff6b6b; --high-bg:#3a1c1e; --med:#f0a646; --med-bg:#3a2a14;
+  --low:#7fb2dc; --low-bg:#172a3a; --info:#9aa5b4; --info-bg:#1f2731; --ok:#5cc58a; --ok-bg:#15301f;
+  --bar:#e4e9ef; --bar-fg:#0f141a; --proto:#c7a3f0; --proto-bg:#2a1f3a; color-scheme:dark }
+
+body{background:var(--bg);color:var(--fg);font:13px/1.45 var(--font);margin:0;padding-bottom:84px}
+button{font:inherit;color:inherit}
+.gut{padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px))}
+.proto{background:var(--proto-bg);color:var(--fg);border-bottom:1px solid var(--line);padding-block:8px;display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center}
+.proto b{color:var(--proto)}
+.proto .q{max-width:70ch;color:var(--muted)}
+.surfaces{display:flex;flex-wrap:wrap;gap:4px;margin-left:auto}
+.surfaces button{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:3px 10px;cursor:pointer}
+.surfaces button[aria-pressed="true"]{background:var(--proto);border-color:var(--proto);color:var(--bg);font-weight:600}
+.vnote{background:var(--surface);border-bottom:1px solid var(--line);padding-block:8px;color:var(--muted)}
+.vnote b{color:var(--fg)}
+.frame{margin-block:14px;border:1px solid var(--line);background:var(--surface);overflow:hidden}
+.mono{font-family:var(--mono);font-size:12px}
+.muted{color:var(--muted)}
+h1,h2,h3,h4{text-wrap:balance}
+
+/* v1 diagram shell */
+header.top{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding-block:8px;border-bottom:1px solid var(--line)}
+header.top h1{font-size:15px;margin:0;font-weight:650}
+.stats{display:flex;flex-wrap:wrap;gap:4px 12px;color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px}
+.stats b{color:var(--fg);font-weight:600}
+.tabs{display:flex;gap:4px 8px;padding-block:4px;border-bottom:1px solid var(--line)}
+.tab{border:0;background:none;padding:6px 10px;border-bottom:2px solid transparent;font-weight:600;color:var(--muted)}
+.tab.on{color:var(--fg);border-bottom-color:var(--accent)}
+.asof{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;padding-block:6px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted)}
+.split{display:grid;grid-template-columns:minmax(0,360px) minmax(0,1fr);min-height:620px}
+@media (max-width:760px){.split{grid-template-columns:minmax(0,1fr)}}
+.side{border-right:1px solid var(--line);max-height:760px;overflow:auto;min-width:0}
+.main{min-width:0;display:flex;flex-direction:column}
+.canvaswrap{background:var(--canvas);border-bottom:1px solid var(--line);overflow-x:auto}
+.det{padding:12px 16px 20px;min-width:0}
+.det h3{margin:0 0 6px;font-size:15px}
+.det h4{margin:14px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+
+/* list rows */
+.grp{border-bottom:1px solid var(--line)}
+.grp>summary,.ghead{list-style:none;cursor:pointer;padding:8px 12px;font-weight:650;display:flex;gap:8px;align-items:center;background:var(--surface);position:sticky;top:0;z-index:1}
+.grp>summary::-webkit-details-marker{display:none}
+.grp>summary::before{content:"▸";color:var(--muted);font-size:10px}
+.grp[open]>summary::before{content:"▾"}
+.ghead .n,.grp>summary .n{margin-left:auto;color:var(--muted);font-weight:400;font-variant-numeric:tabular-nums}
+.row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:2px 8px;padding:7px 12px 7px 14px;border-top:1px solid var(--line);cursor:pointer;align-items:start;background:none;border-left:3px solid transparent;width:100%;text-align:left;border-right:0;border-bottom:0}
+.row:hover{background:var(--ghost)}
+.row.sel{background:var(--accent-bg);border-left-color:var(--accent)}
+.row .t{font-weight:600;min-width:0;overflow-wrap:anywhere}
+.row .s{grid-column:2 / 4;color:var(--muted);font-size:12px;min-width:0;overflow-wrap:anywhere}
+.row .c{color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap}
+.row:focus-visible,.surfaces button:focus-visible,.sw button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.chips{display:flex;flex-wrap:wrap;gap:4px;padding:8px 12px;border-bottom:1px solid var(--line)}
+.chip{border:1px solid var(--line);border-radius:999px;padding:1px 9px;font-size:12px;background:var(--surface)}
+.chip.on{background:var(--accent-bg);border-color:var(--accent);color:var(--fg)}
+
+/* severity */
+.sev{display:inline-flex;align-items:center;gap:4px;border-radius:3px;padding:0 6px;font-size:11px;font-weight:700;letter-spacing:.03em;white-space:nowrap;line-height:18px}
+.sev.Critical{background:var(--crit-bg);color:var(--crit)} .sev.High{background:var(--high-bg);color:var(--high)}
+.sev.Medium{background:var(--med-bg);color:var(--med)} .sev.Low{background:var(--low-bg);color:var(--low)} .sev.Info{background:var(--info-bg);color:var(--info)}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-top:3px}
+.dot.Critical{background:var(--crit)} .dot.High{background:var(--high)} .dot.Medium{background:var(--med)} .dot.Low{background:var(--low)} .dot.Info{background:var(--info)} .dot.None{background:var(--ok)}
+.counts{display:inline-flex;gap:3px;flex-wrap:wrap}
+.counts .sev{padding:0 4px}
+.soft{opacity:.75}
+
+/* tables and blocks */
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{border-bottom:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.tw{overflow-x:auto}
+dl.kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:3px 12px;margin:6px 0}
+dl.kv dt{color:var(--muted)} dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.callout{border:1px solid var(--line);border-left:4px solid var(--ok);background:var(--ok-bg);padding:8px 12px;margin:8px 0;border-radius:4px}
+.callout.none{border-left-color:var(--high);background:var(--high-bg)}
+.callout b{font-size:14px}
+.fixed{font-size:12px;color:var(--muted);border-left:2px solid var(--line);padding-left:8px;margin:8px 0}
+a{color:var(--accent)}
+.hint{color:var(--muted)}
+
+/* report pages (script-free in the real thing) */
+.page{padding:22px 26px 30px;max-width:1080px;font-family:var(--font)}
+.page h1{font-size:22px;margin:0 0 4px}
+.page h2{font-size:16px;margin:26px 0 8px;padding-bottom:4px;border-bottom:1px solid var(--line)}
+.page h3{font-size:14px;margin:18px 0 6px}
+.sumgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin:10px 0}
+.sumgrid div{border:1px solid var(--line);border-radius:4px;padding:8px 10px}
+.sumgrid b{display:block;font-size:20px;font-variant-numeric:tabular-nums}
+.attn li{margin:3px 0}
+.card{border:1px solid var(--line);border-radius:4px;margin:12px 0;overflow:hidden}
+.card>header{padding:8px 12px;background:var(--ghost);display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline}
+.card>header h3{margin:0;font-size:15px}
+.card>.body{padding:6px 12px 10px}
+.card details>summary{cursor:pointer;padding:4px 0;font-weight:600}
+.step{display:grid;grid-template-columns:2.2em minmax(0,1fr);gap:0 10px;margin:14px 0}
+.step .k{font:700 16px var(--mono);color:var(--muted);text-align:right}
+.toc{columns:2 220px;padding-left:18px}
+
+/* mini map */
+svg.map{display:block;width:100%;min-width:560px;height:auto}
+.map .ln{stroke:var(--link);stroke-width:1.6;fill:none}
+.map .ln.bundle{stroke-width:5}
+.map .ln.hot{stroke:var(--accent);stroke-width:2.6}
+.map .ln.bundle.hot{stroke-width:6}
+.map .ln.unv{stroke-dasharray:4 3;opacity:.6}
+.map .dim{opacity:.22}
+.map .nd rect{fill:var(--node);stroke:var(--node-stroke);stroke-width:1.2}
+.map .nd.unv rect{fill:var(--ghost);stroke-dasharray:4 3;stroke:var(--muted)}
+.map .nd.hot rect{stroke:var(--accent);stroke-width:2.6}
+.map .nd text.h{font:600 11px var(--font);fill:var(--fg)}
+.map .nd text.r{font:9.5px var(--mono);fill:var(--muted)}
+.map .bdg text{font:700 9.5px var(--font);fill:#fff}
+.map .tint-Critical rect{fill:var(--crit-bg);stroke:var(--crit);stroke-width:2.2}
+.map .tint-High rect{fill:var(--high-bg);stroke:var(--high);stroke-width:2.2}
+.map .tint-Medium rect{fill:var(--med-bg);stroke:var(--med);stroke-width:2}
+.map .tint-Low rect{fill:var(--low-bg);stroke:var(--low)}
+.map .tint-Info rect{fill:var(--info-bg)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 12px;font-size:12px;color:var(--muted);border-top:1px solid var(--line)}
+.legend span{display:inline-flex;gap:5px;align-items:center}
+
+/* switcher */
+.sw{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom, 0px));display:flex;align-items:center;gap:6px;background:var(--bar);color:var(--bar-fg);border-radius:999px;padding:6px 8px;box-shadow:0 6px 24px rgba(0,0,0,.35);z-index:20;max-width:calc(100% - 32px)}
+.sw button{background:none;border:0;color:inherit;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px}
+.sw button:hover{background:rgba(127,127,127,.25)}
+.sw .lbl{font-weight:650;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sw .lbl small{font-weight:400;opacity:.75}
+@media (prefers-reduced-motion: no-preference){.row,.chip{transition:background .12s}}
+</style>
+
+<div class="proto gut">
+  <span><b>PROTOTYPE</b> · synthetic data · <span class="mono">#82 How Findings are presented</span></span>
+  <span class="q">Which way should Findings read? Flip variants with ← → or the bar below. Each variant is one scheme across all four surfaces.</span>
+  <nav class="surfaces" id="surfaces" aria-label="Surface"></nav>
+</div>
+<div class="vnote gut" id="vnote"></div>
+<div class="gut"><div class="frame" id="frame"></div></div>
+<div class="sw" role="toolbar" aria-label="Prototype variant">
+  <button id="prev" aria-label="Previous variant">←</button>
+  <span class="lbl" id="swlbl"></span>
+  <button id="next" aria-label="Next variant">→</button>
+</div>
+
+<script>
+(function () {
+'use strict';
+/* ================= synthetic data ================= */
+const LEVELS = ['Critical', 'High', 'Medium', 'Low', 'Info'];
+const RANK = Object.fromEntries(LEVELS.map((l, i) => [l, i]));
+const ASOF = '2026-11-19', RUN = '2026-11-20 14:02 UTC';
+const FIXED = 'Matched on software release only. Cisco may limit this Advisory to devices that use a particular feature; see ‘Vulnerable Products’ on Cisco’s page.';
+
+const D = [
+  { id: 'wan-rtr', ip: '192.0.2.41', model: 'ISR4431/K9', plat: 'IOS-XE', rel: '17.3.4a', train: '17.3', target: null },
+  { id: 'core-a', ip: '192.0.2.11', model: 'N9K-C93180YC-FX', plat: 'NX-OS', rel: '9.3(10)', train: '9.3', target: null },
+  { id: 'core-b', ip: '192.0.2.12', model: 'N9K-C93180YC-FX', plat: 'NX-OS', rel: '9.3(10)', train: '9.3', target: null },
+  { id: 'dist-1', ip: '192.0.2.21', model: 'C9500-24Y4C', plat: 'IOS-XE', rel: '17.9.4', train: '17.9', target: '17.9.10' },
+  { id: 'dist-2', ip: '192.0.2.22', model: 'C9500-24Y4C', plat: 'IOS-XE', rel: '17.9.4', train: '17.9', target: '17.9.10' },
+  { id: 'acc-1', ip: '192.0.2.31', model: 'C9300-48P', plat: 'IOS-XE', rel: '17.12.4', train: '17.12', target: '17.12.8' },
+  { id: 'acc-2', ip: '192.0.2.32', model: 'C9300-48P', plat: 'IOS-XE', rel: '17.12.4', train: '17.12', target: '17.12.8' },
+  { id: 'acc-3', ip: '192.0.2.33', model: 'C9200L-48P-4G', plat: 'IOS-XE', rel: '17.12.1', train: '17.12', target: '17.12.8' },
+  { id: 'old-sw', ip: '192.0.2.51', model: 'WS-C2960X-48FPD-L', plat: 'IOS', rel: '15.2(7)E4', train: '15.2E', target: '15.2(7)E15' },
+  { id: 'lab-sw', ip: '192.0.2.61', model: 'C9300-24T', plat: 'IOS-XE', rel: 'unreadable', train: null, target: null, nocheck: 'the version in show version could not be read' },
+];
+const DEV = new Map(D.map(d => [d.id, d]));
+const UNV = [{ id: 'fw-edge', why: 'Platform not supported (Palo Alto)' }];
+
+const TOPICS = ['web UI', 'SNMP', 'IKEv2', 'DHCP snooping', 'Smart Install', 'SSH server', 'IPv6 parser', 'NETCONF', 'CLI', 'HTTP API', 'Wireless controller', 'IOx', 'OSPF', 'NAT', 'Multicast', 'LLDP', 'TCP stack', 'AAA', 'Zone firewall', 'VPN', 'PnP agent', 'Telnet', 'ACL', 'CDP', 'Boot loader'];
+const KINDS = ['privilege escalation', 'denial of service', 'command injection', 'remote code execution', 'authentication bypass', 'arbitrary file write', 'memory leak DoS'];
+const ADV = new Map();
+let cve = 1100;
+function mkAdv(n, plat, crit) {
+  const id = 'cisco-sa-proto-' + plat.toLowerCase().replace(/[^a-z]/g, '') + '-' + String(n).padStart(2, '0');
+  const topic = TOPICS[(n * 7 + plat.length) % TOPICS.length], kind = KINDS[(n * 3) % KINDS.length];
+  const cvss = crit ? [10.0, 9.8, 9.1][n % 3] : [8.6, 7.5, 7.7, 8.8, 7.2, 8.1, 7.4][n % 7];
+  const k = 1 + (n % 3 === 0 ? 2 : n % 2);
+  const cves = Array.from({ length: k }, () => 'CVE-2099-' + (cve++));
+  const m = 1 + (n % 12), dd = 1 + ((n * 5) % 27);
+  const pub = (n % 4 === 0 ? '2026' : n % 4 === 1 ? '2025' : '2024') + '-' + String(m).padStart(2, '0') + '-' + String(dd).padStart(2, '0');
+  const a = { id, title: 'Cisco ' + (plat === 'NX-OS' ? 'NX-OS' : plat === 'IOS' ? 'IOS' : 'IOS XE') + ' Software ' + topic + ' ' + kind + ' vulnerability', plat, cvss, level: cvss >= 9 ? 'Critical' : 'High', cves, published: pub, updated: pub.slice(0, 8) + String(Math.min(28, dd + 3)).padStart(2, '0') };
+  ADV.set(id, a); return a;
+}
+/* IOS-XE: 44 Advisories; counts per release copy #78's table */
+const XE = Array.from({ length: 44 }, (_, i) => mkAdv(i + 1, 'IOS-XE', i < 3));
+const IOS = Array.from({ length: 23 }, (_, i) => mkAdv(i + 1, 'IOS', i < 1));
+const NX = [mkAdv(1, 'NX-OS', true)];
+const AFFECT = {
+  '17.3.4a': XE.slice(0, 44),             // 3 C + 41 H
+  '17.9.4': XE.slice(0, 32),              // 3 C + 29 H
+  '17.12.4': XE.slice(0, 2).concat(XE.slice(3, 23)), // 2 C + 20 H
+  '17.12.1': XE.slice(0, 2).concat(XE.slice(3, 23)),
+  '15.2(7)E4': IOS,                       // 1 C + 22 H
+  '9.3(10)': NX,                          // 1 C
+};
+
+const LINKS = [
+  ['wan-rtr', 'core-a', 'Gi0/0/1', 'Eth1/1'], ['wan-rtr', 'core-b', 'Gi0/0/2', 'Eth1/1'],
+  ['core-a', 'core-b', 'Po1', 'Po1', true],
+  ['core-a', 'dist-1', 'Eth1/49', 'Te1/0/1'], ['core-a', 'dist-2', 'Eth1/50', 'Te1/0/1'],
+  ['core-b', 'dist-1', 'Eth1/49', 'Te1/0/2'], ['core-b', 'dist-2', 'Eth1/50', 'Te1/0/2'],
+  ['dist-1', 'acc-1', 'Te1/0/11', 'Te1/1/1'], ['dist-1', 'acc-2', 'Te1/0/12', 'Te1/1/1'],
+  ['dist-2', 'acc-3', 'Te1/0/11', 'Gi1/1/1'], ['acc-3', 'old-sw', 'Gi1/0/48', 'Gi0/1'],
+  ['dist-2', 'lab-sw', 'Te1/0/20', 'Te1/1/1'], ['core-b', 'fw-edge', 'Eth1/48', 'ethernet1/1', false, true],
+];
+const lk = (a, b) => LINKS.find(l => (l[0] === a && l[1] === b) || (l[0] === b && l[1] === a));
+
+/* Checks: one per Advisory, plus example hardening and topology Checks (placeholder levels) */
+const CHECKS = new Map();
+function check(id, name, type, level, extra) { CHECKS.set(id, Object.assign({ id, name, type, level }, extra || {})); }
+for (const a of ADV.values()) check(a.id, a.title, 'Advisory', a.level, { adv: a });
+check('cfg-telnet', 'Telnet allowed on vty lines', 'Configuration', 'High', { fix: 'Set transport input ssh on every vty line', src: 'Cisco hardening guide (#76)' });
+check('cfg-snmpv2', 'SNMPv1/v2c community configured', 'Configuration', 'Medium', { fix: 'Move to SNMPv3 authPriv and remove communities', src: 'Cisco hardening guide (#76)' });
+check('cfg-http', 'HTTP/HTTPS server (web UI) enabled', 'Configuration', 'Medium', { fix: 'no ip http server / no ip http secure-server unless the web UI is needed', src: 'Cisco hardening guide (#76)' });
+check('cfg-type7', 'Weak password encryption (type 7) in use', 'Configuration', 'Medium', { fix: 'Use type 8 or 9 secrets', src: 'Cisco insecure-feature deprecation (#76)' });
+check('cfg-ntpauth', 'NTP not authenticated', 'Configuration', 'Low', { fix: 'Configure NTP authentication keys', src: 'Cisco hardening guide (#76)' });
+check('cfg-banner', 'No login banner', 'Configuration', 'Low', { fix: 'Add banner login', src: 'Cisco hardening guide (#76)' });
+check('top-native', 'Differing native VLAN', 'Topology', 'Medium', { fix: 'Match the native VLAN on both ends' });
+check('top-trunkacc', 'Trunk facing access port', 'Topology', 'Medium', { fix: 'Make both ends trunk or both access' });
+check('top-bundle', 'Bundle member mismatch', 'Topology', 'Medium', { fix: 'Check channel-group membership on both ends' });
+check('top-oneend', 'VLAN on one end only', 'Topology', 'Low', { fix: 'Prune or add the VLAN so both ends agree', soft: true });
+check('top-conflict', 'Conflicting evidence', 'Topology', 'Info', { fix: 'Check the port by hand; the reports disagree' });
+check('ana-nocheck', 'Advisories could not be checked', 'Analysis', 'Info', { fix: 'Fix the cause and run again' });
+
+const F = [];
+let fid = 0;
+function fnd(checkId, devices, summary, items) { const c = CHECKS.get(checkId); F.push({ id: 'f' + (++fid), check: c, level: c.level, devices, summary, items: items || [] }); }
+for (const d of D) for (const a of (AFFECT[d.rel] || [])) fnd(a.id, [d.id], 'Affected release ' + d.rel + ' (' + a.level + ' from CVSS ' + a.cvss.toFixed(1) + ')');
+[['old-sw', 'line vty 0 15'], ['wan-rtr', 'line vty 0 4']].forEach(([d, w]) => fnd('cfg-telnet', [d], 'Telnet enabled on ' + w));
+['old-sw', 'wan-rtr', 'dist-1', 'dist-2', 'acc-1', 'acc-2', 'acc-3'].forEach(d => fnd('cfg-snmpv2', [d], 'SNMP community configured (read-only)'));
+['acc-1', 'acc-2', 'acc-3', 'dist-1'].forEach(d => fnd('cfg-http', [d], 'ip http secure-server enabled'));
+fnd('cfg-type7', ['old-sw'], 'service password-encryption only (type 7)');
+D.filter(d => !d.nocheck).forEach(d => fnd('cfg-ntpauth', [d.id], 'NTP servers configured without authentication'));
+fnd('cfg-banner', ['acc-3'], 'No banner login configured');
+fnd('top-native', ['dist-1', 'acc-1'], 'Native VLAN 1 on dist-1 Te1/0/11, 999 on acc-1 Te1/1/1', [['dist-1', 'acc-1']]);
+fnd('top-trunkacc', ['acc-3', 'old-sw'], 'acc-3 Gi1/0/48 is a trunk; old-sw Gi0/1 is access VLAN 20', [['acc-3', 'old-sw']]);
+fnd('top-bundle', ['core-a', 'core-b'], 'core-b Eth1/53 is in Po1, core-a Eth1/53 is not bundled', [['core-a', 'core-b']]);
+[['dist-1', 'acc-2', '30,31'], ['dist-2', 'acc-3', '40'], ['core-a', 'dist-2', '210'], ['core-b', 'dist-1', '210,211'], ['dist-2', 'lab-sw', '99']]
+  .forEach(([a, b, v]) => fnd('top-oneend', [a, b], 'VLAN ' + v + ' allowed on ' + a + ' only', [[a, b]]));
+fnd('top-conflict', ['core-a', 'dist-1'], 'CDP and LLDP disagree on the far port of core-a Eth1/49', [['core-a', 'dist-1']]);
+fnd('ana-nocheck', ['lab-sw'], 'Could not check: the version in show version could not be read');
+
+const worst = list => list.reduce((w, f) => (RANK[f.level] < (RANK[w] ?? 99) ? f.level : w), 'None');
+const countBy = list => { const c = {}; list.forEach(f => { c[f.level] = (c[f.level] || 0) + 1; }); return c; };
+const ofDev = id => F.filter(f => f.devices.includes(id));
+const advOf = id => ofDev(id).filter(f => f.check.type === 'Advisory');
+const byLevel = (x, y) => RANK[x.level] - RANK[y.level];
+const TOTAL = countBy(F);
+const STALE_DAYS = 1;
+
+/* ================= helpers ================= */
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const sev = (l, extra) => '<span class="sev ' + l + '">' + l + (extra ? ' ' + esc(extra) : '') + '</span>';
+const counts = c => '<span class="counts">' + LEVELS.filter(l => c[l]).map(l => '<span class="sev ' + l + '" title="' + l + '">' + c[l] + ' ' + l[0] + '</span>').join('') + '</span>';
+const advLink = a => '<a class="mono" href="https://sec.cloudapps.cisco.com/security/center/content/CiscoSecurityAdvisory/' + esc(a.id) + '" rel="noopener noreferrer" target="_blank">' + esc(a.id) + '</a>';
+function targetLine(d, cleared) {
+  if (d.nocheck) return '<div class="callout none"><b>Could not check Advisories</b><br>' + esc(d.nocheck) + '.</div>';
+  const n = advOf(d.id).length;
+  if (!n) return '<div class="callout"><b>No known Critical/High Advisories</b> for ' + esc(d.rel) + ', as of ' + ASOF + '.</div>';
+  if (d.target) return '<div class="callout"><b>Upgrade to ' + esc(d.target) + ' or later</b>' + (cleared !== false ? ' — clears all ' + n + ' Advisory Findings on this device' : '') +
+    '<br><span class="muted">Newest ' + esc(d.train) + ' release not named in any Critical or High Advisory as of ' + ASOF + '. Not Cisco’s suggested release, and not confirmed fixed.</span></div>';
+  return '<div class="callout none"><b>No release in Train ' + esc(d.train) + ' is clear</b> of Critical or High Advisories; move to a newer Train (' + n + ' Advisory Findings).' +
+    '<br><span class="muted">The tool never picks another Train: hardware support differs.</span></div>';
+}
+function targetShort(d) {
+  if (d.nocheck) return '<span class="muted">could not check</span>';
+  if (!advOf(d.id).length) return '<span class="muted">none needed</span>';
+  return d.target ? '<b>' + esc(d.target) + '</b> or later' : '<span style="color:var(--high)">no clear release in ' + esc(d.train) + '</span>';
+}
+function advBlock(a, devs) {
+  return '<dl class="kv"><dt>Advisory</dt><dd>' + advLink(a) + '</dd><dt>Level</dt><dd>' + sev(a.level) + ' <span class="muted">from CVSS ' + a.cvss.toFixed(1) + ' (not Cisco’s SIR)</span></dd>' +
+    '<dt>CVEs</dt><dd class="mono">' + a.cves.join(', ') + '</dd><dt>Published</dt><dd>' + a.published + ' · updated ' + a.updated + '</dd>' +
+    (devs ? '<dt>Status</dt><dd>Affected release</dd>' : '') + '</dl><p class="fixed">' + FIXED + '</p>';
+}
+function devTable(ids, extraCol) {
+  return '<div class="tw"><table><thead><tr><th>Device</th><th>Mgmt IP</th><th>Model</th><th>Release</th><th>Upgrade Target</th>' + (extraCol ? '<th>' + extraCol[0] + '</th>' : '') + '</tr></thead><tbody>' +
+    ids.map(id => { const d = DEV.get(id); return '<tr><td><b>' + esc(d.id) + '</b></td><td class="mono">' + d.ip + '</td><td class="mono">' + esc(d.model) + '</td><td class="mono">' + esc(d.rel) + '</td><td>' + targetShort(d) + '</td>' + (extraCol ? '<td>' + extraCol[1](id) + '</td>' : '') + '</tr>'; }).join('') + '</tbody></table></div>';
+}
+
+/* ================= mini map ================= */
+const POS = { 'wan-rtr': [320, 34], 'fw-edge': [560, 34], 'core-a': [210, 108], 'core-b': [430, 108], 'dist-1': [150, 186], 'dist-2': [490, 186], 'lab-sw': [640, 186],
+  'acc-1': [60, 268], 'acc-2': [220, 268], 'acc-3': [420, 268], 'old-sw': [580, 268] };
+function miniMap(o) {
+  o = o || {};
+  const hot = new Set(o.hot || []), hotLinks = o.hotLinks || [];
+  const dimming = o.dimOthers && hot.size;
+  const isHotLink = l => hotLinks.some(([a, b]) => (l[0] === a && l[1] === b) || (l[0] === b && l[1] === a));
+  let s = '<svg class="map" viewBox="0 -6 720 324" role="img" aria-label="Map tab (synthetic)">';
+  for (const l of LINKS) {
+    const [x1, y1] = POS[l[0]], [x2, y2] = POS[l[1]];
+    const on = isHotLink(l) || (hot.has(l[0]) && hot.has(l[1]));
+    const dim = dimming && !(hot.has(l[0]) || hot.has(l[1]));
+    s += '<line class="ln' + (l[4] ? ' bundle' : '') + (l[5] ? ' unv' : '') + (isHotLink(l) ? ' hot' : '') + (dim ? ' dim' : '') + '" x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '"/>';
+    if (isHotLink(l)) {
+      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+      s += '<text x="' + (mx + 4) + '" y="' + (my - 4) + '" style="font:10px var(--mono);fill:var(--fg);paint-order:stroke;stroke:var(--canvas);stroke-width:3px">' + esc(l[2] + ' ⇄ ' + l[3]) + '</text>';
+    }
+  }
+  for (const id of Object.keys(POS)) {
+    const [x, y] = POS[id], d = DEV.get(id), w = 104, h = 34;
+    const cls = ['nd'];
+    if (!d) cls.push('unv');
+    if (hot.has(id)) cls.push('hot');
+    if (dimming && !hot.has(id) && !LINKS.some(l => (l[0] === id && hot.has(l[1])) || (l[1] === id && hot.has(l[0])))) cls.push('dim');
+    if (d && o.tint) { const t = o.tint(d); if (t) cls.push('tint-' + t); }
+    s += '<g class="' + cls.join(' ') + '" transform="translate(' + (x - w / 2) + ',' + (y - h / 2) + ')"><rect width="' + w + '" height="' + h + '" rx="4"/>' +
+      '<text class="h" x="8" y="14">' + esc(id) + '</text><text class="r" x="8" y="27">' + esc(d ? d.plat + ' ' + d.rel : 'Unvisited') + '</text>' +
+      (d && o.marker ? o.marker(d, w, h) : '') + '</g>';
+  }
+  return s + '</svg>';
+}
+const COLORS = { Critical: 'var(--crit)', High: 'var(--high)', Medium: 'var(--med)', Low: 'var(--low)', Info: 'var(--info)' };
+
+/* ================= shared diagram shell ================= */
+function shell(tab, side, main, chipsHtml) {
+  return '<header class="top gut"><h1>Network diagram</h1><div class="stats"><span><b>10</b> Visited</span><span><b>1</b> Unvisited</span><span><b>13</b> Links</span><span><b>' + F.length + '</b> Findings</span></div></header>' +
+    '<div class="tabs gut"><span class="tab' + (tab === 'map' ? ' on' : '') + '">Map</span><span class="tab' + (tab === 'findings' ? ' on' : '') + '">Findings</span></div>' +
+    '<div class="asof gut"><span>Advisory data as of <b>' + ASOF + '</b> (' + STALE_DAYS + ' day before this Run, fresh)</span><span>Run ' + RUN + '</span><span>' + counts(TOTAL) + '</span><span class="muted">Medium and Low Advisories are not listed.</span></div>' +
+    (side === null ? main : '<div class="split"><div class="side">' + (chipsHtml || '') + side + '</div><div class="main">' + main + '</div></div>');
+}
+
+/* ================= state ================= */
+const S = { v: 'A', surface: 'tab', pick: null, typeFilter: 'All' };
+const SURFACES = [['tab', 'diagram.html · Findings tab'], ['map', 'diagram.html · Map markers'], ['report', 'run-report.html'], ['findings', 'findings.html']];
+
+/* ================= Variant A: by Check ================= */
+const A = {
+  name: 'By Check',
+  note: '<b>A · By Check.</b> Findings are grouped under the Check that raised them, so one Advisory that hits 7 devices is one row, not 7. Severity first, then Check, then the devices. Answers "what is wrong across the network?"',
+  groups() {
+    const m = new Map();
+    for (const f of F) { if (S.typeFilter !== 'All' && f.check.type !== S.typeFilter) continue; if (!m.has(f.check.id)) m.set(f.check.id, []); m.get(f.check.id).push(f); }
+    return [...m.entries()].map(([id, fs]) => ({ c: CHECKS.get(id), fs })).sort((x, y) => RANK[x.c.level] - RANK[y.c.level] || (x.c.adv && y.c.adv ? y.c.adv.cvss - x.c.adv.cvss : 0) || y.fs.length - x.fs.length);
+  },
+  tab() {
+    const gs = this.groups();
+    const chips = '<div class="chips">' + ['All', 'Advisory', 'Configuration', 'Topology', 'Analysis'].map(t => '<button class="chip' + (S.typeFilter === t ? ' on' : '') + '" data-type="' + t + '">' + t + '</button>').join('') + '</div>';
+    let side = '';
+    for (const l of LEVELS) {
+      const here = gs.filter(g => g.c.level === l); if (!here.length) continue;
+      const nf = here.reduce((n, g) => n + g.fs.length, 0);
+      side += '<details class="grp" ' + (RANK[l] <= 1 || l === 'Medium' ? 'open' : '') + '><summary>' + sev(l) + ' <span>' + here.length + ' Check' + (here.length > 1 ? 's' : '') + '</span><span class="n">' + nf + ' Findings</span></summary>' +
+        here.map(g => { const devs = [...new Set(g.fs.flatMap(f => f.devices))];
+          return '<button class="row' + (S.pick === g.c.id ? ' sel' : '') + (g.c.soft ? ' soft' : '') + '" data-pick="' + g.c.id + '"><span class="dot ' + l + '"></span><span class="t">' + esc(g.c.adv ? g.c.adv.id : g.c.name) + '</span><span class="c">' + (g.c.type === 'Topology' ? g.fs.length + ' Link' + (g.fs.length > 1 ? 's' : '') : devs.length + ' device' + (devs.length > 1 ? 's' : '')) + '</span>' +
+            '<span class="s">' + esc(g.c.adv ? g.c.adv.title.replace(/^Cisco /, '') + ' · CVSS ' + g.c.adv.cvss.toFixed(1) : g.c.type + (g.c.soft ? ' · shown softer' : '')) + '</span></button>'; }).join('') + '</details>';
+    }
+    const g = gs.find(x => x.c.id === S.pick) || null;
+    const devs = g ? [...new Set(g.fs.flatMap(f => f.devices))] : [];
+    const links = g ? g.fs.flatMap(f => f.items) : [];
+    let det;
+    if (!g) det = '<p class="hint">Pick a Check to see every device it hit, and where they sit on the Map.</p>';
+    else if (g.c.adv) det = '<h3>' + esc(g.c.adv.title) + '</h3>' + advBlock(g.c.adv, true) + '<h4>' + devs.length + ' devices on an affected release</h4>' + devTable(devs);
+    else det = '<h3>' + esc(g.c.name) + '</h3><div>' + sev(g.c.level) + ' <span class="muted">' + g.c.type + ' Check' + (g.c.src ? ' · ' + esc(g.c.src) : '') + '</span></div><p><b>What to do:</b> ' + esc(g.c.fix) + '</p>' +
+      '<h4>' + g.fs.length + ' Findings</h4><div class="tw"><table><thead><tr><th>Where</th><th>What was found</th></tr></thead><tbody>' + g.fs.map(f => '<tr><td><b>' + esc(f.devices.join(' ⇄ ')) + '</b></td><td>' + esc(f.summary) + '</td></tr>').join('') + '</tbody></table></div>';
+    const main = '<div class="canvaswrap">' + miniMap({ hot: devs, hotLinks: links, dimOthers: true, marker: A.marker }) + '</div><div class="det">' + det + '</div>';
+    return shell('findings', side, main, chips);
+  },
+  marker(d, w) {
+    const fs = ofDev(d.id); if (!fs.length) return '';
+    const l = worst(fs), t = String(fs.length), bw = 10 + t.length * 6;
+    return '<g class="bdg" transform="translate(' + (w - bw / 2) + ',-8)"><rect width="' + bw + '" height="16" rx="8" style="fill:' + COLORS[l] + ';stroke:none"/><text x="' + bw / 2 + '" y="12" text-anchor="middle">' + t + '</text></g>';
+  },
+  map() {
+    const legend = '<div class="legend"><span>Badge = number of Findings on the device, coloured by its worst level</span>' + LEVELS.map(l => '<span><span class="dot ' + l + '"></span>' + l + '</span>').join('') + '</div>';
+    return shell('map', null, '<div class="canvaswrap">' + miniMap({ marker: A.marker }) + '</div>' + legend);
+  },
+  report() {
+    const top = this.groupsAll().filter(g => RANK[g.c.level] <= 1).slice(0, 8);
+    return '<div class="page"><h1>Run report</h1><p class="muted">Run ' + RUN + ' · Advisory data as of ' + ASOF + '</p>' +
+      '<h2 id="summary">Summary</h2>' + sumgrid() +
+      '<h2 id="attention">Needs attention</h2><ul class="attn">' + attnCommon() +
+      '<li>!! ' + (TOTAL.Critical || 0) + ' Critical Findings from ' + new Set(F.filter(f => f.level === 'Critical').map(f => f.check.id)).size + ' Checks. See the Findings report.</li></ul>' +
+      '<h2 id="findings">Findings</h2><p>' + F.length + ' Findings from ' + new Set(F.map(f => f.check.id)).size + ' Checks. The full list, with devices, is in <a href="#">findings.html</a>. The Checks that hit hardest:</p>' +
+      '<div class="tw"><table><thead><tr><th>Level</th><th>Check</th><th class="num">Devices</th></tr></thead><tbody>' + top.map(g => '<tr><td>' + sev(g.c.level) + '</td><td>' + esc(g.c.adv ? g.c.adv.id + ' — ' + g.c.adv.title : g.c.name) + '</td><td class="num">' + new Set(g.fs.flatMap(f => f.devices)).size + '</td></tr>').join('') + '</tbody></table></div>' +
+      '<p class="muted">… and the rest of v1’s sections (Visited, Unvisited, Backups, Credential Sets) unchanged.</p></div>';
+  },
+  groupsAll() { const keep = S.typeFilter; S.typeFilter = 'All'; const g = this.groups(); S.typeFilter = keep; return g; },
+  findings() {
+    const gs = this.groupsAll();
+    let out = '<div class="page"><h1>Findings report</h1><p class="muted">Run ' + RUN + ' · Advisory data as of ' + ASOF + ' · ' + F.length + ' Findings on ' + D.length + ' devices · ' + counts(TOTAL) + '</p>' +
+      '<p>Grouped by level, then by Check. Each Check lists every device it hit.</p><ul class="toc">' + LEVELS.filter(l => gs.some(g => g.c.level === l)).map(l => '<li><a href="#">' + l + '</a> (' + gs.filter(g => g.c.level === l).length + ' Checks)</li>').join('') + '</ul>';
+    for (const l of LEVELS) {
+      const here = gs.filter(g => g.c.level === l); if (!here.length) continue;
+      out += '<h2>' + sev(l) + ' ' + here.length + ' Checks</h2>';
+      here.slice(0, l === 'High' ? 6 : 99).forEach(g => {
+        const devs = [...new Set(g.fs.flatMap(f => f.devices))];
+        out += '<div class="card"><header><h3>' + esc(g.c.adv ? g.c.adv.title : g.c.name) + '</h3><span class="muted">' + (g.c.type === 'Topology' ? g.fs.length + ' Links' : devs.length + ' devices') + '</span></header><div class="body">' +
+          (g.c.adv ? advBlock(g.c.adv, true) + devTable(devs) : '<p><b>What to do:</b> ' + esc(g.c.fix) + '</p><div class="tw"><table><thead><tr><th>Where</th><th>Mgmt IP</th><th>What was found</th></tr></thead><tbody>' +
+            g.fs.map(f => '<tr><td><b>' + esc(f.devices.join(' ⇄ ')) + '</b></td><td class="mono">' + f.devices.map(x => DEV.get(x).ip).join(', ') + '</td><td>' + esc(f.summary) + '</td></tr>').join('') + '</tbody></table></div>') + '</div></div>';
+      });
+      if (l === 'High' && here.length > 6) out += '<p class="muted">… ' + (here.length - 6) + ' more High Checks in the same form (cut short in the prototype).</p>';
+    }
+    return out + '</div>';
+  },
+};
+
+/* ================= Variant B: by device ================= */
+const B = {
+  name: 'By device',
+  note: '<b>B · By device.</b> One entry per device, worst first. Each device leads with its Upgrade Target, then its Advisories folded into one line, then its configuration and Link Findings. Answers "what do I do to this box?"',
+  devs() { return D.slice().sort((x, y) => { const wx = worst(ofDev(x.id)), wy = worst(ofDev(y.id)); return (RANK[wx] ?? 9) - (RANK[wy] ?? 9) || ofDev(y.id).length - ofDev(x.id).length; }); },
+  tab() {
+    const side = '<div class="ghead">Devices with Findings<span class="n">' + D.length + '</span></div>' + this.devs().map(d => {
+      const fs = ofDev(d.id), w = worst(fs), na = advOf(d.id).length;
+      return '<button class="row' + (S.pick === d.id ? ' sel' : '') + '" data-pick="' + d.id + '"><span class="dot ' + w + '"></span><span class="t">' + esc(d.id) + ' <span class="muted mono" style="font-weight:400">' + esc(d.rel) + '</span></span><span class="c">' + counts(countBy(fs)) + '</span>' +
+        '<span class="s">' + (d.nocheck ? 'could not check Advisories' : na ? (d.target ? '→ ' + esc(d.target) + ' clears ' + na + ' Advisories' : 'no clear release in ' + esc(d.train) + ' (' + na + ' Advisories)') : 'no Critical/High Advisories') +
+        (fs.length - na ? ' · ' + (fs.length - na) + ' other' : '') + '</span></button>';
+    }).join('') + '<div class="ghead">Not analysed<span class="n">1</span></div><div class="row"><span class="dot Info"></span><span class="t">fw-edge</span><span class="c"></span><span class="s">Unvisited: ' + esc(UNV[0].why) + '</span></div>';
+    const d = DEV.get(S.pick);
+    let det = '<p class="hint">Pick a device to see what to do to it. Its neighbourhood is drawn above.</p>';
+    if (d) det = this.devDetail(d, true);
+    const nb = d ? LINKS.filter(l => l[0] === d.id || l[1] === d.id).map(l => [l[0], l[1]]) : [];
+    const main = '<div class="canvaswrap">' + miniMap({ hot: d ? [d.id] : [], hotLinks: nb, dimOthers: true, tint: B.tint }) + '</div><div class="det">' + det + '</div>';
+    return shell('findings', side, main);
+  },
+  devDetail(d, interactive) {
+    const fs = ofDev(d.id), adv = fs.filter(f => f.check.type === 'Advisory').sort((x, y) => byLevel(x, y) || y.check.adv.cvss - x.check.adv.cvss), other = fs.filter(f => f.check.type !== 'Advisory').sort(byLevel);
+    let s = '<h3>' + esc(d.id) + '</h3><dl class="kv"><dt>Mgmt IP</dt><dd class="mono">' + d.ip + '</dd><dt>Model</dt><dd class="mono">' + esc(d.model) + '</dd><dt>Release</dt><dd class="mono">' + esc(d.plat + ' ' + d.rel) + '</dd></dl>' + targetLine(d);
+    if (adv.length) s += '<details' + (interactive ? '' : '') + '><summary><b>' + adv.length + ' Advisories</b> ' + counts(countBy(adv)) + ' <span class="muted">· all cleared by the Upgrade Target</span></summary><p class="fixed">' + FIXED + '</p>' +
+      '<div class="tw"><table><thead><tr><th>Level</th><th>Advisory</th><th>Title</th><th class="num">CVSS</th><th>CVEs</th></tr></thead><tbody>' + adv.map(f => { const a = f.check.adv; return '<tr><td>' + sev(a.level) + '</td><td>' + advLink(a) + '</td><td>' + esc(a.title.replace(/^Cisco /, '')) + '</td><td class="num">' + a.cvss.toFixed(1) + '</td><td class="mono">' + a.cves.join(' ') + '</td></tr>'; }).join('') + '</tbody></table></div></details>';
+    if (other.length) s += '<h4>Configuration and Links (' + other.length + ')</h4><div class="tw"><table><thead><tr><th>Level</th><th>Check</th><th>What was found</th><th>What to do</th></tr></thead><tbody>' +
+      other.map(f => '<tr' + (f.check.soft ? ' class="soft"' : '') + '><td>' + sev(f.level) + '</td><td>' + esc(f.check.name) + '</td><td>' + esc(f.summary) + '</td><td>' + esc(f.check.fix) + '</td></tr>').join('') + '</tbody></table></div>';
+    return s;
+  },
+  tint(d) { const w = worst(ofDev(d.id)); return w === 'None' ? null : w; },
+  map() {
+    const legend = '<div class="legend"><span>Box colour = worst Finding on the device</span>' + LEVELS.map(l => '<span><span class="dot ' + l + '"></span>' + l + '</span>').join('') + '<span><span class="dot None"></span>no Findings</span></div>';
+    return shell('map', null, '<div class="canvaswrap">' + miniMap({ tint: B.tint }) + '</div>' + legend);
+  },
+  report() {
+    return '<div class="page"><h1>Run report</h1><p class="muted">Run ' + RUN + ' · Advisory data as of ' + ASOF + '</p><h2>Summary</h2>' + sumgrid() +
+      '<h2>Needs attention</h2><ul class="attn">' + attnCommon() + '<li>!! wan-rtr, core-a and core-b have no clear release in their Train.</li></ul>' +
+      '<h2>Findings by device</h2><div class="tw"><table><thead><tr><th>Device</th><th>Release</th><th>Worst</th><th>Findings</th><th>Upgrade Target</th></tr></thead><tbody>' +
+      this.devs().map(d => { const fs = ofDev(d.id); return '<tr><td><a href="#"><b>' + esc(d.id) + '</b></a></td><td class="mono">' + esc(d.rel) + '</td><td>' + (fs.length ? sev(worst(fs)) : '') + '</td><td>' + counts(countBy(fs)) + '</td><td>' + targetShort(d) + '</td></tr>'; }).join('') +
+      '</tbody></table></div><p>Each device’s full list is in <a href="#">findings.html</a>.</p><p class="muted">… v1’s other sections unchanged.</p></div>';
+  },
+  findings() {
+    let out = '<div class="page"><h1>Findings report</h1><p class="muted">Run ' + RUN + ' · Advisory data as of ' + ASOF + ' · ' + F.length + ' Findings · ' + counts(TOTAL) + '</p>' +
+      '<p>One sheet per device, worst first, so each can be handed to whoever looks after that box.</p><ul class="toc">' + this.devs().map(d => '<li><a href="#">' + esc(d.id) + '</a> ' + counts(countBy(ofDev(d.id))) + '</li>').join('') + '</ul>';
+    for (const d of this.devs()) out += '<div class="card"><header><h3>' + esc(d.id) + '</h3><span class="mono">' + d.ip + '</span><span class="mono">' + esc(d.model) + '</span><span class="mono">' + esc(d.plat + ' ' + d.rel) + '</span></header><div class="body">' + this.devDetail(d, false).replace(/^<h3>.*?<\/dl>/, '') + '</div></div>';
+    return out + '</div>';
+  },
+};
+
+/* ================= Variant C: by fix ================= */
+function actions() {
+  const acts = [];
+  const trains = new Map();
+  for (const d of D) { const n = advOf(d.id).length; if (!n) continue; const k = d.plat + ' ' + d.train; if (!trains.has(k)) trains.set(k, []); trains.get(k).push(d); }
+  for (const [k, ds] of trains) {
+    const fs = ds.flatMap(d => advOf(d.id)), advs = new Set(fs.map(f => f.check.id));
+    const tgt = ds[0].target;
+    acts.push({ id: 'up-' + k, kind: tgt ? 'upgrade' : 'train', level: worst(fs), devices: ds.map(d => d.id), fs,
+      title: tgt ? 'Upgrade ' + ds.length + ' ' + k + ' device' + (ds.length > 1 ? 's' : '') + ' to ' + tgt + ' or later' : 'Move ' + ds.map(d => d.id).join(' and ') + ' off Train ' + k,
+      sub: tgt ? 'Clears ' + fs.length + ' Findings from ' + advs.size + ' Advisories' : 'No release in ' + k + ' is clear of Critical or High Advisories; ' + fs.length + ' Findings from ' + advs.size + ' Advisories' });
+  }
+  const byCheck = new Map();
+  for (const f of F) { if (f.check.type === 'Advisory') continue; if (!byCheck.has(f.check.id)) byCheck.set(f.check.id, []); byCheck.get(f.check.id).push(f); }
+  for (const [id, fs] of byCheck) {
+    const c = CHECKS.get(id), devs = [...new Set(fs.flatMap(f => f.devices))];
+    acts.push({ id, kind: c.type, level: c.level, devices: devs, fs, soft: c.soft, items: fs.flatMap(f => f.items),
+      title: c.fix.replace(/\.$/, '') + (c.type === 'Topology' ? ' (' + fs.length + ' Link' + (fs.length > 1 ? 's' : '') + ')' : c.type === 'Analysis' ? '' : ' (' + devs.length + ' device' + (devs.length > 1 ? 's' : '') + ')'),
+      sub: c.name });
+  }
+  return acts.sort((x, y) => RANK[x.level] - RANK[y.level] || y.fs.length - x.fs.length);
+}
+const C = {
+  name: 'By fix',
+  note: '<b>C · By fix.</b> Findings are folded into the action that clears them: one upgrade per Train clears all its Advisories at once; each configuration Check becomes one change across its devices. Ordered by worst level, then by how many Findings the action clears. Answers "what is the plan?"',
+  tab() {
+    const acts = actions();
+    const sections = [['Software', a => a.kind === 'upgrade' || a.kind === 'train'], ['Configuration', a => a.kind === 'Configuration'], ['Links', a => a.kind === 'Topology'], ['Could not check', a => a.kind === 'Analysis']];
+    let side = '';
+    for (const [name, fn] of sections) {
+      const here = acts.filter(fn); if (!here.length) continue;
+      side += '<details class="grp" open><summary>' + name + '<span class="n">' + here.reduce((n, a) => n + a.fs.length, 0) + ' Findings</span></summary>' +
+        here.map(a => '<button class="row' + (S.pick === a.id ? ' sel' : '') + (a.soft ? ' soft' : '') + '" data-pick="' + esc(a.id) + '"><span class="dot ' + a.level + '"></span><span class="t">' + esc(a.title) + '</span><span class="c">' + a.fs.length + '</span><span class="s">' + esc(a.sub) + '</span></button>').join('') + '</details>';
+    }
+    const a = acts.find(x => x.id === S.pick);
+    let det = '<p class="hint">Pick an action to see the devices it touches and the Findings it clears.</p>';
+    if (a) {
+      det = '<h3>' + esc(a.title) + '</h3><div>' + sev(a.level, 'worst') + ' <span class="muted">' + esc(a.sub) + '</span></div>';
+      if (a.kind === 'upgrade' || a.kind === 'train') {
+        det += targetLine(DEV.get(a.devices[0]), false) + '<h4>Devices</h4>' + devTable(a.devices, ['Findings cleared', id => counts(countBy(advOf(id)))]);
+        const advs = [...new Set(a.fs.map(f => f.check.id))].map(id => ADV.get(id)).sort((x, y) => RANK[x.level] - RANK[y.level] || y.cvss - x.cvss);
+        det += '<details><summary><b>' + advs.length + ' Advisories this clears</b></summary><p class="fixed">' + FIXED + '</p><div class="tw"><table><thead><tr><th>Level</th><th>Advisory</th><th>Title</th><th class="num">CVSS</th><th class="num">Devices</th></tr></thead><tbody>' +
+          advs.map(x => '<tr><td>' + sev(x.level) + '</td><td>' + advLink(x) + '</td><td>' + esc(x.title.replace(/^Cisco /, '')) + '</td><td class="num">' + x.cvss.toFixed(1) + '</td><td class="num">' + a.fs.filter(f => f.check.id === x.id).length + '</td></tr>').join('') + '</tbody></table></div></details>';
+      } else {
+        det += '<h4>Where</h4><div class="tw"><table><thead><tr><th>Device</th><th>What was found</th></tr></thead><tbody>' + a.fs.map(f => '<tr><td><b>' + esc(f.devices.join(' ⇄ ')) + '</b></td><td>' + esc(f.summary) + '</td></tr>').join('') + '</tbody></table></div>';
+      }
+    }
+    const main = '<div class="canvaswrap">' + miniMap({ hot: a ? a.devices : [], hotLinks: a ? (a.items || []) : [], dimOthers: true, marker: C.marker }) + '</div><div class="det">' + det + '</div>';
+    return shell('findings', side, main);
+  },
+  marker(d, w, h) {
+    const fs = ofDev(d.id); if (!fs.length) return '';
+    const l = worst(fs), na = advOf(d.id).length;
+    let s = '<circle cx="' + (w - 9) + '" cy="9" r="5" style="fill:' + COLORS[l] + '"/>';
+    const tag = (txt, col) => '<g transform="translate(0,' + (h + 3) + ')"><rect width="' + (12 + txt.length * 6.2) + '" height="15" rx="3" style="fill:var(--surface);stroke:' + col + '"/><text x="6" y="11" style="font:700 10px var(--font);fill:' + col + '">' + esc(txt) + '</text></g>';
+    if (d.nocheck) s += tag('? could not check', 'var(--info)');
+    else if (na && d.target) s += tag('\u2191 ' + d.target, 'var(--ok)');
+    else if (na) s += tag('new Train', 'var(--high)');
+    return s;
+  },
+  map() {
+    const legend = '<div class="legend"><span>Dot = worst Finding</span><span style="color:var(--ok);font-weight:700">↑ 17.12.8</span><span>its Upgrade Target</span><span style="color:var(--high);font-weight:700">new Train</span><span>no clear release in its Train</span></div>';
+    return shell('map', null, '<div class="canvaswrap">' + miniMap({ marker: C.marker }) + '</div>' + legend);
+  },
+  report() {
+    const acts = actions();
+    return '<div class="page"><h1>Run report</h1><p class="muted">Run ' + RUN + ' · Advisory data as of ' + ASOF + '</p><h2>Summary</h2>' + sumgrid() +
+      '<p><b>' + acts.length + ' actions</b> clear all ' + F.length + ' Findings. The first ' + acts.filter(a => a.kind === 'upgrade' || a.kind === 'train').length + ' are software upgrades and clear ' + F.filter(f => f.check.type === 'Advisory').length + '.</p>' +
+      '<h2>Needs attention</h2><ul class="attn">' + attnCommon() + acts.filter(a => RANK[a.level] === 0).map(a => '<li>!! ' + esc(a.title) + ' (' + a.level + ')</li>').join('') + '</ul>' +
+      '<h2>Plan</h2><ol>' + acts.slice(0, 6).map(a => '<li>' + sev(a.level) + ' ' + esc(a.title) + ' <span class="muted">· ' + a.fs.length + ' Findings</span></li>').join('') + '</ol><p>The full plan, with every Finding, is in <a href="#">findings.html</a>.</p><p class="muted">… v1’s other sections unchanged.</p></div>';
+  },
+  findings() {
+    const acts = actions();
+    let out = '<div class="page"><h1>Findings report</h1><p class="muted">Run ' + RUN + ' · Advisory data as of ' + ASOF + ' · ' + F.length + ' Findings · ' + counts(TOTAL) + '</p>' +
+      '<h2>Plan</h2><p>Actions in order: worst level first, then most Findings cleared. The numbers are that order.</p>';
+    acts.forEach((a, i) => {
+      out += '<div class="step"><span class="k">' + (i + 1) + '</span><div><div class="card" style="margin:0"><header><h3>' + esc(a.title) + '</h3>' + sev(a.level) + '<span class="muted">' + esc(a.sub) + '</span></header><div class="body">' +
+        (a.kind === 'upgrade' || a.kind === 'train' ? devTable(a.devices, ['Findings cleared', id => counts(countBy(advOf(id)))]) :
+          '<div class="tw"><table><thead><tr><th>Where</th><th>Mgmt IP</th><th>What was found</th></tr></thead><tbody>' + a.fs.map(f => '<tr><td><b>' + esc(f.devices.join(' ⇄ ')) + '</b></td><td class="mono">' + f.devices.map(x => DEV.get(x).ip).join(', ') + '</td><td>' + esc(f.summary) + '</td></tr>').join('') + '</tbody></table></div>') +
+        '</div></div></div></div>';
+    });
+    out += '<h2>Appendix: every Advisory Finding</h2><p class="fixed">' + FIXED + '</p>';
+    for (const d of D) { const adv = advOf(d.id); if (!adv.length) continue;
+      out += '<details><summary><b>' + esc(d.id) + '</b> <span class="mono">' + esc(d.rel) + '</span> ' + counts(countBy(adv)) + '</summary><div class="tw"><table><tbody>' + adv.map(f => '<tr><td>' + sev(f.level) + '</td><td>' + advLink(f.check.adv) + '</td><td>' + esc(f.check.adv.title) + '</td><td class="mono">' + f.check.adv.cves.join(' ') + '</td></tr>').join('') + '</tbody></table></div></details>'; }
+    return out + '</div>';
+  },
+};
+
+function sumgrid() {
+  return '<div class="sumgrid"><div><span class="muted">Visited</span><b>10</b></div><div><span class="muted">Unvisited</span><b>1</b></div><div><span class="muted">Findings</span><b>' + F.length + '</b></div>' +
+    LEVELS.map(l => '<div><span class="sev ' + l + '">' + l + '</span><b>' + (TOTAL[l] || 0) + '</b></div>').join('') + '</div>';
+}
+function attnCommon() {
+  return '<li>!! Advisories could not be checked on lab-sw: the version in show version could not be read.</li>' +
+    '<li>Advisory data as of ' + ASOF + ' (fresh). <span class="muted">If older than 7 days this line reads "!! Advisory data is N days old".</span></li>' +
+    '<li class="muted">Medium and Low Advisories are not listed.</li>';
+}
+
+/* ================= wiring ================= */
+const VARIANTS = { A, B, C };
+const KEYS = Object.keys(VARIANTS);
+const DEFAULT_PICK = { A: () => A.groupsAll()[0].c.id, B: () => B.devs()[0].id, C: () => actions()[0].id };
+function readHash() {
+  const m = /^#([abc])-(tab|map|report|findings)$/.exec(location.hash);
+  if (m) { if (S.v !== m[1].toUpperCase()) { S.pick = null; S.typeFilter = 'All'; } S.v = m[1].toUpperCase(); S.surface = m[2]; }
+}
+function render() {
+  const V = VARIANTS[S.v];
+  if (S.pick === null) S.pick = DEFAULT_PICK[S.v]();
+  document.getElementById('vnote').innerHTML = V.note + ' <span class="muted">Severity levels are placeholders until "Which configuration, lifecycle and consistency Checks ship" settles the scale.</span>';
+  document.getElementById('swlbl').innerHTML = S.v + ' <small>(' + V.name + ')</small>';
+  document.getElementById('surfaces').innerHTML = SURFACES.map(([k, n]) => '<button aria-pressed="' + (S.surface === k) + '" data-surface="' + k + '">' + n + '</button>').join('');
+  document.getElementById('frame').innerHTML = V[S.surface]();
+  const h = '#' + S.v.toLowerCase() + '-' + S.surface;
+  if (location.hash !== h) try { history.replaceState(null, '', h); } catch (e) { /* ignore */ }
+}
+function go(dir) { const i = (KEYS.indexOf(S.v) + dir + KEYS.length) % KEYS.length; S.v = KEYS[i]; S.pick = null; S.typeFilter = 'All'; render(); }
+document.getElementById('prev').addEventListener('click', () => go(-1));
+document.getElementById('next').addEventListener('click', () => go(1));
+document.addEventListener('keydown', e => {
+  const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  if (e.key === 'ArrowLeft') go(-1); else if (e.key === 'ArrowRight') go(1);
+});
+document.addEventListener('click', e => {
+  const s = e.target.closest('[data-surface]'); if (s) { S.surface = s.dataset.surface; render(); return; }
+  const p = e.target.closest('[data-pick]'); if (p) { S.pick = p.dataset.pick; render(); return; }
+  const ty = e.target.closest('[data-type]'); if (ty) { S.typeFilter = ty.dataset.type; render(); }
+  if (e.target.closest('a[href="#"]')) e.preventDefault();
+});
+window.addEventListener('hashchange', () => { readHash(); render(); });
+readHash();
+render();
+})();
+</script>
