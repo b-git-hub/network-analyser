@@ -1,5 +1,7 @@
 # Spec #37 handoff, 2026-11-19
 
+> **Superseded 2026-11-20:** spec #37 is finished. [PR #67](https://github.com/b-git-hub/network-analyser/pull/67) merged to `main` on 2026-11-19 (`c28bb92`) and closed #37 and every spec ticket. The operator reported on 2026-11-20 that the build was done and tested. The rest of this page is the historical handoff state.
+
 On 2026-11-19 at about 08:00 UTC the operator asked the building session to wrap up so another agent could finish spec #37. State at handoff, as of `b-git-hub/network-analyser@60edae7` plus this page's commit on `claude/lucid-shannon-8xewst`:
 
 ## Merged (20 of 29 spec tickets, plus #69)
