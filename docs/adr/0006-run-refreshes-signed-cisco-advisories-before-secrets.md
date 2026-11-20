@@ -1,5 +1,7 @@
 # A Run refreshes Cisco's signed Advisories before any secret is typed
 
+_Superseded by [ADR 0007](0007-cisco-lookups-at-run-end-after-secrets-wiped.md) on 2026-11-20: Cisco is now asked once at the end of a Run, after device secrets are wiped, and nothing is stored._
+
 Analysis needs Cisco's Advisories, and the operator wants every Run to check against current data by default. So a Run now reaches the internet, the first time the tool talks to anything other than in-Scope devices. To keep that contact narrow, a Run refreshes its Advisory Store from Cisco's public CSAF directory after the operator confirms and **before the first secret prompt**, and closes every outbound connection before any password or the Backup Passphrase is typed. The tool is never online while it holds a secret. It sends nothing about the operator's devices, only fixed requests for public files, and it keeps only files whose OpenPGP signature verifies against a Cisco PSIRT key built into the tool.
 
 Decided on [When Analysis runs and how it reaches Cisco](https://github.com/b-git-hub/network-analyser/issues/79).
