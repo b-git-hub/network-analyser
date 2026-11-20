@@ -546,7 +546,7 @@ def test_an_arp_entry_that_is_not_a_next_hop_creates_no_device_and_no_link() -> 
     assert built.subnets == ()
 
 
-def test_the_document_gains_adjacencies_and_subnets_without_a_new_format_version() -> None:
+def test_the_document_carries_adjacencies_and_subnets() -> None:
     built = topology.build(
         [
             _device(A, "S1", "rtr-a", "192.0.2.1/24", routing=(_ospf(B),)),
@@ -558,7 +558,7 @@ def test_the_document_gains_adjacencies_and_subnets_without_a_new_format_version
     )
     document = json.loads(json.dumps(topology.to_document(built)))
 
-    assert document["format_version"] == 1
+    assert document["format_version"] == 2
     kinds = {item["kind"] for item in document["adjacencies"]}
     assert kinds == {"OSPF", "shared subnet"}
     shared = next(item for item in document["adjacencies"] if item["kind"] == "shared subnet")
