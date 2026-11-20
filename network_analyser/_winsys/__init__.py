@@ -2,9 +2,10 @@
 
 The elevation check, the masked reader's console calls, the crash-dump guard's
 `SetErrorMode` and registry reads, the per-user folder and long paths, the single-instance
-lock file, folder permissions and the kind of drive a folder is on. Each function works on
-any OS (or says it cannot) so callers can run, and inject fakes, in tests on Linux. Imports
-nothing from the package. `ctypes`, `msvcrt` and `winreg` are imported only here.
+lock file, folder permissions, the kind of drive a folder is on, and Windows' proxy setting.
+Each function works on any OS (or says it cannot) so callers can run, and inject fakes, in
+tests on Linux. Imports nothing from the package. `ctypes`, `msvcrt` and `winreg` are
+imported only here.
 """
 
 from network_analyser._winsys.console import (
@@ -31,6 +32,7 @@ from network_analyser._winsys.paths import (
     pc_name,
     windows_account,
 )
+from network_analyser._winsys.proxy import system_proxy
 from network_analyser._winsys.wer import (
     RegistryUnreadableError,
     RegistryView,
@@ -60,6 +62,7 @@ __all__ = [
     "stdout_is_console",
     "suppress_error_reporting",
     "sync_roots",
+    "system_proxy",
     "unlock",
     "windows_account",
 ]

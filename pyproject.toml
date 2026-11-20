@@ -80,8 +80,13 @@ ignore = [
 "network_analyser/cli/library_loggers.py" = ["TID251"]
 # The one file that reads the environment: LOCALAPPDATA, by literal name (#42).
 "network_analyser/_winsys/paths.py" = ["TID251"]
+# The one file that makes HTTP requests: the fenced transport (#95). The arch tests still
+# keep environment reads, exception text and file writes out of it.
+"network_analyser/advisories/transport.py" = ["TID251"]
 "tests/**" = [
     "S101",    # assert is how pytest checks
+    "S105",    # synthetic CANARY values are named like secrets on purpose
+    "S106",    # ... and passed as arguments that look like secrets
     "D",       # test names are the documentation
     "PLR2004", # literal expected values are the point of a test
     "TID251",  # tests may use banned APIs to prove the product does not (pickle, logging)
@@ -112,8 +117,8 @@ ban-relative-imports = "all"
 "marshal".msg = "Never serialise objects to disk."
 "shelve".msg = "Never serialise objects to disk."
 "ftplib".msg = "The tool talks to devices over SSH only, through device_gateway."
-"urllib.request".msg = "The tool makes no HTTP requests in v1."
-"http.client".msg = "The tool makes no HTTP requests in v1."
+"urllib.request".msg = "Only advisories' fenced transport opens outbound connections (ADR 0007)."
+"http.client".msg = "Only advisories' fenced transport opens outbound connections (ADR 0007)."
 "ssl._create_unverified_context".msg = "Never turn certificate checks off."
 "subprocess".msg = "The tool starts no other programs."
 "paramiko.AutoAddPolicy".msg = "Host keys are checked against the Trust Store (ADR 0002)."

@@ -19,8 +19,10 @@ type Rule = Callable[[str, ast.Module], list[str]]
 # == Rule: reveal() ==
 # Who may unwrap a Secret (decided 2026-11-18 for spec #37): Credential Set passwords live
 # only in `credentials` and `device_gateway`; the Backup Passphrase lives only in
-# `backup_store`. The cli masked reader returns a Secret and never unwraps it.
-REVEAL_OWNERS = ("credentials/", "device_gateway/", "backup_store/")
+# `backup_store`. #95 adds the Cisco API Key's owners (ADR 0008): `advisories` reveals the
+# client ID, secret and token to make one request, and `backup_store` unlocks the key file.
+# The cli masked reader returns a Secret and never unwraps it.
+REVEAL_OWNERS = ("credentials/", "device_gateway/", "backup_store/", "advisories/")
 
 
 def reveal_outside_owners(relative: str, tree: ast.Module) -> list[str]:
@@ -104,6 +106,8 @@ EXCEPTION_SAFE_CALLS = frozenset(
         "network_analyser.records.events.error_event",
         # #49: the fixed message per Netmiko and Paramiko exception type, via error_event.
         "network_analyser.device_gateway.ssh.library_error",
+        # #95: the connection failure's fixed reason, never the exception's text.
+        "network_analyser.advisories.transport._failure",
     }
 )
 # `lineno` and `colno` are where a TOML run file failed to parse (#41): numbers only.
@@ -292,6 +296,7 @@ def test_reveal_is_caught_outside_its_owners_and_allowed_inside() -> None:
     ]
     assert _scan(reveal_outside_owners, "device_gateway/ssh.py", code) == []
     assert _scan(reveal_outside_owners, "backup_store/lock.py", code) == []
+    assert _scan(reveal_outside_owners, "advisories/session.py", code) == []
 
 
 def test_environment_reads_are_caught_except_named_ones_in_winsys() -> None:

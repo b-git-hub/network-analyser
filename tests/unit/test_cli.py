@@ -94,6 +94,8 @@ def test_every_run_flag_of_the_frozen_surface_parses(
             "site-a",
             "--progress",
             "log",
+            "--proxy",
+            "proxy.example:8080",
         ]
     )
 
@@ -121,6 +123,8 @@ REFUSED = [
     pytest.param(["run", "--sweep-inflight", "101"], id="sweep inflight above 100"),
     pytest.param(["run", "--connect-timeout", "0"], id="timeout not positive"),
     pytest.param(["run", "--progress", "fancy"], id="unknown progress view"),
+    pytest.param(["run", "--proxy", "http://proxy.example:8080"], id="proxy with a scheme"),
+    pytest.param(["run", "--proxy", "proxy.example"], id="proxy without a port"),
     pytest.param(["run", "--par", "5"], id="abbreviated flag"),
     pytest.param(["role-snippet", "pan-os"], id="unsupported platform"),
     pytest.param(["trust-key", "192.0.2.10"], id="trust-key without fingerprint"),
@@ -157,6 +161,19 @@ def test_a_stray_argument_is_refused_without_echoing_it(
     assert code == ExitCode.REFUSED
     assert canary not in captured.out + captured.err
     assert "unrecognized arguments (not shown)" in captured.err
+
+
+def test_a_proxy_with_a_password_is_refused_without_echoing_it(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    canary = "CANARY-proxy-pw-95"
+
+    code = main(["run", "--proxy", f"{canary}@proxy.example:8080"])
+
+    captured = capsys.readouterr()
+    assert code == ExitCode.REFUSED
+    assert canary not in captured.out + captured.err
+    assert "must be host:port" in captured.err
 
 
 def test_no_option_name_invites_a_secret() -> None:

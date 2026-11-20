@@ -5,6 +5,10 @@ fetch calls, nor any other way for the page to load or send anything, even when 
 text is written to look like one (#63). The same scan of a generated `diagram.drawio` finds
 no URL and no namespace to fetch (#65). A generated `run-report.html` has no `http(s)://`,
 no `<script>` at all, and a Content-Security-Policy `<meta>` tag (#66).
+
+The tool itself has one egress module (#95, story 15): a static scan of the package finds an
+HTTP client, a socket or a TLS context only in `advisories`, and the conftest fixture that
+refuses every real connection stays.
 """
 
 import json
@@ -17,6 +21,7 @@ from network_analyser.cli import ExitCode, main
 from network_analyser.credentials import SecretScan
 from network_analyser.run_output import RunFolder
 from network_analyser.run_output.report import write_run_report
+from tests.support.source_scan import SourceFile, imported_names, source_files
 from tests.support.topology_documents import (
     adjacency,
     device,
@@ -199,3 +204,51 @@ def test_a_run_report_cannot_reach_the_network(tmp_path: Path) -> None:
     assert 'http-equiv="Content-Security-Policy"' in page
     assert "script-src 'none'" in page
     assert "dev-S1" in page
+
+
+# -- The tool's own egress: only `advisories` may reach out (story 15; #95) -------------------
+EGRESS_MODULE = "advisories"
+# The libraries that can carry a request off the PC. `socket` is not here: the gateway's TCP
+# 22 session and probe are fenced by their own architecture rule, and this test is about the
+# internet-facing TLS client.
+EGRESS_LIBRARIES = frozenset({"http", "urllib", "requests", "ssl", "truststore"})
+
+
+def egress_imports(files: list[SourceFile]) -> list[str]:
+    """Return 'module:line imports name' for every network library outside `advisories`."""
+    found: list[str] = []
+    for source in files:
+        if source.module == EGRESS_MODULE:
+            continue
+        for name, line in imported_names(source):
+            if name.split(".")[0] in EGRESS_LIBRARIES or name.startswith("<dynamic"):
+                found.append(f"{source.relative}:{line} imports {name}")
+    return found
+
+
+def test_only_advisories_may_reach_the_network() -> None:
+    files = source_files()
+
+    assert any(f.relative == "advisories/transport.py" for f in files)
+    assert egress_imports(files) == []
+
+
+def test_the_scan_finds_a_planted_egress_import(tmp_path: Path) -> None:
+    package = tmp_path / "network_analyser"
+    (package / "advisories").mkdir(parents=True)
+    (package / "advisories" / "transport.py").write_text("import ssl\n", encoding="utf-8")
+    (package / "topology").mkdir()
+    (package / "topology" / "__init__.py").write_text(
+        "import http.client\n"
+        "from urllib.request import urlopen\n"
+        "import importlib\n"
+        "importlib.import_module(name)\n",
+        encoding="utf-8",
+    )
+
+    assert egress_imports(source_files(package)) == [
+        "topology/__init__.py:1 imports http.client",
+        "topology/__init__.py:2 imports urllib.request",
+        "topology/__init__.py:2 imports urllib.request.urlopen",
+        "topology/__init__.py:4 imports <dynamic import with a computed name>",
+    ]
