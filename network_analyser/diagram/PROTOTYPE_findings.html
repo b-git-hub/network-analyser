@@ -251,7 +251,7 @@ check('cfg-banner', 'No login banner', 'Configuration', 'Low', { fix: 'Add banne
 check('top-native', 'Differing native VLAN', 'Topology', 'Medium', { fix: 'Match the native VLAN on both ends' });
 check('top-trunkacc', 'Trunk facing access port', 'Topology', 'Medium', { fix: 'Make both ends trunk or both access' });
 check('top-bundle', 'Bundle member mismatch', 'Topology', 'Medium', { fix: 'Check channel-group membership on both ends' });
-check('top-oneend', 'VLAN on one end only', 'Topology', 'Low', { fix: 'Prune or add the VLAN so both ends agree', soft: true });
+check('top-oneend', 'VLAN on one end only', 'Topology', 'Info', { fix: 'Prune or add the VLAN so both ends agree', soft: true });
 check('top-conflict', 'Conflicting evidence', 'Topology', 'Info', { fix: 'Check the port by hand; the reports disagree' });
 check('ana-nocheck', 'Advisories could not be checked', 'Analysis', 'Info', { fix: 'Fix the cause and run again' });
 
@@ -322,7 +322,7 @@ function miniMap(o) {
   for (const l of LINKS) {
     const [x1, y1] = POS[l[0]], [x2, y2] = POS[l[1]];
     const on = isHotLink(l) || (hot.has(l[0]) && hot.has(l[1]));
-    const dim = dimming && !(hot.has(l[0]) || hot.has(l[1]));
+    const dim = dimming && (o.strict ? !(isHotLink(l) || (hot.has(l[0]) && hot.has(l[1]))) : !(hot.has(l[0]) || hot.has(l[1])));
     s += '<line class="ln' + (l[4] ? ' bundle' : '') + (l[5] ? ' unv' : '') + (isHotLink(l) ? ' hot' : '') + (dim ? ' dim' : '') + '" x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '"/>';
     if (isHotLink(l)) {
       const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
@@ -334,7 +334,7 @@ function miniMap(o) {
     const cls = ['nd'];
     if (!d) cls.push('unv');
     if (hot.has(id)) cls.push('hot');
-    if (dimming && !hot.has(id) && !LINKS.some(l => (l[0] === id && hot.has(l[1])) || (l[1] === id && hot.has(l[0])))) cls.push('dim');
+    if (dimming && !hot.has(id) && (o.strict || !LINKS.some(l => (l[0] === id && hot.has(l[1])) || (l[1] === id && hot.has(l[0]))))) cls.push('dim');
     if (d && o.tint) { const t = o.tint(d); if (t) cls.push('tint-' + t); }
     s += '<g class="' + cls.join(' ') + '" transform="translate(' + (x - w / 2) + ',' + (y - h / 2) + ')"><rect width="' + w + '" height="' + h + '" rx="4"/>' +
       '<text class="h" x="8" y="14">' + esc(id) + '</text><text class="r" x="8" y="27">' + esc(d ? d.plat + ' ' + d.rel : 'Unvisited') + '</text>' +
@@ -359,7 +359,7 @@ const SURFACES = [['tab', 'diagram.html · Findings tab'], ['map', 'diagram.html
 /* ================= Variant A: by Check ================= */
 const A = {
   name: 'By Check',
-  note: '<b>A · By Check.</b> Findings are grouped under the Check that raised them, so one Advisory that hits 7 devices is one row, not 7. Severity first, then Check, then the devices. Answers "what is wrong across the network?"',
+  note: '<b>A · By Check (chosen for the Findings tab and run-report.html, 2026-11-20).</b> Picking a Check now lights only the devices it hit. Findings are grouped under the Check that raised them, so one Advisory that hits 7 devices is one row, not 7. Severity first, then Check, then the devices. Answers "what is wrong across the network?"',
   groups() {
     const m = new Map();
     for (const f of F) { if (S.typeFilter !== 'All' && f.check.type !== S.typeFilter) continue; if (!m.has(f.check.id)) m.set(f.check.id, []); m.get(f.check.id).push(f); }
@@ -385,16 +385,16 @@ const A = {
     else if (g.c.adv) det = '<h3>' + esc(g.c.adv.title) + '</h3>' + advBlock(g.c.adv, true) + '<h4>' + devs.length + ' devices on an affected release</h4>' + devTable(devs);
     else det = '<h3>' + esc(g.c.name) + '</h3><div>' + sev(g.c.level) + ' <span class="muted">' + g.c.type + ' Check' + (g.c.src ? ' · ' + esc(g.c.src) : '') + '</span></div><p><b>What to do:</b> ' + esc(g.c.fix) + '</p>' +
       '<h4>' + g.fs.length + ' Findings</h4><div class="tw"><table><thead><tr><th>Where</th><th>What was found</th></tr></thead><tbody>' + g.fs.map(f => '<tr><td><b>' + esc(f.devices.join(' ⇄ ')) + '</b></td><td>' + esc(f.summary) + '</td></tr>').join('') + '</tbody></table></div>';
-    const main = '<div class="canvaswrap">' + miniMap({ hot: devs, hotLinks: links, dimOthers: true, marker: A.marker }) + '</div><div class="det">' + det + '</div>';
+    const main = '<div class="canvaswrap">' + miniMap({ hot: devs, hotLinks: links, dimOthers: true, strict: true, marker: A.marker }) + '</div><div class="det">' + det + '</div>';
     return shell('findings', side, main, chips);
   },
-  marker(d, w) {
+  marker(d, w, h) {
     const fs = ofDev(d.id); if (!fs.length) return '';
     const l = worst(fs), t = String(fs.length), bw = 10 + t.length * 6;
-    return '<g class="bdg" transform="translate(' + (w - bw / 2) + ',-8)"><rect width="' + bw + '" height="16" rx="8" style="fill:' + COLORS[l] + ';stroke:none"/><text x="' + bw / 2 + '" y="12" text-anchor="middle">' + t + '</text></g>';
+    return '<g class="bdg" transform="translate(' + (w - bw / 2) + ',-8)"><rect width="' + bw + '" height="16" rx="8" style="fill:' + COLORS[l] + ';stroke:none"/><text x="' + bw / 2 + '" y="12" text-anchor="middle">' + t + '</text></g>' + C.tag(d, w, h);
   },
   map() {
-    const legend = '<div class="legend"><span>Badge = number of Findings on the device, coloured by its worst level</span>' + LEVELS.map(l => '<span><span class="dot ' + l + '"></span>' + l + '</span>').join('') + '</div>';
+    const legend = '<div class="legend"><span>Badge = number of Findings on the device, coloured by its worst level</span><span style="color:var(--ok);font-weight:700">↑ 17.12.8</span><span>its Upgrade Target</span><span style="color:var(--high);font-weight:700">new Train</span><span>no clear release in its Train</span>' + LEVELS.map(l => '<span><span class="dot ' + l + '"></span>' + l + '</span>').join('') + '</div>';
     return shell('map', null, '<div class="canvaswrap">' + miniMap({ marker: A.marker }) + '</div>' + legend);
   },
   report() {
@@ -430,7 +430,7 @@ const A = {
 /* ================= Variant B: by device ================= */
 const B = {
   name: 'By device',
-  note: '<b>B · By device.</b> One entry per device, worst first. Each device leads with its Upgrade Target, then its Advisories folded into one line, then its configuration and Link Findings. Answers "what do I do to this box?"',
+  note: '<b>B · By device (chosen for findings.html, 2026-11-20).</b> One entry per device, worst first. Each device leads with its Upgrade Target, then its Advisories folded into one line, then its configuration and Link Findings. Answers "what do I do to this box?"',
   devs() { return D.slice().sort((x, y) => { const wx = worst(ofDev(x.id)), wy = worst(ofDev(y.id)); return (RANK[wx] ?? 9) - (RANK[wy] ?? 9) || ofDev(y.id).length - ofDev(x.id).length; }); },
   tab() {
     const side = '<div class="ghead">Devices with Findings<span class="n">' + D.length + '</span></div>' + this.devs().map(d => {
@@ -527,8 +527,11 @@ const C = {
   },
   marker(d, w, h) {
     const fs = ofDev(d.id); if (!fs.length) return '';
-    const l = worst(fs), na = advOf(d.id).length;
-    let s = '<circle cx="' + (w - 9) + '" cy="9" r="5" style="fill:' + COLORS[l] + '"/>';
+    return '<circle cx="' + (w - 9) + '" cy="9" r="5" style="fill:' + COLORS[worst(fs)] + '"/>' + C.tag(d, w, h);
+  },
+  tag(d, w, h) {
+    const na = advOf(d.id).length;
+    let s = '';
     const tag = (txt, col) => '<g transform="translate(0,' + (h + 3) + ')"><rect width="' + (12 + txt.length * 6.2) + '" height="15" rx="3" style="fill:var(--surface);stroke:' + col + '"/><text x="6" y="11" style="font:700 10px var(--font);fill:' + col + '">' + esc(txt) + '</text></g>';
     if (d.nocheck) s += tag('? could not check', 'var(--info)');
     else if (na && d.target) s += tag('\u2191 ' + d.target, 'var(--ok)');
