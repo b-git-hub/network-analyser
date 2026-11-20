@@ -55,6 +55,9 @@ EOX_BATCH_SIZE: Final = 20
 SUGGESTION_BATCH_SIZE: Final = 10
 """Cisco's Software Suggestion limit: 10 base PIDs per call (story 18)."""
 
+EOX_MAX_PAGES: Final = 20
+"""The most pages one EoX batch may take: a reply naming more is refused, not chased."""
+
 REFUSED: Final = "Cisco was not asked: a lookup value did not match its safe pattern"
 """Fixed text when an outbound value is refused (story 13)."""
 
@@ -156,6 +159,8 @@ def _eox(session: Session, kind: str, values: Sequence[str]) -> EoxAnswer | Sour
             records.extend(answer.records)
             unanswered.extend(answer.unanswered)
             last = eox_last_page(call.response.body)
+            if last > EOX_MAX_PAGES:
+                return SourceUnavailable("Cisco's reply named too many pages")
             if page >= last:
                 break
             page += 1

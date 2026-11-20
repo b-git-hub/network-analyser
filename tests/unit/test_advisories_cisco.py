@@ -490,6 +490,16 @@ def test_an_eox_reply_with_only_an_error_code_is_unavailable() -> None:
     assert "SSA_ERR_021_Pid" in answers.hardware_eox.reason
 
 
+def test_an_eox_reply_naming_too_many_pages_is_refused() -> None:
+    fake = FakeCisco(last_page={"EOXByProductID": 500})
+
+    answers, _ = lookup(fake, questions(releases=(), hardware_pids=("C9300-48P",)))
+
+    assert len([path for path in fake.paths() if "/EOXByProductID/" in path]) == 1
+    assert isinstance(answers.hardware_eox, SourceUnavailable)
+    assert "too many pages" in answers.hardware_eox.reason
+
+
 def test_check_api_key_sends_one_token_request_and_nothing_else() -> None:
     fake = FakeCisco()
     pacer, _ = fast_pacer()
