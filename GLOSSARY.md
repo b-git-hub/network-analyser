@@ -107,3 +107,21 @@ _Avoid_: Network, LAN, segment
 **VLAN Mismatch**:
 A disagreement in VLAN settings between the two ends of a Link or Bundle: a VLAN carried on one end but not the other, differing native VLANs, a trunk facing an access port, or differing access VLANs.
 _Avoid_: VLAN error, trunk mismatch
+
+## Analysis
+
+**Analysis**:
+The part of a Run that tests what was collected from Visited Devices against every Check, and raises Findings.
+_Avoid_: Audit, scan, assessment
+
+**Check**:
+One rule the tool tests a device, Link or the whole network against, such as "the software is named in a Critical Advisory" or "Telnet is enabled".
+_Avoid_: Test, rule, policy
+
+**Finding**:
+One problem a Check found, with a severity, on a device, a Link or the network. A VLAN Mismatch is one kind of Finding.
+_Avoid_: Issue, alert, vulnerability, result
+
+**Advisory**:
+A vendor's published security advisory (for Cisco, a PSIRT advisory) that names the software versions it affects.
+_Avoid_: CVE, bulletin, vulnerability notice
