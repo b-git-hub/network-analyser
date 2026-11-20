@@ -12,6 +12,8 @@ the `management` VRF to `nx-b`, and Po10 (Eth1/3) joined to vPC 10.
 import json
 from typing import Final
 
+from tests.support import nxos_show
+
 
 def _json(data: object) -> str:
     return json.dumps(data, indent=2) + "\n"
@@ -706,9 +708,10 @@ NXOS_JSON_REPLIES: Final = {
     "show ip bgp summary vrf all | json": BGP,
     "show ip route static vrf all | json": STATIC_ROUTES,
     "show hsrp brief | json": HSRP,
+    **nxos_show.NEW_COMMANDS,
 }
 """Every collection command `nx-a` answers. EIGRP and VRRP are off, so their commands are
-never sent."""
+never sent. The new read-only commands of ticket #98 are in `nxos_show`."""
 
 DENIED: Final = "% Permission denied for the role\n"
 INVALID: Final = "                        ^\n% Invalid command at '^' marker.\n"

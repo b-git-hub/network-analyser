@@ -40,6 +40,13 @@ ALLOWED = {
         "show cdp neighbors detail | json",
         "show lldp neighbors detail | json",
         "show running-config",
+        # The new read-only commands of release 0.2.0 (tickets #97, #98).
+        "show inventory | json",
+        "show ntp peer-status | json",
+        "show copp status | json",
+        "show ssh key",
+        "show guestshell",
+        "show virtual-service list",
     ],
 }
 
@@ -93,7 +100,27 @@ NEAR_MISSES = [
 # the full view (story 96), and NX-OS has no CLI views.
 PLATFORM_NEAR_MISSES = {
     Platform.IOS_XE: ["show running-config"],
-    Platform.NX_OS: ["show running-config view full"],
+    Platform.NX_OS: [
+        "show running-config view full",
+        # The new commands are exact strings, JSON form included (#97, #98). SNMPv3 users
+        # come from the running config, so there is deliberately no `show snmp user`.
+        "show inventory",
+        "show inventory | json ",
+        "show inventory | json-pretty",
+        "show inventory | include PID",
+        "show ntp peer-status",
+        "show ntp peer-status | json\nconfigure terminal",
+        "show copp status",
+        "show copp status | json | redirect bootflash:x",
+        "show ssh key ",
+        "show ssh key rsa",
+        "show ssh key | include bitcount",
+        "show guestshell detail",
+        "show guestshell | json",
+        "show virtual-service list | json",
+        "show snmp user",
+        "show snmp user | json",
+    ],
 }
 
 BAD_PARAMETERS = [

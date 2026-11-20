@@ -47,6 +47,36 @@ SHOW_IP_ROUTE_STATIC: Final = "show ip route static vrf all | json"
 SHOW_HSRP_BRIEF: Final = "show hsrp brief | json"
 SHOW_VRRP: Final = "show vrrp | json"
 
+# The new read-only commands of release 0.2.0 (spec #92, stacks #97 and #98). Their exact
+# strings, JSON forms and whether their output holds secrets are provisional until the lab
+# confirms them (lab checklist section K). SNMPv3 users are deliberately not here: they come
+# from the running config, not from a new command (story 78).
+SHOW_INVENTORY: Final = "show inventory | json"
+"""Chassis, stack-member, supervisor and line-card PIDs for the hardware EoX Check (story 14)."""
+SHOW_NTP_PEER_STATUS: Final = "show ntp peer-status | json"
+"""Whether an NTP peer is selected for synchronisation (story 60)."""
+SHOW_COPP_STATUS: Final = "show copp status | json"
+"""Whether a control-plane policing policy is applied (story 60)."""
+SHOW_SSH_KEY: Final = "show ssh key"
+"""The device's public host key, read only to measure its size (story 60)."""
+SHOW_GUESTSHELL: Final = "show guestshell"
+"""Whether the Guest Shell is on (story 60). `show virtual-service list` is its fallback."""
+SHOW_VIRTUAL_SERVICE_LIST: Final = "show virtual-service list"
+"""The fallback when `show guestshell` is refused or not understood (the lab picks)."""
+
+SHOW_OUTPUT: Final = (
+    SHOW_INVENTORY,
+    SHOW_NTP_PEER_STATUS,
+    SHOW_COPP_STATUS,
+    SHOW_SSH_KEY,
+    SHOW_GUESTSHELL,
+)
+"""The new show commands, in the order they are sent after the Topology's collection.
+
+`SHOW_VIRTUAL_SERVICE_LIST` is not among them: it is sent only when `SHOW_GUESTSHELL`
+answers neither data nor a fact. SNMPv3 users are not a command at all: they come from the
+running config (story 78)."""
+
 COLLECTION: Final = (
     SHOW_FEATURE,
     SHOW_INTERFACE,
@@ -79,5 +109,7 @@ ALLOW_LIST: Final = AllowList(
         Exact(SHOW_CDP_NEIGHBORS_DETAIL),
         Exact(SHOW_LLDP_NEIGHBORS_DETAIL),
         *(Exact(command) for command in COLLECTION),
+        *(Exact(command) for command in SHOW_OUTPUT),
+        Exact(SHOW_VIRTUAL_SERVICE_LIST),
     )
 )

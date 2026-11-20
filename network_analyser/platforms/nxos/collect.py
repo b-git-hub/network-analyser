@@ -14,6 +14,10 @@ and the gateway puts its readings in their place.
 BGP, HSRP, VRRP) is not sent, and its data is "none", with `show feature` as the evidence.
 When `show feature` itself gives nothing, every command is sent.
 
+Last, the new read-only commands of tickets #97 and #98 are sent, after everything the
+Topology needs, and their parsed values join the `Collected` record (#98). A refusal there
+costs only that part, never the Backup or the Topology.
+
 No value is taken from the running config.
 """
 
@@ -23,13 +27,14 @@ from typing import Final
 
 from network_analyser.platforms.collection import Collection, Problem, Send
 from network_analyser.platforms.nxos import commands as c
-from network_analyser.platforms.nxos import readers
+from network_analyser.platforms.nxos import readers, show_output
 from network_analyser.platforms.nxos.json_reply import (
     NOT_UNDERSTOOD,
     NotUnderstood,
     Refused,
     Row,
     read,
+    refusal,
 )
 from network_analyser.records.collected import (
     NOT_COLLECTED,
@@ -102,6 +107,11 @@ class _Collector:
                     (c.SHOW_VRRP, readers.vrrp_groups, "vrrp"),
                 )
             ),
+            inventory=self.single(c.SHOW_INVENTORY, show_output.inventory),
+            ntp_associations=self.single(c.SHOW_NTP_PEER_STATUS, show_output.ntp_associations),
+            control_plane=self.single(c.SHOW_COPP_STATUS, show_output.control_plane),
+            ssh=self.single(c.SHOW_SSH_KEY, show_output.ssh_settings),
+            guest_shell=self.guest_shell(),
         )
         return Collection(collected, tuple(self.problems), PARSER)
 
@@ -168,6 +178,50 @@ class _Collector:
         if not commands:
             return gaps[0]
         return Reading(tuple(commands), tuple(values), tuple(gaps))
+
+    # -- The new read-only commands (tickets #97, #98) ------------------
+
+    def single[T](self, command: str, reader: Callable[[str], T]) -> Reading[T] | Unknown:
+        """Send one new command and read its part; a refusal leaves only that part unknown.
+
+        These commands are sent last, after everything the Topology needs, so a refusal can
+        never cost the Topology or the Backup. A denied reply is `Unknown("<command>: denied")`,
+        which is what `outdated_role` reads to report a Device Role that predates the command.
+        """
+        found = self.tried(command, reader)
+        if isinstance(found, Refused):
+            return Unknown(f"{command}: {found.reason}")
+        return found
+
+    def tried[T](self, command: str, reader: Callable[[str], T]) -> Reading[T] | Unknown | Refused:
+        """Send one new command and read its part, or say why there is none."""
+        reply = self.send(command)
+        if isinstance(reply, Unknown):
+            return reply
+        refused = refusal(reply)
+        if refused is None:
+            try:
+                return Reading((command,), reader(reply))
+            except NotUnderstood:
+                refused = Refused(NOT_UNDERSTOOD)
+        self.problems.append(Problem(command, refused.reason))
+        return refused
+
+    def guest_shell(self) -> Reading[bool] | Unknown:
+        """The Guest Shell's presence, from `show guestshell` or its documented fallback.
+
+        The fallback is sent only when the first command answers neither data nor a fact
+        (refused or not understood); never after the session was dropped.
+        """
+        found = self.tried(c.SHOW_GUESTSHELL, show_output.guest_shell)
+        if isinstance(found, (Reading, Unknown)):
+            return found
+        fallback = self.tried(
+            c.SHOW_VIRTUAL_SERVICE_LIST, show_output.guest_shell_from_service_list
+        )
+        if isinstance(fallback, Refused):
+            return Unknown(f"{c.SHOW_GUESTSHELL}: {found.reason}")
+        return fallback
 
     # -- Interfaces ------------------
 
