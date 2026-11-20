@@ -159,6 +159,12 @@ nodes:
            commands exec include show standby brief
            commands exec include show vrrp brief
            commands exec include show glbp brief
+           commands exec include show inventory
+           commands exec include show snmp user
+           commands exec include show ntp associations
+           commands exec include show policy-map control-plane
+           commands exec include show ip ssh
+           commands exec include show system insecure configuration
           !
           username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
           !
@@ -322,6 +328,12 @@ nodes:
            commands exec include show standby brief
            commands exec include show vrrp brief
            commands exec include show glbp brief
+           commands exec include show inventory
+           commands exec include show snmp user
+           commands exec include show ntp associations
+           commands exec include show policy-map control-plane
+           commands exec include show ip ssh
+           commands exec include show system insecure configuration
           !
           username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
           !
@@ -535,6 +547,12 @@ nodes:
            commands exec include show standby brief
            commands exec include show vrrp brief
            commands exec include show glbp brief
+           commands exec include show inventory
+           commands exec include show snmp user
+           commands exec include show ntp associations
+           commands exec include show policy-map control-plane
+           commands exec include show ip ssh
+           commands exec include show system insecure configuration
           !
           username netanalyser view NA-READ algorithm-type scrypt secret CHANGE_ME
           !
