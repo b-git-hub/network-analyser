@@ -23,8 +23,11 @@ from network_analyser.records.platform import CredentialSetResult, CredentialSet
 from network_analyser.records.run_summary import RunReport, RunReportFacts
 from network_analyser.records.sweep import ProbeFailure, ProbeResult, SweepResult
 from network_analyser.records.topology import (
+    Check,
+    CheckType,
     Finding,
     FindingKind,
+    FindingLevel,
     SkippedCheck,
     Topology,
     UnknownInterfaceName,
@@ -161,12 +164,19 @@ def test_a_secret_in_device_text_is_blocked_before_it_is_escaped(tmp_path: Path)
         topology.build((record,)),
         findings=(
             Finding(
-                "finding-0123456789ab",
-                FindingKind.CONFLICTING_EVIDENCE,
-                f"see {quoted} and {BACKUP_CANARY}",
-                ("dev-S1",),
-                (),
-                (),
+                id="finding-0123456789ab",
+                devices=("dev-S1",),
+                items=(),
+                evidence=(),
+                level=FindingLevel.LOW,
+                check=Check(
+                    "topology-conflicting-evidence", "Conflicting evidence", CheckType.TOPOLOGY
+                ),
+                what_was_found=f"see {quoted} and {BACKUP_CANARY}",
+                what_to_do="Check both reports for the port.",
+                source="device reports",
+                kind=FindingKind.CONFLICTING_EVIDENCE,
+                summary=f"see {quoted} and {BACKUP_CANARY}",
             ),
         ),
     )
@@ -182,6 +192,26 @@ def test_a_secret_in_device_text_is_blocked_before_it_is_escaped(tmp_path: Path)
     assert "[blocked]" in text
     assert _SCRIPT.search(text) is None
     assert _URL.search(text) is None
+
+
+def test_a_finding_without_a_v1_kind_is_named_by_its_check() -> None:
+    base = _report()
+    analysis = dataclasses.replace(
+        base.topology.findings[0],
+        kind=None,
+        check=Check(
+            "consistency-model-drift",
+            "Same model on different releases",
+            CheckType.CONSISTENCY,
+        ),
+        summary="C9300-48P runs on two releases",
+    )
+    built = dataclasses.replace(base.topology, findings=(analysis,))
+
+    page = report_page.render_run_report(dataclasses.replace(base, topology=built), SecretScan())
+
+    assert "Same model on different releases" in page
+    assert "C9300-48P runs on two releases" in page
 
 
 def test_the_file_is_written_whole_through_the_scan(tmp_path: Path) -> None:
@@ -327,20 +357,37 @@ def _drawn(devices: tuple[DeviceRecord, ...]) -> Topology:
         topology.build(devices),
         findings=(
             Finding(
-                "finding-0123456789ab",
-                FindingKind.DIFFERING_NATIVE_VLAN,
-                "native VLAN differs on the trunk",
-                ("dev-S1",),
-                (),
-                (),
+                id="finding-0123456789ab",
+                devices=("dev-S1",),
+                items=(),
+                evidence=(),
+                level=FindingLevel.MEDIUM,
+                check=Check(
+                    "topology-differing-native-vlan", "Differing native VLAN", CheckType.TOPOLOGY
+                ),
+                what_was_found="native VLAN differs on the trunk",
+                what_to_do="Set the same native VLAN on both ends.",
+                source="config",
+                kind=FindingKind.DIFFERING_NATIVE_VLAN,
+                summary="native VLAN differs on the trunk",
             ),
             Finding(
-                "finding-aaaaaaaaaaaa",
-                FindingKind.VLAN_ON_ONE_END,
-                "VLAN 30 on one end only",
-                ("dev-S1",),
-                (),
-                (),
+                id="finding-aaaaaaaaaaaa",
+                devices=("dev-S1",),
+                items=(),
+                evidence=(),
+                level=FindingLevel.LOW,
+                check=Check(
+                    "topology-vlan-on-one-end",
+                    "VLAN on one end only",
+                    CheckType.TOPOLOGY,
+                    soft=True,
+                ),
+                what_was_found="VLAN 30 on one end only",
+                what_to_do="Add the VLAN to the other end, or prune it from this end.",
+                source="config",
+                kind=FindingKind.VLAN_ON_ONE_END,
+                summary="VLAN 30 on one end only",
             ),
         ),
         skipped=(SkippedCheck("dev-S1", "vlans", "show vlan brief: denied"),),

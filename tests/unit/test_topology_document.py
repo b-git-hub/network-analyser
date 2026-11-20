@@ -1,10 +1,18 @@
 """`topology.json`'s content: plain JSON data with a format version and no username (#52)."""
 
 import json
+from dataclasses import replace
 from typing import Any
 
 from network_analyser import topology
 from network_analyser.records.collected import ALL_VLANS, Reading, SwitchportMode, Vlan
+from network_analyser.records.topology import (
+    AdvisoryDetail,
+    Check,
+    CheckType,
+    Finding,
+    FindingLevel,
+)
 from network_analyser.records.unknown import Unknown
 from tests.support.topology_records import neighbour, port, visited
 
@@ -77,8 +85,6 @@ def test_an_unknown_value_is_an_object_naming_its_reason_never_null() -> None:
 
 
 def test_vlan_sets_are_written_as_ranges() -> None:
-    from dataclasses import replace  # noqa: PLC0415 (only here)
-
     trunk = replace(port("Gi1/0/1"), allowed_vlans=frozenset({1, 2, 3, 10, 20, 21}))
     every = replace(port("Gi1/0/2"), allowed_vlans=ALL_VLANS)
     access = replace(
@@ -98,8 +104,6 @@ def test_vlan_sets_are_written_as_ranges() -> None:
 
 
 def _with_vlans(vlans: Reading[tuple[Vlan, ...]] | Unknown) -> Any:  # noqa: ANN401 (JSON data)
-    from dataclasses import replace  # noqa: PLC0415 (only here)
-
     record = visited(A, "S1")
     assert record.collected is not None
     record = replace(record, collected=replace(record.collected, vlans=vlans))
@@ -121,3 +125,85 @@ def test_a_vlan_database_not_collected_or_incomplete_is_unknown() -> None:
 
     assert _with_vlans(Unknown("show vlan brief: denied")) == {"unknown": "show vlan brief: denied"}
     assert _with_vlans(partial) == {"unknown": "the VLAN database is incomplete"}
+
+
+def _vlan_finding_document() -> Any:  # noqa: ANN401 (JSON data, read by key)
+    a = visited(
+        A,
+        "S1",
+        cdp=[neighbour("Gi1/0/1", "sw-b", "Gi1/0/1", B)],
+        interfaces=[replace(port("Gi1/0/1"), native_vlan=1, allowed_vlans=frozenset({10}))],
+    )
+    b = visited(
+        B,
+        "S2",
+        "sw-b",
+        cdp=[neighbour("Gi1/0/1", "sw-a", "Gi1/0/1", A)],
+        interfaces=[replace(port("Gi1/0/1"), native_vlan=99, allowed_vlans=frozenset({10}))],
+    )
+    return json.loads(json.dumps(topology.to_document(topology.build([a, b]))))
+
+
+def test_a_finding_carries_its_level_check_advice_and_source() -> None:
+    document = _vlan_finding_document()
+
+    (finding,) = document["findings"]
+    assert finding["level"] == "Medium"
+    assert finding["check"] == {
+        "id": "topology-differing-native-vlan",
+        "name": "Differing native VLAN",
+        "type": "Topology",
+        "soft": False,
+    }
+    assert finding["what_was_found"] == finding["summary"]
+    assert finding["what_to_do"] == "Set the same native VLAN on both ends."
+    assert finding["source"] == "config"
+    assert finding["cisco_detail"] is None
+    assert finding["also_flagged_by_cisco"] is False
+    assert document["format_version"] == 1  # an older render drops keys it does not know
+
+
+def test_an_advisory_detail_is_written_as_its_own_object() -> None:
+    detail = AdvisoryDetail(
+        id="cisco-sa-example-abc123",
+        title="Cisco IOS XE Software Example Vulnerability",
+        sir="High",
+        cvss="8.6",
+        cves=("CVE-2099-0001",),
+        published="2026-01-02T16:00:00",
+        updated="2026-02-03T16:00:00",
+        first_fixed="17.9.10",
+        hardware_family_not_confirmed=True,
+    )
+    finding = Finding(
+        id="finding-0123456789ab",
+        devices=("dev-S1",),
+        items=(),
+        evidence=(),
+        level=FindingLevel.HIGH,
+        check=Check("advisory-cisco-sa-example-abc123", "Example Advisory", CheckType.ADVISORY),
+        what_was_found="Affected release 17.9.4",
+        what_to_do="Upgrade to 17.9.10 or later.",
+        source="Cisco openVuln",
+        summary="Affected release 17.9.4",
+        cisco_detail=detail,
+        also_flagged_by_cisco=True,
+    )
+
+    document: Any = topology.to_document(replace(topology.build(()), findings=(finding,)))
+
+    (written,) = document["findings"]
+    assert written["cisco_detail"] == {
+        "id": "cisco-sa-example-abc123",
+        "title": "Cisco IOS XE Software Example Vulnerability",
+        "sir": "High",
+        "cvss": "8.6",
+        "cves": ["CVE-2099-0001"],
+        "published": "2026-01-02T16:00:00",
+        "updated": "2026-02-03T16:00:00",
+        "first_fixed": "17.9.10",
+        "hardware_family_not_confirmed": True,
+    }
+    assert written["also_flagged_by_cisco"] is True
+    assert written["kind"] is None
+    assert written["summary"] == "Affected release 17.9.4"

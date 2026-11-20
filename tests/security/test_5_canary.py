@@ -4,6 +4,7 @@ A canary Credential Set password and Backup Passphrase never appear in `repr`/`s
 console output, `audit.log`, `topology.json` (#52), `diagram.html` (#63), `diagram.drawio`
 (#65) or `run-report.html` (#66), and nothing from
 the `netmiko`/`paramiko` loggers reaches any file or the console. Plain pytest, no device.
+Every Finding's text is scanned too, as a backstop for a Check that leaks a secret (#93).
 """
 
 import dataclasses
@@ -17,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from network_analyser import backup_store, run_output
+from network_analyser import backup_store, run_output, topology
 from network_analyser.cli import main
 from network_analyser.cli.console import ScannedStream
 from network_analyser.cli.diagram_file import write_diagram
@@ -25,6 +26,14 @@ from network_analyser.cli.parser import build_parser
 from network_analyser.cli.run_topology import save_topology
 from network_analyser.credentials import CredentialSet, CredentialSets, Secret, SecretScan
 from network_analyser.records.events import LoginAttempted, LoginResult
+from network_analyser.records.topology import (
+    AdvisoryDetail,
+    Check,
+    CheckType,
+    Finding,
+    FindingKind,
+    FindingLevel,
+)
 from network_analyser.run_output.report import write_run_report
 from tests.support import fake_age
 from tests.support.run_driver import (
@@ -160,6 +169,49 @@ def test_a_secret_that_slips_into_topology_json_never_reaches_the_diagram(tmp_pa
         for canary in (*CANARIES, quoted, "CANARY-pw"):
             assert canary not in text, name
     assert scan.hits >= 6  # at least the three in each file
+
+
+def test_a_secret_that_slips_into_a_finding_never_reaches_disk(tmp_path: Path) -> None:
+    quoted = 'CANARY-pw-"<q\\uote'
+    scan = _scan()
+    scan.watch(Secret(quoted))
+    detail = AdvisoryDetail(
+        id=quoted,
+        title=f"{DEVICE_CANARY} {BACKUP_CANARY}",
+        sir=DEVICE_CANARY,
+        cvss=BACKUP_CANARY,
+        cves=(quoted,),
+        published=DEVICE_CANARY,
+        updated=BACKUP_CANARY,
+        first_fixed=quoted,
+    )
+    finding = Finding(
+        id="finding-0123456789ab",
+        devices=(),
+        items=(),
+        evidence=(),
+        level=FindingLevel.HIGH,
+        check=Check(f"advisory-{quoted}", DEVICE_CANARY, CheckType.ADVISORY),
+        what_was_found=f"{quoted} {DEVICE_CANARY}",
+        what_to_do=f"{BACKUP_CANARY} {quoted}",
+        source=DEVICE_CANARY,
+        kind=FindingKind.CONFLICTING_EVIDENCE,
+        summary=quoted,
+        cisco_detail=detail,
+        also_flagged_by_cisco=True,
+    )
+    built = dataclasses.replace(topology.build(()), findings=(finding,))
+    folder = run_output.RunFolder(path=tmp_path, io_path=tmp_path)
+
+    run_output.write_scanned_json(folder, "topology.json", topology.to_document(built), scan)
+    write_diagram(folder, scan)
+    write_run_report(folder, dataclasses.replace(_report(), topology=built), scan)
+
+    for name in ("topology.json", "diagram.html", "diagram.drawio", "run-report.html"):
+        text = (tmp_path / name).read_text(encoding="utf-8")
+        for canary in (*CANARIES, quoted, "CANARY-pw"):
+            assert canary not in text, name
+    assert "[blocked]" in (tmp_path / "topology.json").read_text(encoding="utf-8")
 
 
 def test_a_secret_that_slips_into_device_text_never_reaches_the_run_report(tmp_path: Path) -> None:
