@@ -127,9 +127,11 @@ _ADVICE: dict[str, _Schema] = {
     "upgrade_target": LEAF,
     "latest_release": LEAF,
     "latest_in_train": LEAF,
+    "train": LEAF,
 }
 """Per-device Analysis advice (#105): its Advisory outcome, Upgrade Target and Latest
-Release. Optional, so a file from before #105 reads it as unknown."""
+Release, and the Train it is on, so the Findings report can say "no fix in Train T" (#107).
+Optional, so a file from before #105 reads it as unknown."""
 _DEVICE: dict[str, _Schema] = {
     "id": ID,
     "outcome": LEAF,
