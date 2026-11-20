@@ -78,6 +78,42 @@ def test_render_redraws_in_place_and_never_touches_the_run_report(run_folder: Pa
     assert (run_folder / "run-report.html").read_text(encoding="utf-8") == "the Run's own record"
 
 
+def test_render_redraws_a_finding_s_level_and_check_from_an_extended_topology(
+    run_folder: Path,
+) -> None:
+    topology = run_folder / "topology.json"
+    data = json.loads(topology.read_text(encoding="utf-8"))
+    data["findings"] = [
+        {
+            "id": "finding-0123456789ab",
+            "kind": "differing native VLAN",
+            "summary": "Differing native VLAN: 1 on sw-a Gi1/0/1; 99 on sw-b Gi1/0/2",
+            "devices": ["dev-S1", "dev-S2"],
+            "items": ["link-1"],
+            "evidence": [],
+            "level": "Medium",
+            "check": {
+                "id": "topology-differing-native-vlan",
+                "name": "Differing native VLAN",
+                "type": "Topology",
+                "soft": False,
+            },
+            "what_was_found": "Differing native VLAN: 1 on sw-a Gi1/0/1; 99 on sw-b Gi1/0/2",
+            "what_to_do": "Set the same native VLAN on both ends.",
+            "source": "config",
+        }
+    ]
+    topology.write_text(json.dumps(data), encoding="utf-8")
+
+    assert _render(str(run_folder)) == ExitCode.CLEAN
+
+    page = (run_folder / DIAGRAM).read_text(encoding="utf-8")
+    assert "topology-differing-native-vlan" in page
+    assert "Differing native VLAN" in page
+    assert "Medium" in page
+    assert "Set the same native VLAN on both ends." in page
+
+
 def test_a_topology_from_a_newer_version_is_refused(
     run_folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

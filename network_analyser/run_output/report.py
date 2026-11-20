@@ -315,9 +315,8 @@ def _finding(item: Finding, names: dict[str, str], scan: SecretScan) -> str:
     who = ", ".join(
         _link("device", device, names.get(device, device), scan) for device in item.devices
     )
-    return (
-        f"{_link('finding', item.id, item.kind.value, scan)}: {_text(item.summary, scan)} ({who})"
-    )
+    label = item.kind.value if item.kind is not None else item.check.name
+    return f"{_link('finding', item.id, label, scan)}: {_text(item.summary, scan)} ({who})"
 
 
 def _sweep(sweep: SweepResult | None, scan: SecretScan) -> str:

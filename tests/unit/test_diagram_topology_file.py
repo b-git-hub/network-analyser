@@ -159,6 +159,63 @@ def test_an_l3_item_needs_a_plain_id(part: str) -> None:
         diagram.read_topology(_text(document))
 
 
+def test_a_finding_from_before_the_scale_reads_its_new_fields_as_unknown() -> None:
+    document = _document()
+    document["findings"] = [
+        {
+            "id": "finding-0123456789ab",
+            "kind": "conflicting evidence",
+            "summary": "Reports disagree about Gi1/0/1",
+            "devices": [],
+            "items": [],
+            "evidence": [],
+        }
+    ]
+
+    (finding,) = _content(document)["findings"]
+
+    assert finding["kind"] == "conflicting evidence"  # the v1 page still draws it
+    assert finding["summary"] == "Reports disagree about Gi1/0/1"
+    for field in (
+        "level",
+        "check",
+        "what_was_found",
+        "what_to_do",
+        "source",
+        "cisco_detail",
+        "also_flagged_by_cisco",
+    ):
+        assert set(finding[field]) == {"unknown"}, field
+
+
+def test_a_finding_s_level_and_check_are_read_for_drawing() -> None:
+    document = _document()
+    document["findings"] = [
+        {
+            "id": "finding-0123456789ab",
+            "level": "Low",
+            "check": {
+                "id": "topology-vlan-on-one-end",
+                "name": "VLAN on one end only",
+                "type": "Topology",
+                "soft": True,
+            },
+            "what_was_found": "VLAN 30 on sw-a Gi1/0/1 only",
+            "what_to_do": "Add the VLAN to the other end, or prune it from this end.",
+            "source": "config",
+            "also_flagged_by_cisco": False,
+        }
+    ]
+
+    (finding,) = _content(document)["findings"]
+
+    assert finding["level"] == "Low"
+    assert finding["check"]["id"] == "topology-vlan-on-one-end"
+    assert finding["check"]["soft"] is True
+    assert finding["what_was_found"] == "VLAN 30 on sw-a Gi1/0/1 only"
+    assert finding["also_flagged_by_cisco"] is False
+
+
 def test_what_is_read_cannot_be_changed() -> None:
     content = _content(_document())
 

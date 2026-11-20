@@ -34,6 +34,7 @@ from network_analyser.records.unknown import Unknown
 from network_analyser.topology import ids
 from network_analyser.topology.devices import Known
 from network_analyser.topology.l3 import NextHop
+from network_analyser.topology.scale import scaled
 
 FAR_PORT: Final = "far port not learned"
 """Why an inferred Link's far interface is unknown: MAC and ARP do not name it."""
@@ -192,9 +193,9 @@ def _learned_ports(device: Known, mac: str) -> dict[str, InterfaceName] | None:
 
 def _conflict(device: Known, hop: NextHop, names: Names, why: str) -> Finding:
     subject = [FindingKind.CONFLICTING_EVIDENCE.value, device.id, hop.far, str(hop.ip), why]
-    return Finding(
-        id=ids.hashed("finding", subject),
-        kind=FindingKind.CONFLICTING_EVIDENCE,
+    return scaled(
+        FindingKind.CONFLICTING_EVIDENCE,
+        ident=ids.hashed("finding", subject),
         summary=(
             f"MAC/ARP evidence for {hop.ip} on {names(device.id)} disagrees ({why}), "
             "so no inferred Link was placed"
@@ -237,9 +238,9 @@ def _one_port_each(
             kept.append(_merged(group))
             continue
         findings.append(
-            Finding(
-                id=ids.hashed("finding", [FindingKind.CONFLICTING_EVIDENCE.value, local, far]),
-                kind=FindingKind.CONFLICTING_EVIDENCE,
+            scaled(
+                FindingKind.CONFLICTING_EVIDENCE,
+                ident=ids.hashed("finding", [FindingKind.CONFLICTING_EVIDENCE.value, local, far]),
                 summary=(
                     f"MAC/ARP evidence places {names(far)} on more than one port of "
                     f"{names(local)}, so no inferred Link was placed"

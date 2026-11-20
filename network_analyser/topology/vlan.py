@@ -30,6 +30,7 @@ from network_analyser.records.topology import (
 from network_analyser.records.unknown import Unknown
 from network_analyser.topology import ids
 from network_analyser.topology.devices import Known, vlan_database
+from network_analyser.topology.scale import scaled
 
 DATA: Final = "vlan_mismatch"
 """`skipped.data` for a VLAN check that could not run. Not a `Collected` field."""
@@ -426,9 +427,9 @@ def _findings(facts: Sequence[_Fact], subject: str, names: Mapping[str, str]) ->
         )
         devices = tuple(sorted({party for fact in group for party in fact.parties}))
         made.append(
-            Finding(
-                id=ids.hashed("finding", [kind.value, subject, *tokens]),
-                kind=kind,
+            scaled(
+                kind,
+                ident=ids.hashed("finding", [kind.value, subject, *tokens]),
                 summary=_summary(kind, group, names),
                 devices=devices,
                 items=(subject,),

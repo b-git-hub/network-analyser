@@ -108,9 +108,18 @@ A prefix in one VRF on exactly two devices is one adjacency of kind `shared subn
 
 ### `findings[]`
 
-`id`, `kind`, `summary` (one line), `devices[]`, `items[]` (Link, Bundle, Segment ids), `evidence[]`.
+`id`, `devices[]`, `items[]` (Link, Bundle, Segment ids), `evidence[]`, `level`, `check`, `what_was_found`, `what_to_do`, `source`, `summary`, and the optional `kind`, `cisco_detail` and `also_flagged_by_cisco` (#93, 2026-11-20).
+
+- `level` is `Critical`, `High`, `Medium` or `Low`. There is no Info level.
+- `check` is the Check that raised it: `id` (stable in every Run), `name`, `type` (`Advisory`, `Configuration`, `Lifecycle`, `Consistency`, `Topology`) and `soft` (true for a Check shown fainter and listed last within its level, such as `VLAN on one end only`).
+- `what_was_found` is fixed text plus names, keywords, type numbers and counts; `what_to_do` is the fix; `source` is `Cisco openVuln`, `config`, `device reports` or `tool policy, not a Cisco rule`.
+- `summary` is one line saying what is wrong, kept so the v1 pages still draw a Topology Finding. `kind` is v1's kind, `null` for an Analysis Finding. A file from before #93 has neither the new keys nor the new shape; its findings still draw.
+- `cisco_detail` is one of two shapes, or `null`: an Advisory's `id`, `title`, `sir`, `cvss`, `cves[]`, `published`, `updated`, `first_fixed` (`null` for no fix in the device's Train) and `hardware_family_not_confirmed`; or an EoX `items[]` of `name`, `last_date_of_support`, `end_of_security_support`, `end_of_sw_maintenance`, `end_of_sale` and `replacement`. Dates are fixed ISO 8601 text.
+- `also_flagged_by_cisco` is `true` when Cisco's own insecure-configuration list flags the same thing.
 
 `kind` is `conflicting evidence`, `Bundle member mismatch`, or a VLAN Mismatch (#61, 2026-11-19): `VLAN on one end only`, `differing native VLAN`, `trunk facing access`, `differing access VLANs`. A VLAN Mismatch's `items` is the Link or the Bundle, never a member Link. Its `evidence[].source` is `VLAN` for switchport and VLAN-database commands, or `CDP` when the native VLAN was advertised by an Unvisited Device. `format_version` stays `1`: `kind` and `source` are plain strings an older `render` already keeps.
+
+**No format-version bump for #93 (2026-11-20).** The new Finding fields are optional: an older `render` drops the keys it does not know and still draws the v1 `kind` and `summary` it reads, so it would not misread the file. A new `render` reads a file from before #93 with the new fields unknown. The bump rule in *Format version* is unchanged, and a newer file is still refused.
 
 ### `skipped[]` and `unknown_interface_names[]`
 
@@ -130,3 +139,4 @@ A prefix in one VRF on exactly two devices is one adjacency of kind `shared subn
   - #62 (2026-11-19) added `adjacencies` and `subnets` to this file.
   - Built by #64 (2026-11-19): the diagram schema now reads `adjacencies`, `subnets`, `skipped` and devices' `vlan_database`; `place(...).subnets` positions Subnet nodes. `diagram.html` has the Map tab (Physical, Routing (L3), VLAN views, with Mismatch markers) and the Findings tab, which `#finding=<id>` opens. `diagram.drawio`'s Routing page draws Adjacencies and Subnets. Calls: [spec-37-implementation-calls](wiki/spec-37-implementation-calls.md), item 16.
 - **#66 (Run report):** list `skipped`, `unknown_interface_names` and `findings`; link with the ids above.
+- **#93 (Finding scale, 2026-11-20):** every Finding now carries `level`, `check` (stable id, name, type, `soft`), `what_was_found`, `what_to_do` and `source`, with optional `cisco_detail` and `also_flagged_by_cisco` (records in `records/topology.py`). v1's kinds are mapped in `topology/scale.py`: conflicting evidence and `VLAN on one end only` are Low (the latter `soft`); Bundle member mismatch, differing native VLAN, trunk facing access and differing access VLANs are Medium. New Analysis Findings carry no v1 `kind`, but they do carry a v1 `summary`. `format_version` stays `1` for the reason given under `findings[]`. A later Check ticket builds its own `Check(id, name, type)` and a `Finding` through the record, sorts with `Finding.order` (worst first, a soft Check last in its level) and writes it into `topology.json` as an optional field.

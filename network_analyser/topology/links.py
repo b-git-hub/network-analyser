@@ -25,6 +25,7 @@ from network_analyser.records.topology import (
 from network_analyser.records.unknown import Unknown
 from network_analyser.topology import ids
 from network_analyser.topology.devices import Claim
+from network_analyser.topology.scale import scaled
 
 NOT_ADVERTISED = "the far end did not advertise its port"
 
@@ -203,9 +204,9 @@ def _conflicts(links: list[Link], names: Names) -> tuple[list[Link], tuple[Findi
         if len(claiming) < 2:  # noqa: PLR2004 (two claims disagree)
             continue
         items = sorted(link.id for link in claiming)
-        finding = Finding(
-            id=ids.hashed("finding", [FindingKind.CONFLICTING_EVIDENCE.value, *items]),
-            kind=FindingKind.CONFLICTING_EVIDENCE,
+        finding = scaled(
+            FindingKind.CONFLICTING_EVIDENCE,
+            ident=ids.hashed("finding", [FindingKind.CONFLICTING_EVIDENCE.value, *items]),
             summary=(
                 f"Reports disagree about {port} on {names(device)}: {len(claiming)} Links claim it"
             ),

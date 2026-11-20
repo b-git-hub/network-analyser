@@ -133,6 +133,30 @@ _BUNDLE: dict[str, _Schema] = {
     "role": LEAF,
     "flagged": [ID],
 }
+_CHECK: dict[str, _Schema] = {"id": LEAF, "name": LEAF, "type": LEAF, "soft": LEAF}
+_ADVISORY_DETAIL: dict[str, _Schema] = {
+    "id": LEAF,
+    "title": LEAF,
+    "sir": LEAF,
+    "cvss": LEAF,
+    "cves": [LEAF],
+    "published": LEAF,
+    "updated": LEAF,
+    "first_fixed": LEAF,
+    "hardware_family_not_confirmed": LEAF,
+}
+_EOX_ITEM: dict[str, _Schema] = {
+    "name": LEAF,
+    "last_date_of_support": LEAF,
+    "end_of_security_support": LEAF,
+    "end_of_sw_maintenance": LEAF,
+    "end_of_sale": LEAF,
+    "replacement": LEAF,
+}
+_CISCO_DETAIL: dict[str, _Schema] = {
+    **_ADVISORY_DETAIL,
+    "items": [_EOX_ITEM],
+}
 _FINDING: dict[str, _Schema] = {
     "id": ID,
     "kind": LEAF,
@@ -140,6 +164,13 @@ _FINDING: dict[str, _Schema] = {
     "devices": [ID],
     "items": [ID],
     "evidence": [_EVIDENCE],
+    "level": LEAF,
+    "check": _CHECK,
+    "what_was_found": LEAF,
+    "what_to_do": LEAF,
+    "source": LEAF,
+    "cisco_detail": _CISCO_DETAIL,
+    "also_flagged_by_cisco": LEAF,
 }
 _ADJACENCY: dict[str, _Schema] = {
     "id": ID,

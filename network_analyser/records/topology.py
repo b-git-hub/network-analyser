@@ -3,7 +3,8 @@
 Its shape is the `topology.json` schema (docs/topology-json.md): each record becomes a JSON
 object with the same field names. VLAN Mismatches (#61) add four finding kinds and a
 `vlan_mismatch` skipped row. Later tickets add L3 Adjacency, Subnets and inferred Links (#62).
-A new optional field needs no format-version bump;
+Every Finding also carries the 0.2.0 scale: level, Check identity, what was found, what to do,
+source, and optional Cisco detail (#93). A new optional field needs no format-version bump;
 a change an older `render` would misread does (`topology.FORMAT_VERSION`).
 
 **Stable ids** (`id` fields) are shared by `topology.json`, the diagram (`#device=<id>`,
@@ -280,7 +281,7 @@ class Bundle:
 
 @unique
 class FindingKind(Enum):
-    """The kinds of finding the Topology raises. Later tickets add theirs (#62)."""
+    """v1's kinds of finding, raised by the Topology. An Analysis Finding has none (#93)."""
 
     CONFLICTING_EVIDENCE = "conflicting evidence"
     """Reports disagree about a port: kept, flagged, never resolved silently (story 125)."""
@@ -296,25 +297,178 @@ class FindingKind(Enum):
     """The two ends' access VLANs differ (story 134)."""
 
 
+@unique
+class FindingLevel(Enum):
+    """How bad a Finding is (spec #92, "Levels"). Critical is worst, and there is no Info."""
+
+    CRITICAL = "Critical"
+    HIGH = "High"
+    MEDIUM = "Medium"
+    LOW = "Low"
+
+    @property
+    def rank(self) -> int:
+        """0 for Critical through 3 for Low, for a worst-first sort."""
+        return _LEVELS.index(self)
+
+
+_LEVELS: tuple[FindingLevel, ...] = (
+    FindingLevel.CRITICAL,
+    FindingLevel.HIGH,
+    FindingLevel.MEDIUM,
+    FindingLevel.LOW,
+)
+
+
+@unique
+class CheckType(Enum):
+    """What kind of Check raised a Finding (spec #92, "Finding record")."""
+
+    ADVISORY = "Advisory"
+    CONFIGURATION = "Configuration"
+    LIFECYCLE = "Lifecycle"
+    CONSISTENCY = "Consistency"
+    TOPOLOGY = "Topology"
+
+
+@dataclass(frozen=True, slots=True)
+class Check:
+    """The Check that raised a Finding: its stable id, name and type (spec #92).
+
+    Attributes:
+        id: its stable id, the same in every Run.
+        name: its name, as the operator sees it.
+        type: Advisory, Configuration, Lifecycle, Consistency or Topology.
+        soft: True for a Check whose Findings are drawn fainter and listed last within
+            their level (VLAN on one end only, story 85).
+    """
+
+    id: str
+    name: str
+    type: CheckType
+    soft: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class AdvisoryDetail:
+    """Cisco's own detail for an Advisory Finding (stories 49-51).
+
+    Attributes:
+        id: the Advisory id, such as `cisco-sa-example-abc123`.
+        title: its title, in Cisco's words.
+        sir: Cisco's Security Impact Rating: Critical, High, Medium or Low.
+        cvss: its CVSS score, as Cisco gives it.
+        cves: the CVEs it covers, in Cisco's order.
+        published: when Cisco published it, as fixed ISO 8601 text.
+        updated: when Cisco last updated it, as fixed ISO 8601 text.
+        first_fixed: the Advisory's first fixed release in the device's Train; None when
+            it has no fix in that Train.
+        hardware_family_not_confirmed: True when an NX-OS match rests on the release alone
+            because the Nexus hardware family could not be worked out (story 46).
+    """
+
+    id: str
+    title: str
+    sir: str
+    cvss: str
+    cves: tuple[str, ...]
+    published: str
+    updated: str
+    first_fixed: str | None
+    hardware_family_not_confirmed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class EoxItem:
+    """One hardware or software item Cisco gives end-of-life dates for (story 74).
+
+    Dates are fixed ISO 8601 text; None means Cisco gave none.
+
+    Attributes:
+        name: the item Cisco names: a PID, or a release string.
+        last_date_of_support: Cisco's Last Date of Support.
+        end_of_security_support: Cisco's End of Security/Vulnerability Support.
+        end_of_sw_maintenance: Cisco's End of SW Maintenance.
+        end_of_sale: Cisco's End of Sale.
+        replacement: Cisco's replacement PID; None when it names none.
+    """
+
+    name: str
+    last_date_of_support: str | None = None
+    end_of_security_support: str | None = None
+    end_of_sw_maintenance: str | None = None
+    end_of_sale: str | None = None
+    replacement: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EoxDetail:
+    """Cisco's EoX detail for a hardware or software Finding (story 74).
+
+    Attributes:
+        items: one per item Cisco named, in Cisco's order.
+    """
+
+    items: tuple[EoxItem, ...]
+
+
+type CiscoDetail = AdvisoryDetail | EoxDetail
+"""Cisco's own detail on a Finding: an Advisory's, or EoX dates and replacement PIDs."""
+
+
 @dataclass(frozen=True, slots=True)
 class Finding:
     """Something the operator should look at, with a stable id (`#finding=<id>`).
 
+    A v1 kind keeps its `kind` and `summary` so the v1 pages still draw it; every Finding
+    also carries the 0.2.0 scale: its level, Check identity, advice and source (spec #92).
+    An Analysis Finding has no v1 kind.
+
+    Every string here is plain data. The Run's secret scan runs over it before it reaches
+    `topology.json`, the diagram or a report, so a bug in a Check cannot leak a secret
+    (story 116).
+
     Attributes:
         id: its stable id.
-        kind: what kind of finding.
-        summary: one line saying what is wrong, built from fixed text and names.
         devices: the ids of the devices it concerns.
         items: the ids of the Links, Bundles or Shared Segments it concerns.
         evidence: the reports behind it.
+        level: Critical, High, Medium or Low.
+        check: the Check that raised it: stable id, name and type.
+        what_was_found: fixed text plus names, keywords, type numbers and counts, never a
+            secret, hash, key or quoted config line (story 66).
+        what_to_do: how to fix it, as fixed text.
+        source: where it comes from: `Cisco openVuln`, `config`, `device reports` or
+            `tool policy, not a Cisco rule`.
+        summary: one line saying what is wrong, built from fixed text and names; the v1
+            pages show it.
+        kind: the v1 kind; None for an Analysis Finding.
+        cisco_detail: Cisco's own detail for an Advisory or EoX Finding; None otherwise.
+        also_flagged_by_cisco: True when Cisco's own insecure-configuration list flags the
+            same thing (story 67).
     """
 
     id: str
-    kind: FindingKind
-    summary: str
     devices: tuple[str, ...]
     items: tuple[str, ...]
     evidence: tuple[Evidence, ...]
+    level: FindingLevel
+    check: Check
+    what_was_found: str
+    what_to_do: str
+    source: str
+    summary: str
+    kind: FindingKind | None = None
+    cisco_detail: CiscoDetail | None = None
+    also_flagged_by_cisco: bool = False
+
+    @property
+    def order(self) -> tuple[int, int, str, str]:
+        """A worst-first sort key: level, then soft Checks last, then Check and Finding id.
+
+        `VLAN on one end only` is soft, so it is listed last within Low (story 85).
+        """
+        return (self.level.rank, 1 if self.check.soft else 0, self.check.id, self.id)
 
 
 @unique
