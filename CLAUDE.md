@@ -41,11 +41,11 @@ When you coordinate subagents, set `model` on every Agent call. A subagent with 
 
 | Role | Model |
 |---|---|
-| Planning: map, spec, tickets, decision tickets | Opus |
+| Planning: map, spec, tickets, and every wayfinder decision ticket (`wayfinder:research`, `prototype`, `grilling`, `task`) | Opus |
 | Coordinating, and `code-review` of an integration branch | Opus |
 | Implementing a ticket that touches `credentials`, `device_gateway`, `backup_store`, `trust_store`, the secret scan or redaction, or the command allow-list | Opus |
 | Implementing any other ticket | Sonnet |
-| Exploration that only gathers and summarises facts | Sonnet |
+| Fetching and summarising pages or docs for an Opus agent that makes the decision, and code exploration before implementing | Sonnet |
 | Merging a finished ticket branch ([merger brief](docs/wiki/merger-brief.md)) | Sonnet |
 | Retros, wiki log lines, regenerating the lab role, other scripted steps | Sonnet, or Haiku when the steps are fully scripted |
 

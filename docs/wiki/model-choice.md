@@ -11,6 +11,9 @@ On 2026-11-20 the operator asked for coordinators to use cheaper models where th
 ## Why the split is by risk, not by planning versus coding
 The guardrails (strict ruff and mypy, arch tests, security tests, `CODING_STANDARDS.md`) catch most mistakes in well-specified code, so a cheaper model fits there. They cannot catch a security behaviour that no test describes yet. In the security-core modules, finding that gap is the job, so those tickets stay on Opus.
 
+## Wayfinder research tickets (2026-11-20)
+The operator confirmed that `wayfinder:research` tickets run on Opus. They end in a decision that later work builds on (ADRs, the spec), so weighing sources and spotting conflicts is the job. An Opus research agent may hand pure page fetching and summarising to Sonnet helpers, but it reads the primary sources behind any claim the decision rests on.
+
 ## How to revise
 - First trial suggested: give #65 (`diagram.drawio`) to Sonnet, run `code-review`, and compare against an Opus ticket of similar size. Record the result here, dated.
 - Move a role down a tier only with evidence like that. Move a role up after a failure, and say which ticket failed.
