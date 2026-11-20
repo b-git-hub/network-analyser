@@ -1,0 +1,40 @@
+# Cisco lookups happen at the end of a Run, after device secrets are wiped, and send only models and releases
+
+_Supersedes [ADR 0006](0006-run-refreshes-signed-cisco-advisories-before-secrets.md)._
+
+Analysis now asks Cisco three things about the Visited Devices:
+- which Advisories affect a release, from the PSIRT openVuln API;
+- end-of-life dates, from the EoX API;
+- which releases Cisco suggests and which is latest, from the Software Suggestion API.
+
+All three take the model or release in the request, and the tool learns those only after logging into devices. The operator also wants nothing kept between Runs: the tool is often run once against a network, so a local store of Cisco's data would rarely be reused.
+
+So ADR 0006 is replaced. It refreshed a stored, signed copy of every CSAF Advisory before any secret was typed, and sent no device data. Instead, a Run goes online **once, at its end**:
+
+1. Every device session is closed.
+2. Every Backup is already locked.
+3. Every Credential Set password and the Backup Passphrase are wiped from memory.
+4. The tool then sends Cisco only the **de-duplicated set** of PIDs and release strings it needs, using the Cisco API secret.
+
+That secret is the only one held while online, and it goes only to Cisco's token service. Nothing Cisco returns is written anywhere except as Findings and advice in the Run's outputs.
+
+Decided on [Which configuration, lifecycle and consistency Checks ship](https://github.com/b-git-hub/network-analyser/issues/81).
+
+## Consequences
+
+- **Still one egress module.** `advisories` is the only module that opens an outbound HTTPS connection or imports the HTTP client. It holds no device password and no Backup Passphrase. The only secret it ever holds is the Cisco API secret. It receives plain lists of PIDs and releases from `analysis`. The import test enforces this.
+- **What is sent.** Only distinct PIDs (chassis, stack members, supervisors and line cards; never optics, PSUs or fans) and distinct OS type + release strings. Each value must match a strict pattern before it is sent. Serials, counts, hostnames, IPs, config and every other field are never sent. The Audit log records how many calls and values went to each endpoint, never the values themselves.
+- **No duplicate requests.** One request per distinct question, batched where the API allows (20 PIDs or releases per EoX call, 10 PIDs per Suggestion call). Calls are paced under Cisco's limits (openVuln allows 30 calls a minute), honour `Retry-After` and Cisco's rate-limit codes, and are retried once.
+- **Fence.** Only `id.cisco.com` (token) and `apix.cisco.com` (APIs), only over HTTPS on port 443, with certificates checked against the Windows store. Every redirect is refused. Proxies come from Windows' own setting or `--proxy`, never from environment variables.
+- **Trust rests on TLS.** openVuln, EoX and Suggestion replies are not signed, so the CSAF signature check and the built-in PSIRT keys go away. The Run report says the data was fetched over TLS and not signature-checked.
+- **Nothing stored.** There is no Advisory Store and no lifecycle store, and nothing is kept between Runs.
+- **Outages never stop a Run.** If Cisco can't be reached, or the key is missing, expired or revoked, each affected source gets one Needs-your-attention line, there are no per-device Findings for it, and the Run exits 1.
+- **Opt-out.** `--cisco-lookups on|off` (default `on`) replaces `--advisories`. `off` means the Run never goes online.
+- **A Cisco key is required for any Cisco data.** How it is supplied and kept is decided on [How Cisco API keys are supplied and kept](https://github.com/b-git-hub/network-analyser/issues/77). It must be in memory at the Run's end, and Cisco's terms forbid embedding it in an open-source project, so it is never built into the exe.
+
+## Considered Options
+
+- **Keep ADR 0006 (signed CSAF, stored, refreshed before secrets):** this was the strongest isolation, but it can't serve EoX or the Suggested Release, and the operator does not want a local store.
+- **Pull every CSAF file fresh each Run, held in memory:** this stays keyless and signed, but it means about 5,800 requests and roughly 13 MB compressed per Run whatever the estate size (measured 2026-11-20). The operator preferred a few targeted queries.
+- **Look up during the crawl:** results come sooner, but the tool would be online while every device password is in memory.
+- **A separate lookup command after the Run:** this adds a second step to a tool that is usually run once.
