@@ -37,7 +37,8 @@ version_file.write_text(version_file_text(__version__), encoding="utf-8")
 a = Analysis(  # noqa: F821
     [str(REPO_ROOT / "network_analyser" / "__main__.py")],
     pathex=[str(REPO_ROOT)],
-    hiddenimports=["netmiko", "paramiko", "pyrage", "textfsm", "ntc_templates"],
+    # #95: truststore picks a platform backend by `platform.system()`, so name it too.
+    hiddenimports=["netmiko", "paramiko", "pyrage", "textfsm", "ntc_templates", "truststore"],
     # TextFSM templates, and any non-Python files of our own (such as the diagram's
     # JavaScript and CSS once they exist).
     # ntc_templates reads its own version from its metadata when imported.
