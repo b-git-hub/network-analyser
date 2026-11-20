@@ -10,6 +10,7 @@ from network_analyser import topology
 from network_analyser.records.collected import Interface, Neighbour, Reading, SwitchportMode, Vlan
 from network_analyser.records.device import DeviceRecord
 from network_analyser.records.topology import (
+    Check,
     CheckType,
     Finding,
     FindingKind,
@@ -211,3 +212,32 @@ def test_the_levels_sort_critical_first_with_no_info_level() -> None:
     ordered = sorted(FindingLevel, key=lambda level: level.rank)
 
     assert [level.value for level in ordered] == ["Critical", "High", "Medium", "Low"]
+
+
+def _made(ident: str, level: FindingLevel, check_id: str, *, soft: bool = False) -> Finding:
+    return Finding(
+        id=ident,
+        devices=(),
+        items=(),
+        evidence=(),
+        level=level,
+        check=Check(check_id, check_id, CheckType.TOPOLOGY, soft=soft),
+        what_was_found="something",
+        what_to_do="fix it",
+        source="config",
+        summary="something",
+    )
+
+
+def test_a_soft_check_is_listed_last_within_its_level() -> None:
+    conflict = _made("finding-000000000001", FindingLevel.LOW, "topology-conflicting-evidence")
+    one_end = _made("finding-000000000002", FindingLevel.LOW, "topology-vlan-on-one-end", soft=True)
+    native = _made("finding-000000000003", FindingLevel.MEDIUM, "topology-differing-native-vlan")
+
+    ordered = sorted([one_end, native, conflict], key=lambda finding: finding.order)
+
+    assert [finding.check.id for finding in ordered] == [
+        "topology-differing-native-vlan",
+        "topology-conflicting-evidence",
+        "topology-vlan-on-one-end",
+    ]

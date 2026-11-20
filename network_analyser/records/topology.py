@@ -462,6 +462,14 @@ class Finding:
     cisco_detail: CiscoDetail | None = None
     also_flagged_by_cisco: bool = False
 
+    @property
+    def order(self) -> tuple[int, int, str, str]:
+        """A worst-first sort key: level, then soft Checks last, then Check and Finding id.
+
+        `VLAN on one end only` is soft, so it is listed last within Low (story 85).
+        """
+        return (self.level.rank, 1 if self.check.soft else 0, self.check.id, self.id)
+
 
 @unique
 class AdjacencyKind(Enum):
