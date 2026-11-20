@@ -254,15 +254,41 @@ def test_a_device_s_advice_is_read_for_the_advisory_pane() -> None:
         "outcome": "1 Advisory matches",
         "upgrade_target": "17.12.8",
         "latest_release": "17.12.10",
+        "latest_in_train": "17.12.10",
     }
 
-    advice = _content(document)["devices"][0]["advice"]
+    advice = diagram.device_advice(_content(document)["devices"][0])
 
-    assert advice["upgrade_target"] == "17.12.8"
-    assert advice["latest_release"] == "17.12.10"
+    assert advice.known is True
+    assert advice.outcome == "1 Advisory matches"
+    assert (advice.upgrade_target, advice.target_recorded) == ("17.12.8", True)
+    assert advice.latest_release == "17.12.10"
+    assert advice.latest_in_train == "17.12.10"
 
 
-def test_a_device_from_before_advice_reads_it_as_unknown() -> None:
-    advice = _content(_document())["devices"][0]["advice"]
+def test_a_device_from_before_advice_reads_it_as_not_known() -> None:
+    advice = diagram.device_advice(_content(_document())["devices"][0])
 
-    assert set(advice) == {"unknown"}
+    assert advice.known is False
+    assert (advice.outcome, advice.upgrade_target, advice.latest_release) == (None, None, None)
+
+
+def test_a_null_upgrade_target_is_recorded_but_an_unknown_one_is_not() -> None:
+    document = _document()
+    document["devices"][0]["advice"] = {"outcome": "1 Advisory matches", "upgrade_target": None}
+    document["devices"][1]["advice"] = {
+        "outcome": "1 Advisory matches",
+        "upgrade_target": {"unknown": "no source for the NX-OS Upgrade Target"},
+    }
+
+    first, second = _content(document)["devices"]
+
+    assert diagram.device_advice(first).target_recorded is True
+    assert diagram.device_advice(second).target_recorded is False
+
+
+def test_a_null_advice_record_reads_as_not_known() -> None:
+    document = _document()
+    document["devices"][0]["advice"] = None
+
+    assert diagram.device_advice(_content(document)["devices"][0]).known is False

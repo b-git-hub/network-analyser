@@ -86,6 +86,65 @@ def cisco_lookups(topology: TopologyFile) -> CiscoLookups:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class DeviceAdvice:
+    """One device's Analysis advice (#105), read here for the Findings pane and the Map (#109).
+
+    The field is optional, so a file from before #105, or a device Analysis did not advise,
+    has no record and reads as not known rather than as empty.
+
+    Attributes:
+        known: True only when the file holds an advice record for this device.
+        outcome: its Advisory outcome; None when the file records none.
+        upgrade_target: the release to move to; None when the file records null or none.
+        target_recorded: True when the file records the Upgrade Target as either a release
+            or null. False when it is unknown or missing, so a null is never confused with
+            a value this topology.json does not hold.
+        latest_release: the newest release; None when the file records none.
+        latest_in_train: the newest release in its Train; None when the file records none.
+    """
+
+    known: bool
+    outcome: str | None
+    upgrade_target: str | None
+    target_recorded: bool
+    latest_release: str | None
+    latest_in_train: str | None
+
+
+def device_advice(device: Mapping[str, Plain]) -> DeviceAdvice:
+    """Return the one reading of a device's `advice` record (#105, #109).
+
+    Every surface that shows a device's Advisory outcome, Upgrade Target or Latest Release
+    goes through here, so a change to the field's shape is a change in one place. Absent or
+    unreadable advice reads as not known, never as an empty answer.
+    """
+    recorded = device.get("advice")
+    if not isinstance(recorded, Mapping) or _is_unknown(recorded):
+        return DeviceAdvice(
+            known=False,
+            outcome=None,
+            upgrade_target=None,
+            target_recorded=False,
+            latest_release=None,
+            latest_in_train=None,
+        )
+    target = recorded.get("upgrade_target")
+    return DeviceAdvice(
+        known=True,
+        outcome=_text_field(recorded, "outcome"),
+        upgrade_target=target if isinstance(target, str) else None,
+        target_recorded=target is None or isinstance(target, str),
+        latest_release=_text_field(recorded, "latest_release"),
+        latest_in_train=_text_field(recorded, "latest_in_train"),
+    )
+
+
+def _text_field(record: Mapping[str, Plain], field: str) -> str | None:
+    value = record.get(field)
+    return value if isinstance(value, str) else None
+
+
 class _Leaf:
     """Any plain value: text, a number, true/false, null, unknown, or a list of these."""
 
@@ -314,15 +373,16 @@ def _record(value: dict[object, object], schema: dict[str, _Schema]) -> Mapping[
 
 def _is_unknown(value: object) -> bool:
     return (
-        isinstance(value, dict) and set(value) == {"unknown"} and isinstance(value["unknown"], str)
+        isinstance(value, Mapping)
+        and set(value) == {"unknown"}
+        and isinstance(value["unknown"], str)
     )
 
 
 def _leaf(value: object) -> Plain:
     if value is None or isinstance(value, str | int | float | bool):
         return value
-    if _is_unknown(value):
-        assert isinstance(value, dict)  # noqa: S101 (checked by _is_unknown)
+    if isinstance(value, Mapping) and _is_unknown(value):
         return MappingProxyType({"unknown": str(value["unknown"])})
     if isinstance(value, list):
         return tuple(_leaf(item) for item in value)

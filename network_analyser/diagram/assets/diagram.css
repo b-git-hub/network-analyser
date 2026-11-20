@@ -3,6 +3,7 @@
   --bg:#f3f5f8; --surface:#ffffff; --canvas:#fbfcfd; --fg:#18212c; --muted:#5a6676; --line:#d6dce4;
   --accent:#0b6e99; --accent-bg:#e3f1f8; --link:#3b4757;
   --bad:#c42b2b; --bad-bg:#fbe8e8; --warn:#b5650b; --unk:#8792a2; --conflict:#b0236f; --ok:#2c7a4b;
+  --critical:#8f1239; --high:#c42b2b; --medium:#b5650b; --low:#3d6a8f;
   --node:#ffffff; --node-stroke:#2d3a4a; --ghost:#eceff3;
   --font:"Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   --mono:"Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, Menlo, monospace;
@@ -11,6 +12,7 @@
   --bg:#0f141a; --surface:#161d26; --canvas:#121920; --fg:#e4e9ef; --muted:#97a3b3; --line:#2a3542;
   --accent:#4fb3de; --accent-bg:#14303f; --link:#a9b6c6;
   --bad:#ff6b6b; --bad-bg:#3a1c1e; --warn:#f0a646; --unk:#7d8898; --conflict:#f06ab0; --ok:#5cc58a;
+  --critical:#ff7aa2; --high:#ff6b6b; --medium:#f0a646; --low:#7fb2dc;
   --node:#1b2430; --node-stroke:#9fb0c3; --ghost:#1a2029; color-scheme:dark }}
 
 html,body{height:100%;margin:0}
@@ -105,6 +107,23 @@ header.top h1{font-size:15px;margin:0;font-weight:650}
 .edge.mk-noisy .ln{stroke:var(--warn);opacity:.8}
 .edge.mk-conflict .ln{stroke:var(--conflict)}
 .node.has-bad rect{stroke:var(--bad);stroke-width:2.4}
+
+/* Map badges and Upgrade Target tags (#109, stories 96-98) */
+.marker{pointer-events:none}
+.marker.count rect{stroke:var(--surface);stroke-width:1.5}
+.marker.count text{font:700 11px var(--font);fill:#fff}
+.marker.count.critical rect{fill:var(--critical)} .marker.count.high rect{fill:var(--high)}
+.marker.count.medium rect{fill:var(--medium)} .marker.count.low rect{fill:var(--low)}
+.marker.tag rect{fill:var(--surface);stroke:currentColor}
+.marker.tag text{font:700 10px var(--font);fill:currentColor}
+.marker.tag.target{color:var(--ok)} .marker.tag.no-fix{color:var(--warn)} .marker.tag.could-not-check{color:var(--unk)}
+.marker-key{font:700 10.5px/1 var(--font)}
+.marker-key.target{color:var(--ok)} .marker-key.no-fix{color:var(--warn)} .marker-key.could-not-check{color:var(--unk)}
+.marker-dot{width:9px;height:9px;border-radius:50%;display:inline-block;background:var(--unk)}
+.marker-dot.critical{background:var(--critical)} .marker-dot.high{background:var(--high)}
+.marker-dot.medium{background:var(--medium)} .marker-dot.low{background:var(--low)}
+@media (prefers-color-scheme: dark){ .marker.count text{fill:#0f141a} }
+
 .node.faded{opacity:.28}
 .node.centre rect{stroke-width:2.4}
 .edge.focus .ln{stroke:var(--accent);stroke-width:3}

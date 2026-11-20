@@ -1,8 +1,9 @@
 r"""`draw_html(topology, redact)`: the self-contained `diagram.html` (#63, #64, stories 142-153).
 
-Two tabs: the Map (Physical, Routing and VLAN views, each device in the same place) and
-Findings (grouped by level, then by Check; picking a Check lights only the devices and Links
-it hit and dims everything else) (#108).
+Two tabs: the Map (Physical, Routing and VLAN views, each device in the same place, with a
+Finding count badge and an Upgrade Target tag on every box) (#109) and Findings (grouped by
+level, then by Check; picking a Check lights only the devices and Links it hit and dims
+everything else) (#108).
 
 The page is one file that works offline. It loads nothing: no CDN, web font, telemetry or
 third-party JavaScript, only our own plain JavaScript and CSS from `assets/`, inlined. A
@@ -33,6 +34,7 @@ from typing import Final
 
 from network_analyser.diagram.findings import findings_tab
 from network_analyser.diagram.layout import Layout, place
+from network_analyser.diagram.markers import map_markers
 from network_analyser.diagram.topology_file import Plain, TopologyFile
 
 TITLE: Final = "Network diagram"
@@ -50,6 +52,7 @@ def draw_html(topology: TopologyFile, redact: Callable[[str], str]) -> str:
         "topology": topology.content,
         "layout": _layout_data(layout),
         "findings": asdict(findings_tab(topology)),
+        "markers": asdict(map_markers(topology)),
     }
     payload = _encode(data, redact)
     style = _asset("diagram.css")

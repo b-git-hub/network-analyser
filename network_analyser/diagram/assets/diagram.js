@@ -75,6 +75,11 @@
   const checkSel = () => (S.check ? CHECK_BY_KEY.get(S.check) : null);
   const levelClass = level => String(level || '').toLowerCase();
 
+  /* ---------- the Map's badges and tags, worked out by the tool (#109) ---------- */
+  const MK = DATA.markers && typeof DATA.markers === 'object' ? DATA.markers : {};
+  const MARK_BY_DEVICE = new Map();
+  arr(MK.devices).forEach(m => { if (m && typeof m.device === 'string') MARK_BY_DEVICE.set(m.device, m); });
+
   function nameOf(id) {
     const d = DEV.get(id);
     if (d) return str(d.hostname) || str(d.management_ip) || id;
@@ -369,6 +374,32 @@
   }
   const boxless = id => SEG.has(id) || SUBNET.has(id);
 
+  /* The Map's marks on one device box: a count badge coloured by the worst level, and the
+     upgrade-path tag under it (stories 96-97). They are drawn from the tool's model and never
+     change a device's position. */
+  function nodeMarkers(id) {
+    const m = MARK_BY_DEVICE.get(id);
+    if (!m) return '';
+    const count = num(m.count);
+    let out = '';
+    if (count !== null && count > 0) {
+      const t = String(count), w = Math.max(18, 10 + t.length * 7);
+      out += '<g class="marker count ' + esc(levelClass(m.level)) + '" transform="translate(64,-20)">' +
+        '<title>' + esc(t + ' ' + (count === 1 ? 'Finding' : 'Findings') + ' on ' + nameOf(id) + ', worst ' + txt(m.level)) + '</title>' +
+        '<rect x="' + (-w / 2).toFixed(1) + '" y="-9" width="' + w.toFixed(1) + '" height="18" rx="9"/>' +
+        '<text y="4" text-anchor="middle">' + esc(t) + '</text></g>';
+    }
+    const tag = str(m.tag);
+    if (tag) {
+      const label = short(tag, 24), w = Math.min(128, 14 + label.length * 6.2);
+      out += '<g class="marker tag ' + esc(str(m.tag_kind) || '') + '" transform="translate(0,20)">' +
+        '<title>' + esc(tag) + '</title>' +
+        '<rect x="' + (-w / 2).toFixed(1) + '" y="3" width="' + w.toFixed(1) + '" height="15" rx="3"/>' +
+        '<text y="13.5" text-anchor="middle">' + esc(label) + '</text></g>';
+    }
+    return out;
+  }
+
   function render(g, sc) {
     let out = '';
     const count = new Map(), index = new Map();
@@ -419,14 +450,15 @@
       }
       out += '<g class="node ' + n.cls + sel + '" data-id="' + esc(n.id) + '"' + tr + '><title>' + esc(n.t) + '</title><rect x="-64" y="-20" width="128" height="40" rx="6"/>' +
         '<text class="t" y="-3" text-anchor="middle">' + esc(short(n.t, 20)) + '</text><text class="s" y="12" text-anchor="middle">' +
-        (n.plat ? '<tspan class="plat">' + esc(n.plat) + '</tspan> ' : '') + esc(short(n.s, n.plat ? 14 : 26)) + '</text></g>';
+        (n.plat ? '<tspan class="plat">' + esc(n.plat) + '</tspan> ' : '') + esc(short(n.s, n.plat ? 14 : 26)) + '</text>' +
+        (S.tab === 'map' && DEV.has(n.id) ? nodeMarkers(n.id) : '') + '</g>';
     }
     g.innerHTML = out;
   }
 
   function boundsOf(sc) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    sc.nodes.forEach(n => { const p = posOf(n.id); if (!p) return; x0 = Math.min(x0, p.x - 70); x1 = Math.max(x1, p.x + 70); y0 = Math.min(y0, p.y - 30); y1 = Math.max(y1, p.y + 40); });
+    sc.nodes.forEach(n => { const p = posOf(n.id); if (!p) return; x0 = Math.min(x0, p.x - 70); x1 = Math.max(x1, p.x + 70); y0 = Math.min(y0, p.y - 34); y1 = Math.max(y1, p.y + 46); });
     sc.labels.forEach(l => { x0 = Math.min(x0, l.x); y0 = Math.min(y0, l.y - 16); x1 = Math.max(x1, l.x + 340); });
     return isFinite(x0) ? { x0, y0, x1, y1 } : { x0: -100, y0: -100, x1: 100, y1: 100 };
   }
@@ -715,15 +747,24 @@
   const sample = (cls, double) => '<svg width="34" height="12" aria-hidden="true"><g class="edge ' + cls + '"><path class="ln" d="M2,6 L32,6"/>' + (double ? '<path class="ln2" d="M2,6 L32,6"/>' : '') + '</g></svg>';
   const stat = (n, one, many) => '<span><b>' + n + '</b> ' + (n === 1 ? one : many) + '</span>';
   const markCount = m => EDGES.filter(e => e.mark && e.mark === MARK[m]).length;
+  /* The legend explains the badge and every tag the Map can show (story 98). */
+  function markerLegend() {
+    const L = MK.legend && typeof MK.legend === 'object' ? MK.legend : {};
+    const levels = arr(L.levels).map(l => '<span><span class="marker-dot ' + esc(levelClass(l)) + '"></span>' + esc(l) + '</span>').join('');
+    return '<span>' + esc(str(L.badge) || '') + '</span>' + levels +
+      '<span><b class="marker-key target">' + esc(str(L.target) || '') + '</b></span>' +
+      '<span><b class="marker-key no-fix">' + esc(str(L.no_fix) || '') + '</b></span>' +
+      '<span><b class="marker-key could-not-check">' + esc(str(L.could_not_check) || '') + '</b></span>';
+  }
   function keyHtml() {
     if (S.tab === 'findings') {
       return '<span><b class="hot-key">lit</b> = the picked Check\'s devices and Links</span><span class="muted">dimmed = everything else</span>' +
         '<span><b class="mk bad">!</b> mismatch</span><span><b class="mk noisy">~</b> one end only</span><span><b class="mk unknown">?</b> not checked</span><span><b class="mk conflict">≠</b> conflict</span>';
     }
     if (S.view === 'routing') {
-      if (!L3_RECORDED) return '<span>This topology.json holds no L3 Adjacencies or Subnets (it was written by an older version), so no routing lines are drawn.</span>';
+      if (!L3_RECORDED) return '<span>This topology.json holds no L3 Adjacencies or Subnets (it was written by an older version), so no routing lines are drawn.</span>' + markerLegend();
       return '<span>' + sample('l3 shared') + 'shared subnet (prefix)</span><span>' + sample('l3 proto') + 'routing protocol</span>' +
-        '<span>Subnet node = prefix shared by 3+ devices</span><span>faded = no L3 interface</span>';
+        '<span>Subnet node = prefix shared by 3+ devices</span><span>faded = no L3 interface</span>' + markerLegend();
     }
     if (S.view === 'vlan') {
       const sc = vlanScene();
@@ -731,13 +772,13 @@
         ? '<label class="field">VLAN <select id="vsel">' + VLANS.map(n => '<option' + (n === S.vlan ? ' selected' : '') + '>' + n + '</option>').join('') + '</select></label>'
         : '<span>No VLAN is recorded in this topology.json.</span>';
       return pickVlan + '<span class="c-on"><b>' + sc.counts.on + '</b> carry it at both ends</span><span class="c-break"><b>' + sc.counts.br + '</b> stop at one end</span>' +
-        '<span class="c-unk"><b>' + sc.counts.un + '</b> unknown far end</span>';
+        '<span class="c-unk"><b>' + sc.counts.un + '</b> unknown far end</span>' + markerLegend();
     }
     return '<span>' + sample('st-confirmed') + 'confirmed</span><span>' + sample('st-one-sided') + 'one-sided</span>' +
       '<span>' + sample('st-inferred') + 'inferred</span><span>' + sample('bundle st-confirmed', true) + 'Bundle</span>' +
       '<span>' + sample('segment') + 'to a Shared Segment</span>' +
       '<span><b class="mk bad">!</b> ' + markCount('bad') + ' mismatch</span><span><b class="mk noisy">~</b> ' + markCount('noisy') + ' one end only</span>' +
-      '<span><b class="mk unknown">?</b> ' + markCount('unknown') + ' not checked</span><span><b class="mk conflict">≠</b> ' + markCount('conflict') + ' conflict</span>';
+      '<span><b class="mk unknown">?</b> ' + markCount('unknown') + ' not checked</span><span><b class="mk conflict">≠</b> ' + markCount('conflict') + ' conflict</span>' + markerLegend();
   }
   app.innerHTML = '<header class="top gut"><h1>Network diagram</h1><div class="stats">' +
     stat(DEV.size, 'Visited Device', 'Visited Devices') + stat(UNV.size, 'Unvisited Device', 'Unvisited Devices') +
