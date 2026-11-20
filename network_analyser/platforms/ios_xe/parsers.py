@@ -78,11 +78,16 @@ def _has_data(text: str) -> bool:
 
 # -- Stack members (`show version`) -----------------------------------------------------------
 
-_SWITCH_ROW: Final = re.compile(r"^\s*(\*)?\s*(\d{1,2})\s+\d+\s+(\S+)\s+\S+", re.MULTILINE)
+_SWITCH_ROW: Final = re.compile(
+    r"^\s*(\*)?\s*(\d{1,2})\s+\d+\s+(\S+)"
+    r"(?:\s+(\S+)\s+(\S+)\s+([A-Za-z]+))?[ \t]*$",
+    re.MULTILINE,
+)
 _SWITCH_SECTION: Final = re.compile(r"^Switch 0*(\d{1,2})\s*\n-+\s*$", re.MULTILINE)
 _SERIAL: Final = re.compile(
     r"^(?:System Serial Number\s*:|Processor board ID)\s*([A-Za-z0-9]{1,40})\s*$", re.MULTILINE
 )
+_BOOT_MODES: Final = frozenset({"INSTALL", "BUNDLE"})
 
 
 def stack_members(
@@ -90,9 +95,9 @@ def stack_members(
 ) -> tuple[StackMember, ...]:
     """Read the stack's member switches from `show version`; one member for a lone device.
 
-    The member table (`Switch Ports Model ...`) gives each number and model; the serial of
-    the switch logged into (`*`) comes before the table, each other member's from its own
-    `Switch 0N` section.
+    The member table (`Switch Ports Model ...`) gives each number, model, release and boot
+    mode; the serial of the switch logged into (`*`) comes before the table, each other
+    member's from its own `Switch 0N` section.
     """
     table_at = text.find("Switch Ports Model")
     if table_at < 0:
@@ -115,9 +120,25 @@ def stack_members(
                 number,
                 serial or Unknown("serial not found in show version"),
                 fields.word({"model": row.group(3)}, "model", "model"),
+                _release(row.group(4)),
+                _mode(row.group(6)),
             )
         )
     return tuple(members)
+
+
+def _release(value: str | None) -> str | Unknown:
+    """One column of the member table as a release, or Unknown when the table has none."""
+    return fields.word({"release": value}, "release", "release")
+
+
+def _mode(value: str | None) -> str | Unknown:
+    """The boot-mode column, only when it is one of the modes Cisco reports."""
+    found = fields.word({"mode": value}, "mode", "mode")
+    if isinstance(found, str) and found.upper() in _BOOT_MODES:
+        return found.upper()
+    return Unknown("mode not reported by show version")
+
 
 
 # -- Interfaces -------------------------------------------------------------------------------

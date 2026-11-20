@@ -8,19 +8,25 @@ when a source it needs was unavailable (story 10), and then the reason is record
 New Checks are added to `CHECKS`; nothing else in `analysis` needs to change.
 """
 
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from ipaddress import IPv4Address
 from typing import Final
 
 from network_analyser.analysis.ids import finding_id
 from network_analyser.records.analysis import AnalysisInput
+from network_analyser.records.collected import VpcState
+from network_analyser.records.platform import Platform
 from network_analyser.records.topology import (
     Check,
     CheckType,
     Finding,
     FindingLevel,
+    LinkRole,
     VisitedDevice,
 )
+from network_analyser.records.unknown import Unknown
 
 MINIMUM_DRIFT_RELEASES: Final = 2
 """Two releases of one model is drift; one is not (story 70)."""
@@ -32,6 +38,50 @@ MODEL_DRIFT_CHECK: Check = Check(
 )
 """Story 70: one network-wide Low Finding per model running more than one release."""
 
+STACK_MISMATCH_CHECK: Check = Check(
+    "consistency-stack-mismatch",
+    "Stack or StackWise Virtual members on different releases or modes",
+    CheckType.CONSISTENCY,
+)
+"""Story 71: one Medium Finding per stack whose members differ."""
+
+VPC_MISMATCH_CHECK: Check = Check(
+    "consistency-vpc-mismatch",
+    "vPC peers on different releases",
+    CheckType.CONSISTENCY,
+)
+"""Story 71: one Medium Finding per vPC pair whose peers differ."""
+
+BUNDLE_MODE_CHECK: Check = Check(
+    "consistency-bundle-mode",
+    "Catalyst 9000 in bundle mode",
+    CheckType.CONSISTENCY,
+)
+"""Story 72: one Low Finding per Catalyst 9000 running bundle mode."""
+
+TRAIN_SUPPORT_CHECK: Check = Check(
+    "consistency-standard-support-train",
+    "IOS-XE on a Standard-Support Train",
+    CheckType.CONSISTENCY,
+)
+"""Story 72: one Low Finding per Catalyst 9000 on a Standard-Support Train."""
+
+STANDARD_SUPPORT_TRAINS: Final = frozenset({"17.13", "17.14", "17.16", "17.17"})
+"""The Catalyst 9000 Trains Cisco gives 12 months of support, from the #76 research.
+
+Cisco's Catalyst 9200-9600 release guidance, as of September 2026, makes 17.12, 17.15 and
+17.18 Extended-Support Trains (48 months) and 17.13, 17.14, 17.16 and 17.17 Standard-Support
+Trains (12 months). Any other Train is left unclassified rather than guessed at.
+"""
+
+EXTENDED_SUPPORT_TRAINS: Final = frozenset({"17.12", "17.15", "17.18"})
+"""The Catalyst 9000 Extended-Support Trains, from the same table."""
+
+_CATALYST_9000: Final = re.compile(r"C9[2-6]\d{2}")
+_TRAIN: Final = re.compile(r"^(\d{1,2})\.(\d{1,2})(?:[.(]|$)")
+_LEADING_ZERO: Final = re.compile(r"(?<!\d)0+(\d)")
+_BUNDLE: Final = "BUNDLE"
+
 
 @dataclass(frozen=True, slots=True)
 class CheckDefinition:
@@ -40,10 +90,13 @@ class CheckDefinition:
     Attributes:
         check: its stable identity, shown on every Finding it raises.
         run: returns every Finding it raises for the Run.
+        skip_reason: why this Run cannot run the Check, or None when it can. Only a Check
+            whose source is unavailable needs one (story 10).
     """
 
     check: Check
     run: Callable[[AnalysisInput], tuple[Finding, ...]]
+    skip_reason: Callable[[AnalysisInput], str | None] | None = None
 
 
 def model_drift(data: AnalysisInput) -> tuple[Finding, ...]:
@@ -93,6 +146,284 @@ def model_drift(data: AnalysisInput) -> tuple[Finding, ...]:
             )
         )
     return tuple(findings)
+
+
+def stack_mismatch(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Return one Medium Finding for each stack or StackWise Virtual whose members differ.
+
+    A stack or a StackWise Virtual pair appears in `stack_members` as its members. Its
+    members must run one release and one boot mode; Cisco calls mixed releases on stack
+    members incompatible and a vPC-style mismatch unsupported. Only the members that were
+    actually read can be compared: an `Unknown` release or mode is never guessed at.
+    """
+    findings: list[Finding] = []
+    for device in data.topology.devices:
+        members = device.stack_members
+        if isinstance(members, Unknown) or len(members) < MINIMUM_DRIFT_RELEASES:
+            continue
+        releases = {
+            _release_key(member.software_version)
+            for member in members
+            if isinstance(member.software_version, str)
+        }
+        modes = {member.mode.upper() for member in members if isinstance(member.mode, str)}
+        if len(releases) < MINIMUM_DRIFT_RELEASES and len(modes) < MINIMUM_DRIFT_RELEASES:
+            continue
+        described = "; ".join(_member_text(member) for member in members)
+        what = f"{_name(device)} stack or StackWise Virtual members differ: {described}."
+        findings.append(
+            Finding(
+                id=finding_id(STACK_MISMATCH_CHECK.id, f"device:{device.id}"),
+                devices=(device.id,),
+                items=(),
+                evidence=(),
+                level=FindingLevel.MEDIUM,
+                check=STACK_MISMATCH_CHECK,
+                what_was_found=what,
+                what_to_do=(
+                    "Bring every stack or StackWise Virtual member onto one release and one mode."
+                ),
+                source="device reports",
+                summary=what,
+            )
+        )
+    return tuple(findings)
+
+
+def vpc_mismatch(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Return one Medium Finding for each vPC pair whose peers run different releases.
+
+    The peers come from facts the Run already holds: each device's vPC domain and
+    peer-keepalive, and the Topology's vPC peer-link or peer-keepalive Links. Both devices
+    must be Visited and in the same vPC domain; a peer whose release was not read is never
+    guessed at.
+    """
+    devices = data.topology.devices
+    by_id = {device.id: device for device in devices}
+    findings: list[Finding] = []
+    for first, second in _vpc_pairs(data):
+        peer = by_id[first]
+        other = by_id[second]
+        release = peer.software_version
+        other_release = other.software_version
+        if not isinstance(release, str) or not isinstance(other_release, str):
+            continue
+        if _release_key(release) == _release_key(other_release):
+            continue
+        what = (
+            f"vPC peers {_name(peer)} and {_name(other)} run different releases: "
+            f"{_name(peer)} {release}, {_name(other)} {other_release}."
+        )
+        findings.append(
+            Finding(
+                id=finding_id(VPC_MISMATCH_CHECK.id, f"vpc:{first}:{second}"),
+                devices=(first, second),
+                items=(),
+                evidence=(),
+                level=FindingLevel.MEDIUM,
+                check=VPC_MISMATCH_CHECK,
+                what_was_found=what,
+                what_to_do=(
+                    "Upgrade both vPC peers to the same NX-OS release before the next change."
+                ),
+                source="device reports",
+                summary=what,
+            )
+        )
+    return tuple(findings)
+
+
+def bundle_mode(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Return one Low Finding for each Catalyst 9000 running bundle mode (story 72).
+
+    Cisco recommends install mode on Catalyst 9000. The boot mode is the one `show version`'s
+    member table already reports; a mode that was not read raises nothing.
+    """
+    findings: list[Finding] = []
+    for device in data.topology.devices:
+        if not _is_catalyst_9000(device.model):
+            continue
+        members = device.stack_members
+        if isinstance(members, Unknown):
+            continue
+        bundled = [
+            member
+            for member in members
+            if isinstance(member.mode, str) and member.mode.upper() == _BUNDLE
+        ]
+        if not bundled:
+            continue
+        described = "; ".join(_member_text(member) for member in bundled)
+        what = f"Catalyst 9000 {device.model} is in bundle mode: {described}."
+        findings.append(
+            Finding(
+                id=finding_id(BUNDLE_MODE_CHECK.id, f"device:{device.id}"),
+                devices=(device.id,),
+                items=(),
+                evidence=(),
+                level=FindingLevel.LOW,
+                check=BUNDLE_MODE_CHECK,
+                what_was_found=what,
+                what_to_do=(
+                    "Move it to install mode; Cisco recommends install mode on Catalyst 9000."
+                ),
+                source="device reports",
+                summary=what,
+            )
+        )
+    return tuple(findings)
+
+
+def train_support(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Return one Low Finding per Catalyst 9000 on a Standard-Support Train (story 72).
+
+    Only a Train the #76 research classifies as Standard-Support raises a Finding.
+    `train_support_skip_reason` skips the Check rather than letting an unclassified Train
+    read as Extended-Support.
+    """
+    findings: list[Finding] = []
+    for device in data.topology.devices:
+        if not _train_applies(device):
+            continue
+        release = device.software_version
+        if not isinstance(release, str):
+            continue
+        train = _train(release)
+        if train not in STANDARD_SUPPORT_TRAINS:
+            continue
+        what = (
+            f"{_name(device)} runs IOS-XE {release} on Standard-Support Train {train}; "
+            "Cisco recommends an Extended-Support Train (17.12, 17.15 or 17.18)."
+        )
+        findings.append(
+            Finding(
+                id=finding_id(TRAIN_SUPPORT_CHECK.id, f"device:{device.id}"),
+                devices=(device.id,),
+                items=(),
+                evidence=(),
+                level=FindingLevel.LOW,
+                check=TRAIN_SUPPORT_CHECK,
+                what_was_found=what,
+                what_to_do=(
+                    "Plan a move to an Extended-Support Train (17.12, 17.15 or 17.18)."
+                ),
+                source="device reports",
+                summary=what,
+            )
+        )
+    return tuple(findings)
+
+
+def train_support_skip_reason(data: AnalysisInput) -> str | None:
+    """Why the Train Check cannot run, or None when every applicable Train is classified."""
+    trains = sorted(
+        {
+            train
+            for device in data.topology.devices
+            if _train_applies(device)
+            for train in (_train(device.software_version),)
+            if isinstance(train, str) and train not in _SUPPORT_TRAINS
+        }
+    )
+    if not trains:
+        return None
+    return "Cisco's Catalyst 9000 Train support table does not classify Train " + ", ".join(trains)
+
+
+_SUPPORT_TRAINS: Final = STANDARD_SUPPORT_TRAINS | EXTENDED_SUPPORT_TRAINS
+
+
+def _member_text(member: object) -> str:
+    """One stack member as a Finding names it: its number, release and mode."""
+    number = getattr(member, "number")
+    release = getattr(member, "software_version")
+    mode = getattr(member, "mode")
+    shown_release = release if isinstance(release, str) else "an unknown release"
+    shown_mode = f"{mode} mode" if isinstance(mode, str) else "an unknown mode"
+    return f"member {number} runs {shown_release} in {shown_mode}"
+
+
+def _release_key(release: str) -> str:
+    """A release with IOS-XE's leading zeros stripped, for comparing two members.
+
+    `17.09.04a` and `17.9.4a` are one release; the Finding still shows each as reported.
+    """
+    return _LEADING_ZERO.sub(r"\1", release)
+
+
+def _train(release: str | Unknown) -> str | None:
+    """The Train a release belongs to, such as `17.13`; None when it cannot be read."""
+    if not isinstance(release, str):
+        return None
+    match = _TRAIN.match(_release_key(release))
+    if match is None:
+        return None
+    return f"{int(match.group(1))}.{int(match.group(2))}"
+
+
+def _is_catalyst_9000(model: object) -> bool:
+    """True for a Catalyst 9200, 9300, 9400, 9500 or 9600 model."""
+    return isinstance(model, str) and _CATALYST_9000.match(model) is not None
+
+
+def _train_applies(device: VisitedDevice) -> bool:
+    """The Train Check is IOS-XE only, and its table covers Catalyst 9000 models."""
+    return device.platform is Platform.IOS_XE and _is_catalyst_9000(device.model)
+
+
+def _vpc_pairs(data: AnalysisInput) -> tuple[tuple[str, str], ...]:
+    """Every vPC pair the Run's own facts show, as sorted (first, second) device id pairs."""
+    devices = data.topology.devices
+    by_id = {device.id: device for device in devices}
+    pairs = _vpc_keepalive_pairs(devices, by_id)
+    for link in data.topology.links:
+        if link.role not in {LinkRole.VPC_PEER_LINK, LinkRole.VPC_PEER_KEEPALIVE}:
+            continue
+        first, second = (end.device for end in link.ends)
+        one = by_id.get(first)
+        two = by_id.get(second)
+        if one is None or two is None or first == second:
+            continue
+        one_state = _vpc_state(one)
+        two_state = _vpc_state(two)
+        if one_state is not None and two_state is not None and one_state.domain == two_state.domain:
+            pairs.add(_pair(first, second))
+    return tuple(sorted(pairs))
+
+
+def _vpc_keepalive_pairs(
+    devices: Sequence[VisitedDevice], by_id: dict[str, VisitedDevice]
+) -> set[tuple[str, str]]:
+    """Pair vPC peers whose keepalives reach each other, in the same domain."""
+    owners: dict[IPv4Address, str] = {}
+    for device in devices:
+        owners[device.management_ip] = device.id
+    for device in devices:
+        for address in device.alias_ips:
+            owners.setdefault(address, device.id)
+    reaches: dict[str, str] = {}
+    for device in devices:
+        state = _vpc_state(device)
+        if state is None or isinstance(state.keepalive, Unknown):
+            continue
+        other = by_id.get(owners.get(state.keepalive.destination, ""))
+        other_state = None if other is None else _vpc_state(other)
+        if other is not None and other_state is not None and other_state.domain == state.domain:
+            reaches[device.id] = other.id
+    return {
+        _pair(first, second)
+        for first, second in reaches.items()
+        if reaches.get(second) == first and first != second
+    }
+
+
+def _vpc_state(device: VisitedDevice) -> VpcState | None:
+    state = device.vpc
+    return state if isinstance(state, VpcState) else None
+
+
+def _pair(first: str, second: str) -> tuple[str, str]:
+    return (first, second) if first < second else (second, first)
 
 
 def _name(device: VisitedDevice) -> str:
