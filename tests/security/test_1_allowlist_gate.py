@@ -47,6 +47,13 @@ ALLOWED = {
         "show cdp neighbors detail | json",
         "show lldp neighbors detail | json",
         "show running-config",
+        # The new read-only commands of release 0.2.0 (tickets #97, #98).
+        "show inventory | json",
+        "show ntp peer-status | json",
+        "show copp status | json",
+        "show ssh key",
+        "show guestshell",
+        "show virtual-service list",
     ],
 }
 
@@ -96,7 +103,6 @@ NEAR_MISSES = [
     "show lldp neighbors detail | json\nconfigure terminal",
     "show lldp neighbors",
     # Near-misses on the 0.2.0 commands (#97).
-    "show inventory | json",
     "show inventory all",
     "show snmp user netops-ro",
     "show ntp associations detail",
@@ -111,8 +117,32 @@ NEAR_MISSES = [
 # Near-misses on one Platform that are allowed on the other (#51): IOS-XE is only ever sent
 # the full view (story 96), and NX-OS has no CLI views.
 PLATFORM_NEAR_MISSES = {
-    Platform.IOS_XE: ["show running-config"],
-    Platform.NX_OS: ["show running-config view full"],
+    Platform.IOS_XE: [
+        "show running-config",
+        # IOS/IOS-XE reads text inventory; the NX-OS JSON form is not on its allow-list (#97).
+        "show inventory | json",
+    ],
+    Platform.NX_OS: [
+        "show running-config view full",
+        # The new commands are exact strings, JSON form included (#97, #98). SNMPv3 users
+        # come from the running config, so there is deliberately no `show snmp user`.
+        "show inventory",
+        "show inventory | json ",
+        "show inventory | json-pretty",
+        "show inventory | include PID",
+        "show ntp peer-status",
+        "show ntp peer-status | json\nconfigure terminal",
+        "show copp status",
+        "show copp status | json | redirect bootflash:x",
+        "show ssh key ",
+        "show ssh key rsa",
+        "show ssh key | include bitcount",
+        "show guestshell detail",
+        "show guestshell | json",
+        "show virtual-service list | json",
+        "show snmp user",
+        "show snmp user | json",
+    ],
 }
 
 BAD_PARAMETERS = [

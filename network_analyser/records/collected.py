@@ -468,6 +468,8 @@ class Collected:
         insecure_configuration: Cisco's own insecure-configuration entries (#97). None when
             the Platform has no such command, or an IOS/IOS-XE release below 17.18.2 cannot
             run it (story 68), so None never means "Cisco found nothing".
+        guest_shell: whether the NX-OS Guest Shell is installed and enabled (#98). None when
+            the Platform has no such command, which is every Platform but NX-OS.
     """
 
     stack_members: Reading[tuple[StackMember, ...]] | Unknown
@@ -489,6 +491,7 @@ class Collected:
     control_plane: Reading[ControlPlanePolicy] | Unknown | None = None
     ssh: Reading[SshSettings] | Unknown | None = None
     insecure_configuration: Reading[tuple[InsecureConfigurationItem, ...]] | Unknown | None = None
+    guest_shell: Reading[bool] | Unknown | None = None
 
     @classmethod
     def nothing(cls, reason: str) -> Collected:

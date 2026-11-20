@@ -68,10 +68,9 @@ def read(text: str) -> Row | Refused:
     if not stripped:
         return {}
     if not stripped.startswith("{"):
-        if _DENIED.search(stripped):
-            return Refused(DENIED)
-        if _ERROR.search(stripped):
-            return Refused(REJECTED)
+        refused = refusal(stripped)
+        if refused is not None:
+            return refused
         raise NotUnderstood
     try:
         data: object = json.loads(stripped)
@@ -80,6 +79,22 @@ def read(text: str) -> Row | Refused:
     if not isinstance(data, dict):
         raise NotUnderstood
     return data
+
+
+def refusal(text: str) -> Refused | None:
+    """Return how a reply refused the command, or None when it may be data.
+
+    A reply that is an error message is `denied` (the role or AAA refused it) or `rejected by
+    the device`; anything else, including a JSON object, may be data. Never quotes the reply.
+    """
+    stripped = text.strip()
+    if not stripped or stripped.startswith("{"):
+        return None
+    if _DENIED.search(stripped):
+        return Refused(DENIED)
+    if _ERROR.search(stripped):
+        return Refused(REJECTED)
+    return None
 
 
 def rows(data: Row, name: str) -> list[Row]:

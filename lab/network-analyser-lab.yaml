@@ -772,6 +772,12 @@ nodes:
             rule 22 permit command show ip route static vrf all | json
             rule 23 permit command show hsrp brief | json
             rule 24 permit command show vrrp | json
+            rule 25 permit command show inventory | json
+            rule 26 permit command show ntp peer-status | json
+            rule 27 permit command show copp status | json
+            rule 28 permit command show ssh key
+            rule 29 permit command show guestshell
+            rule 30 permit command show virtual-service list
           username netanalyser password CHANGE_ME role NA-READ
           no username netanalyser role network-operator
           password strength-check
@@ -957,6 +963,12 @@ nodes:
             rule 22 permit command show ip route static vrf all | json
             rule 23 permit command show hsrp brief | json
             rule 24 permit command show vrrp | json
+            rule 25 permit command show inventory | json
+            rule 26 permit command show ntp peer-status | json
+            rule 27 permit command show copp status | json
+            rule 28 permit command show ssh key
+            rule 29 permit command show guestshell
+            rule 30 permit command show virtual-service list
           username netanalyser password CHANGE_ME role NA-READ
           no username netanalyser role network-operator
           password strength-check

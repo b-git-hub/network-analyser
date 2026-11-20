@@ -39,6 +39,13 @@ SEED = IPv4Address("192.0.2.10")
 PARSER = "Network Analyser NX-OS JSON reader"
 IOS_PARSER = "Network Analyser IOS/IOS-XE reader (ntc-templates cisco_ios)"
 IOS_BACKUP = "show running-config view full"
+NXOS_SHOW_COMMANDS = (
+    "show inventory | json",
+    "show ntp peer-status | json",
+    "show copp status | json",
+    "show ssh key",
+    "show guestshell",
+)
 
 
 class Visit:
@@ -245,3 +252,36 @@ def test_a_catalyst_with_no_full_config_is_still_collected(visit: Visit) -> None
     assert visit.backups == []
     assert record.collected is not None
     assert isinstance(record.collected.interfaces, Reading)
+
+
+# -- The new read-only commands (ticket #98) --------------------------------------------------
+
+
+def test_a_nexus_whose_role_refuses_a_new_command_keeps_its_backup(visit: Visit) -> None:
+    visit.nexus(**{"show inventory | json": nxos_json.DENIED})
+
+    record = visit()
+
+    assert record.outcome is DeviceOutcome.VISITED
+    assert record.collected is not None
+    assert record.collected.inventory == Unknown("show inventory | json: denied")
+    assert visit.backups == [device_text.NXOS_RUNNING_CONFIG]
+    assert ParseFailed(SEED, "show inventory | json", PARSER, "denied") in visit.events
+    assert all("Permission" not in repr(e) for e in visit.events)
+
+
+def test_a_nexus_answers_every_new_command_in_a_visit(visit: Visit) -> None:
+    device = visit.nexus()
+
+    record = visit()
+
+    assert record.outcome is DeviceOutcome.VISITED
+    assert record.collected is not None
+    assert isinstance(record.collected.inventory, Reading)
+    assert isinstance(record.collected.ntp_associations, Reading)
+    assert isinstance(record.collected.control_plane, Reading)
+    assert isinstance(record.collected.ssh, Reading)
+    assert isinstance(record.collected.guest_shell, Reading)
+    for command in NXOS_SHOW_COMMANDS:
+        assert device.lines.count(command) == 1, command
+    assert not [e for e in visit.events if isinstance(e, ParseFailed)]

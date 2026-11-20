@@ -220,3 +220,39 @@ def test_the_nx_os_role_never_uses_network_operator_or_a_read_rule(*, tacacs: bo
     granted = [c for c in commands if re.search(r"\brole network-operator\b", c)]
     assert set(granted) <= {f"no username {USERNAME} role network-operator"}
     assert not re.search(r"shell:roles=.*network-operator", text)
+
+
+NEW_NX_OS_COMMANDS = [
+    "show inventory | json",
+    "show ntp peer-status | json",
+    "show copp status | json",
+    "show ssh key",
+    "show guestshell",
+    "show virtual-service list",
+]
+"""The read-only commands release 0.2.0 adds for NX-OS (spec #92; tickets #97, #98)."""
+
+
+@BOTH_FORMS
+def test_the_nx_os_role_covers_every_new_read_only_command(*, tacacs: bool) -> None:
+    text = platforms.role_snippet(Platform.NX_OS, USERNAME, tacacs=tacacs)
+
+    if tacacs:
+        rows = ise_command_set(text)
+        for command in NEW_NX_OS_COMMANDS:
+            assert len(ise_permits(rows, command)) == 1, command
+    else:
+        for command in NEW_NX_OS_COMMANDS:
+            assert f" permit command {command}\n" in text, command
+
+
+@BOTH_FORMS
+def test_the_nx_os_role_never_asks_for_snmpv3_users_because_they_come_from_the_config(
+    *, tacacs: bool
+) -> None:
+    text = platforms.role_snippet(Platform.NX_OS, USERNAME, tacacs=tacacs)
+
+    asserted = [line.strip() for line in commands_in(text)]
+    assert not [line for line in asserted if "snmp" in line.lower()], (
+        "SNMPv3 users come from the running config, not a new command (story 78)"
+    )
