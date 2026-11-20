@@ -65,12 +65,16 @@ _Avoid_: Run index, history
 ## Outputs
 
 **Run folder**:
-The folder a Run writes everything it produces into: its Backups, Topology, diagram, Run report and Audit log. Every Run gets a new one, and the tool never deletes it.
+The folder a Run writes everything it produces into: its Backups, Topology, diagram, Run report, Findings report and Audit log. Every Run gets a new one, and the tool never deletes it.
 _Avoid_: Output directory, results folder, run directory
 
 **Run report**:
 The page a Run writes when it ends, saying what it found and what needs the operator's attention: the devices visited and not visited, the Backups taken and missed, and the problems found. Teammates may read it, so it never holds a password or device output.
 _Avoid_: Summary, results, output report
+
+**Findings report**:
+The page a Run writes that lists every Finding, each with its device, without the rest of the estate, so it can be handed to whoever fixes them. Like the Run report, teammates may read it, so it never holds a password or device output.
+_Avoid_: Vulnerability report, findings export, scan report
 
 **Audit log**:
 The record, written as a Run goes, of what the tool did, in order: each connection, host-key check, login attempt and command sent. It is the evidence that the Run stayed read-only and inside the Scope, and it never holds a password or device output.
