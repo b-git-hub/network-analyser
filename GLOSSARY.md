@@ -129,3 +129,11 @@ _Avoid_: CVE, bulletin, vulnerability notice
 **Advisory Store**:
 The tool's local copy of the vendor's Advisories, each one kept only if its vendor signature checks out. Analysis matches Visited Devices' software against it, and a Run refreshes it from the vendor unless told not to.
 _Avoid_: Advisory cache, feed, vulnerability database
+
+**Train**:
+One release line of a Platform's software, such as IOS-XE 17.12 or IOS 15.2E, whose releases share features and hardware support.
+_Avoid_: Branch, stream, major version
+
+**Upgrade Target**:
+The newest release in a device's own Train, newer than the one it runs, that no Critical or High Advisory names. It is advice attached to the device's Advisory result, not a Finding.
+_Avoid_: Fixed version, recommended release, suggested release
