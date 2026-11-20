@@ -30,6 +30,13 @@ ALLOWED = {
         "show cdp neighbors detail",
         "show lldp neighbors detail",
         "show running-config view full",
+        # The 0.2.0 Analysis commands (#97).
+        "show inventory",
+        "show snmp user",
+        "show ntp associations",
+        "show policy-map control-plane",
+        "show ip ssh",
+        "show system insecure configuration",
     ],
     Platform.NX_OS: [
         "terminal length 0",
@@ -88,6 +95,18 @@ NEAR_MISSES = [
     "show cdp neighbors GigabitEthernet1/0/1 detail",
     "show lldp neighbors detail | json\nconfigure terminal",
     "show lldp neighbors",
+    # Near-misses on the 0.2.0 commands (#97).
+    "show inventory | json",
+    "show inventory all",
+    "show snmp user netops-ro",
+    "show ntp associations detail",
+    "show policy-map control-plane input",
+    "show ip ssh vrf Mgmt-intf",
+    "show crypto key mypubkey rsa",
+    "show system insecure configuration | include Severity",
+    "show system insecure configurations",
+    "show system insecure-configuration",
+    "show system insecure configuration\n",
 ]
 # Near-misses on one Platform that are allowed on the other (#51): IOS-XE is only ever sent
 # the full view (story 96), and NX-OS has no CLI views.

@@ -244,6 +244,20 @@ From [IOS/IOS-XE collection and parsers](https://github.com/b-git-hub/network-an
 | J3 | After W1, each IOS/IOS-XE node's entry in `topology.json` has its interfaces (down ones included, with VRF, masks and secondaries), VLANs, port-channels, VRFs (`Mgmt-intf` marked) and stack members, and `skipped` lists nothing for it. Record any part listed as skipped and its reason; `not understood` means a template or reader misread the device's text. | | |
 | J4 | Stack member numbers: on a stack (or StackWise Virtual pair, if any is available), `show version` lists each member with its model and serial, and interfaces on member 2 carry member 2. On a lone switch, interfaces carry no member number. | | |
 
+### K. The 0.2.0 read-only commands
+
+From [New read-only commands: IOS/IOS-XE, and Device Role out of date](https://github.com/b-git-hub/network-analyser/issues/97), for [Spec: Network Analysis](https://github.com/b-git-hub/network-analyser/issues/92) stories 68 and 78-81. The command strings, reply shapes and version gate were written from Cisco's documentation and hand-written synthetic output, never seen on a device. Run each check on xe-sw1, xe-sw2 and xe-rtr1, logged in as `netanalyser`, and describe what you see; never paste output. Say for each whether its output holds a secret, and whether it needs a different form or role line.
+
+| ID | Check | Result | Date (UTC) |
+|---|---|---|---|
+| K1 | `show ip ssh` under the `NA-READ` view, and the choice of this command over `show crypto key mypubkey rsa`: does the reply print `Modulus Size : <n> bits` (Cisco's field notice FN-72511 documents it from IOS-XE 17.11)? Does a classic IOS or IOL node omit it, leaving the key size `Unknown`? Does the `IOS Keys in SECSH format` line print only the public key, never a private one? Record which command each release family should be read with. | | |
+| K2 | `show inventory` under the view: the names the classifier reads (`Chassis`, `Switch N`, a supervisor, `Slot N - ...`, a router's `NIM`/`SPA` subslot) and the entries it drops (power supply, fan tray, transceiver/SFP). Record every name that is wrongly dropped or wrongly kept; a dropped line card also drops its PID from the EoX question (story 14). | | |
+| K3 | `show snmp user` under the view: does it list every user with `Authentication Protocol` and `Privacy Protocol`, and what does it print with SNMPv3 unconfigured? Does the reply hold a secret (it should carry no key or password)? | | |
+| K4 | `show ntp associations` under the view: the exact marker on the synchronised peer (`*`), the stratum and reference clock columns, and what it prints with NTP unconfigured or no peer reachable. Confirm the reader's row shape. | | |
+| K5 | `show policy-map control-plane` under the view: the exact form, the `Service-policy input:` line when CoPP is applied, and what it prints when no policy is attached (empty, or a `%` line). | | |
+| K6 | `show system insecure configuration` on a 17.18.2+ node: the exact string, the entry-block fields (`Module`, `CLI Command`, `Reason`, `Severity`) and the `Total Active Insecure Commands` and `Scan Status` lines. Confirm the output can echo a configured value (the walk line for `snmp-server community` does), that the tool keeps only the placeholder form, and that the command is **not** sent to a node on 17.18.1 or earlier. | | |
+| K7 | **Device Role out of date** (story 80): apply a Device Role generated before this release, then run once. Expect exactly one Medium Finding "Device Role is out of date: N Checks could not run", naming the Checks and `role-snippet`; the affected data is `Unknown` (a `parse_failed` line with reason `denied` for each refused command), the Run finishes and keeps its Backups. Re-apply the new role and run again: no such Finding. | | |
+
 ## Walkthrough of the tool
 
 Run these on every booking that tests a new build. Use only `netanalyser` Credential Sets, and give the Scope as the lab's management addresses, one `--scope` per address.

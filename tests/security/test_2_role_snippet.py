@@ -157,6 +157,24 @@ def test_the_ios_xe_tacacs_command_set_permits_exactly_the_allow_list() -> None:
     assert re.search(r"^!\s+cli-view-name=NA-READ$", text, flags=re.MULTILINE)
 
 
+def test_the_new_0_2_0_commands_are_in_the_ios_xe_role() -> None:
+    new = (
+        "show inventory",
+        "show snmp user",
+        "show ntp associations",
+        "show policy-map control-plane",
+        "show ip ssh",
+        "show system insecure configuration",
+    )
+    local = platforms.role_snippet(Platform.IOS_XE, USERNAME, tacacs=False)
+    tacacs = platforms.role_snippet(Platform.IOS_XE, USERNAME, tacacs=True)
+    rows = ise_command_set(tacacs)
+
+    for command in new:
+        assert f" commands exec include {command}\n" in local, command
+        assert len(ise_permits(rows, command)) == 1, command
+
+
 @BOTH_FORMS
 def test_the_ios_xe_role_never_sets_a_file_privilege_or_enable(*, tacacs: bool) -> None:
     text = platforms.role_snippet(Platform.IOS_XE, USERNAME, tacacs=tacacs)

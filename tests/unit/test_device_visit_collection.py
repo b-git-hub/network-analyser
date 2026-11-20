@@ -14,6 +14,7 @@ import pytest
 from network_analyser import device_gateway, scope, trust_store
 from network_analyser.credentials import CredentialSet, CredentialSets, Secret
 from network_analyser.device_gateway.gate import DROP_REASONS, CommandTimedOutError
+from network_analyser.platforms.ios_xe import commands as ios_xe_commands
 from network_analyser.records import Platform, ScopeRecord
 from network_analyser.records.backup import BackupCapture
 from network_analyser.records.collected import Reading
@@ -191,6 +192,19 @@ def test_a_denied_ios_command_is_audited_and_never_fatal(visit: Visit) -> None:
     failed = [e for e in visit.events if isinstance(e, ParseFailed)]
     assert failed == [ParseFailed(SEED, "show vlan brief", IOS_PARSER, "denied")]
     assert all("Invalid input" not in repr(e) for e in visit.events)
+
+
+def test_a_new_command_a_0_1_role_refuses_keeps_the_backup_and_the_run(visit: Visit) -> None:
+    command = ios_xe_commands.SHOW_INVENTORY
+    visit.catalyst({command: device_text.IOS_XE_INVALID_INPUT})
+
+    record = visit()
+
+    assert record.outcome is DeviceOutcome.VISITED
+    assert record.collected is not None
+    assert record.collected.inventory == Unknown(f"{command}: denied")
+    assert visit.backups == [device_text.IOS_XE_RUNNING_CONFIG]
+    assert ParseFailed(SEED, command, IOS_PARSER, "denied") in visit.events
 
 
 def test_an_ios_reply_that_cannot_be_parsed_is_audited_without_its_text(visit: Visit) -> None:

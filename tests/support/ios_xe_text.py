@@ -429,6 +429,147 @@ Vlan ID: - not advertised
 Total entries displayed: 2
 """
 
+# -- The 0.2.0 read-only commands (#97) -------------------------------------------------------
+
+SHOW_INVENTORY = """\
+NAME: "Chassis", DESCR: "Cisco Catalyst 9300 48-port GbE switch"
+PID: C9300-48P, VID: V02, SN: TEST0000A01
+
+NAME: "Switch 1", DESCR: "Cisco Catalyst 9300 48-port GbE switch"
+PID: C9300-48P, VID: V02, SN: TEST0000A01
+
+NAME: "Switch 2", DESCR: "Cisco Catalyst 9300 48-port GbE switch"
+PID: C9300-48P, VID: V02, SN: TEST0000A02
+
+NAME: "Slot 1 - Supervisor Module", DESCR: "Supervisor Module"
+PID: C9400-SUP-1XL, VID: V01, SN: TEST0000A03
+
+NAME: "Slot 2 - Line Card 1", DESCR: "48-port GbE line card"
+PID: C9400-LC-48U, VID: V01, SN: TEST0000A04
+
+NAME: "Switch 1 - Power Supply A", DESCR: "Power supply"
+PID: PWR-C1-715WAC, VID: V01, SN: TEST0000A05
+
+NAME: "Switch 1 - Fan Tray 1", DESCR: "Fan tray"
+PID: C9300-FAN, VID: V01, SN: TEST0000A06
+
+NAME: "GigabitEthernet1/0/1", DESCR: "SFP transceiver"
+PID: SFP-10G-SR, VID: V03, SN: TEST0000A07
+"""
+"""Chassis, stack members, a supervisor and a line card; PSU, fan and optic are left out."""
+
+SHOW_SNMP_USER = """\
+User name: netops-ro
+Engine ID: 80000009030000005E005300
+storage-type: nonvolatile        active
+Authentication Protocol: SHA-256
+Privacy Protocol: AES256
+Group-name: NA-RO
+
+User name: legacy-user
+Engine ID: 80000009030000005E005300
+storage-type: nonvolatile        active
+Authentication Protocol: MD5
+Privacy Protocol: DES
+Group-name: NA-RO
+"""
+
+SHOW_NTP_ASSOCIATIONS = """\
+      address         ref clock     st   when   poll reach  delay  offset   disp
+ *~192.0.2.1        .GPS.            1     35     64   377   1.234   0.567   0.890
+ +~198.51.100.1     .GPS.            2     41     64   377   2.345  -0.123   1.010
+ * sys.peer, # selected, + candidate, - outlyer, x falseticker, ~ configured
+"""
+
+SHOW_POLICY_MAP_CONTROL_PLANE = """\
+Control Plane
+  Service-policy input: NA-COPP
+
+  Class-map: NA-COPP-class (match-any)
+    0 packets, 0 bytes
+    30 second offered rate 0000 bps
+"""
+
+SHOW_IP_SSH = """\
+SSH Enabled - version 2.0
+Authentication methods:publickey,keyboard-interactive,password
+Authentication Publickey Algorithms:x509v3-ssh-rsa,ssh-rsa
+Hostkey Algorithms:x509v3-ssh-rsa,ssh-rsa
+Encryption Algorithms:aes128-ctr,aes192-ctr,aes256-ctr
+MAC Algorithms:hmac-sha2-256,hmac-sha2-512
+Authentication timeout: 120 secs; Authentication retries: 3
+Minimum expected Diffie Hellman key size : 2048 bits
+IOS Keys in SECSH format(ssh-rsa, base64 encoded): NONE
+Modulus Size : 2048 bits
+"""
+
+SHOW_IP_SSH_WITHOUT_MODULUS = """\
+SSH Enabled - version 1.99
+Authentication timeout: 120 secs; Authentication retries: 3
+Minimum expected Diffie Hellman key size : 1024 bits
+IOS Keys in SECSH format(ssh-rsa, base64 encoded): ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ
+"""
+"""Classic IOS: the host key's modulus is not printed at all (#97, lab check K5)."""
+
+SHOW_SYSTEM_INSECURE_CONFIGURATION = """\
+=============================================================
+          ACTIVE INSECURE CONFIGURATION DATABASE
+=============================================================
+Generated: Active Configuration Analysis
+Total Active Insecure Commands: 2
+Database Type: Active (Current State)
+Scan Status: Complete
+Next Update: No pending updates
+Database State: Stable
+=============================================================
+SECURE_CONFIG_ACTIVE_INSECURE_CONFIG_DB_WALK: Processing 2 active insecure CLI entries
+
++-------------------------------------------------------------
+| ACTIVE INSECURE CONFIGURATION ENTRY [1/2]
++-------------------------------------------------------------
+|               Module: FTP
+|       Parent Command: NA
+|          CLI Command: ip ftp source-interface GigabitEthernet0/0
+|          Description: FTP service enabled - transmits credentials in plaintext
+|               Reason: No encryption is configured
+|          Remediation: Transition to secure file transfer methods
+|          Config Mode: configure
+|               Status: ACTIVE
+|             Severity: HIGH
++-------------------------------------------------------------
+SECURE_CONFIG_ACTIVE_INSECURE_CONFIG_DB_WALK: Processed entry 1: ip ftp source-interface Gi0/0
+
++-------------------------------------------------------------
+| ACTIVE INSECURE CONFIGURATION ENTRY [2/2]
++-------------------------------------------------------------
+|               Module: SNMP
+|       Parent Command: NA
+|          CLI Command: snmp-server community <STRING> RO
+|               Reason: Legacy protocol poses data confidentiality risks
+|             Severity: HIGH
++-------------------------------------------------------------
+SECURE_CONFIG_ACTIVE_INSECURE_CONFIG_DB_WALK: Processed entry 2: snmp-server community CANARY-c97 RO
+
+=============================================================
+                    DATABASE SUMMARY
+=============================================================
+Total Active Entries Processed: 2
+"""
+"""17.18.2+ only (#97). The walk line echoes the real community string: it must be dropped."""
+
+SHOW_SYSTEM_INSECURE_CONFIGURATION_EMPTY = """\
+=============================================================
+          ACTIVE INSECURE CONFIGURATION DATABASE
+=============================================================
+Generated: Active Configuration Analysis
+Total Active Insecure Commands: 0
+Database Type: Active (Current State)
+Scan Status: Complete
+Next Update: No pending updates
+Database State: Stable
+=============================================================
+"""
+
 BGP_NOT_ACTIVE = "% BGP not active\n"
 NOT_UNDERSTOOD = "% Something unexpected happened\n"
 
@@ -463,5 +604,14 @@ REPLIES = {
     "show standby brief": SHOW_STANDBY_BRIEF,
     "show vrrp brief": SHOW_VRRP_BRIEF,
     "show glbp brief": SHOW_GLBP_BRIEF,
+    "show inventory": SHOW_INVENTORY,
+    "show snmp user": SHOW_SNMP_USER,
+    "show ntp associations": SHOW_NTP_ASSOCIATIONS,
+    "show policy-map control-plane": SHOW_POLICY_MAP_CONTROL_PLANE,
+    "show ip ssh": SHOW_IP_SSH,
 }
-"""Every collection command's reply on `sw-a`, keyed by the exact command."""
+"""Every collection command's reply on `sw-a`, keyed by the exact command.
+
+`show system insecure configuration` is not here: `sw-a` runs 17.9.4a, below its 17.18.2
+gate (#97), so it is never sent. Its reply is a fixture of its own.
+"""
