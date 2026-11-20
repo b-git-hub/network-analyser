@@ -126,6 +126,10 @@ _Avoid_: Issue, alert, vulnerability, result
 A vendor's published security advisory (for Cisco, a PSIRT advisory) that names the software versions it affects.
 _Avoid_: CVE, bulletin, vulnerability notice
 
+**Advisory Store**:
+The tool's local copy of the vendor's Advisories, each one kept only if its vendor signature checks out. Analysis matches Visited Devices' software against it, and a Run refreshes it from the vendor unless told not to.
+_Avoid_: Advisory cache, feed, vulnerability database
+
 **Train**:
 One release line of a Platform's software, such as IOS-XE 17.12 or IOS 15.2E, whose releases share features and hardware support.
 _Avoid_: Branch, stream, major version
