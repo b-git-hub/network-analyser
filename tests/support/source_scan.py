@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "network_analyser"
 PACKAGE_ROOT = REPO_ROOT / PACKAGE
 
-# The eleven modules of spec #37 ("Modules and their interfaces"), ADR 0003.
+# The modules of spec #37 ("Modules and their interfaces"), ADR 0003, plus `analysis` (#94).
 MODULES = frozenset(
     {
         "cli",
@@ -27,6 +27,7 @@ MODULES = frozenset(
         "topology",
         "diagram",
         "run_output",
+        "analysis",
     }
 )
 # Leaf modules that import nothing from the package (CODING_STANDARDS.md, "Layout").

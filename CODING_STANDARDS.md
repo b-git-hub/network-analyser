@@ -29,7 +29,7 @@ One package, `network_analyser/`, with the eleven modules from the spec plus two
 | Module | May import (package modules) |
 |---|---|
 | `records`, `_winsys` (leaves) | nothing |
-| `scope`, `credentials`, `trust_store`, `platforms`, `topology`, `diagram` | `records` |
+| `scope`, `credentials`, `trust_store`, `platforms`, `topology`, `analysis`, `diagram` | `records` |
 | `backup_store` | `records`, `credentials` |
 | `run_output` | `records`, `credentials`, `_winsys` |
 | `device_gateway` | `records`, `scope`, `trust_store`, `credentials`, `platforms` |

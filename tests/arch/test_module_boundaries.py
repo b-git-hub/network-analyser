@@ -25,6 +25,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     "trust_store": frozenset({"records"}),
     "platforms": frozenset({"records"}),
     "topology": frozenset({"records"}),
+    "analysis": frozenset({"records"}),  # pure: no HTTP client, SSH library or device code
     "diagram": frozenset({"records"}),  # reads only the Topology file
     "backup_store": frozenset({"records", "credentials"}),
     "run_output": frozenset({"records", "credentials", "_winsys"}),
