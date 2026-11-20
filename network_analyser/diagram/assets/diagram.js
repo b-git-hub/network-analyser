@@ -91,6 +91,8 @@
   const ONE_END = 'VLAN on one end only';
   const CONFLICT = 'conflicting evidence';
   const RED = new Set(['differing native VLAN', 'trunk facing access', 'differing access VLANs']);
+  /* a Finding from Analysis has no v1 kind, so its Check name names it (#93) */
+  const findingName = f => (typeof f.kind === 'string' ? f.kind : (f.check && typeof f.check.name === 'string' ? f.check.name : 'Finding'));
   const MARK = {
     conflict: { t: '≠', cls: 'conflict', name: 'conflicting evidence' },
     bad: { t: '!', cls: 'bad', name: 'VLAN Mismatch' },
@@ -471,7 +473,7 @@
   }
   function findingBox(f) {
     const m = markOf(f);
-    return '<div class="find ' + (m || 'other') + '">' + (m ? '<b class="mk">' + esc(MARK[m].t) + '</b> ' : '') + '<b>' + h(f.kind) + '.</b> ' + h(f.summary) + '</div>';
+    return '<div class="find ' + (m || 'other') + '">' + (m ? '<b class="mk">' + esc(MARK[m].t) + '</b> ' : '') + '<b>' + h(findingName(f)) + '.</b> ' + h(f.summary) + '</div>';
   }
   function itemBoxes(items) {
     const seen = new Set(), boxes = [];
@@ -610,7 +612,7 @@
     const items = arr(f.items).filter(i => typeof i === 'string');
     const first = items.map(i => edgesOfItem(i)[0]).find(Boolean);
     const named = items.map(i => (LINK.has(i) || BUNDLE.has(i) ? i : nameOf(i)));
-    return '<div class="det"><div><h3>' + h(f.kind) + '</h3>' + findingBox(f) + '<dl>' +
+    return '<div class="det"><div><h3>' + h(findingName(f)) + '</h3>' + findingBox(f) + '<dl>' +
       row('Devices', esc(arr(f.devices).map(d => nameOf(d)).join(', ') || 'none named')) +
       row('Concerns', '<span class="mono">' + esc(named.join(', ') || 'none named') + '</span>') +
       row('Id', '<span class="mono">' + esc(f.id) + '</span>') + '</dl><h4>Evidence</h4>' + evidenceList(f.evidence) + '</div></div>' +
@@ -652,7 +654,7 @@
     const items = arr(f.items).filter(i => typeof i === 'string');
     const centres = [...new Set([...arr(f.devices).filter(d => typeof d === 'string'), ...items.flatMap(centresOfItem)])];
     const m = markOf(f);
-    return item({ dot: m || 'other', title: centres.slice(0, 2).map(nameOf).join(' ⇄ ') || txt(f.kind), sub: txt(f.summary), finding: f.id,
+    return item({ dot: m || 'other', title: centres.slice(0, 2).map(nameOf).join(' ⇄ ') || txt(findingName(f)), sub: txt(f.summary), finding: f.id,
       sel: { centres, focus: focusOf(items), pick: { finding: f.id } } });
   }
   function edgeTitle(id) {

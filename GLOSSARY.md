@@ -127,8 +127,12 @@ One rule the tool tests a device, Link or the whole network against, such as "th
 _Avoid_: Test, rule, policy
 
 **Finding**:
-One problem a Check found, with a severity, on a device, a Link or the network. A VLAN Mismatch is one kind of Finding.
+One problem a Check found, with a level, on a device, a Link or the network. A VLAN Mismatch is one kind of Finding.
 _Avoid_: Issue, alert, vulnerability, result
+
+**Level**:
+How bad a Finding is: Critical, High, Medium or Low, worst first. There is no Info level, and nothing can be switched off, suppressed or accepted in this release.
+_Avoid_: Severity, priority, score
 
 **Advisory**:
 A vendor's published security advisory (for Cisco, a PSIRT advisory) that names the software versions it affects.

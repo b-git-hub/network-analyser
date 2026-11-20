@@ -8,6 +8,9 @@ tested from hand-written synthetic records with no device:
 - `to_document(topology)` returns it as plain JSON data, the content of `topology.json`,
   carrying `FORMAT_VERSION`. The cli writes it through the secret scan (`run_output`).
 
+Every Finding carries the 0.2.0 scale: `topology/scale.py` maps v1's kinds to their level,
+Check identity and advice (#93).
+
 The schema is in docs/topology-json.md.
 """
 

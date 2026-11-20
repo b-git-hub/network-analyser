@@ -25,6 +25,7 @@ from network_analyser.records.topology import (
 from network_analyser.records.unknown import Unknown
 from network_analyser.topology import ids
 from network_analyser.topology.devices import Known
+from network_analyser.topology.scale import scaled
 
 NOT_VISITED = "not a Visited Device"
 NOT_COLLECTED = "Bundle membership not collected"
@@ -256,9 +257,9 @@ def _flag(groups: Iterable[_Group], names: Callable[[str], str]) -> tuple[set[st
         bad_ids = sorted({link.id for link in bad})
         flagged.update(bad_ids)
         findings.append(
-            Finding(
-                id=ids.hashed("finding", [FindingKind.BUNDLE_MEMBER_MISMATCH.value, key]),
-                kind=FindingKind.BUNDLE_MEMBER_MISMATCH,
+            scaled(
+                FindingKind.BUNDLE_MEMBER_MISMATCH,
+                ident=ids.hashed("finding", [FindingKind.BUNDLE_MEMBER_MISMATCH.value, key]),
                 summary=(
                     f"{channel} on {names(device)}: {len(bad_ids)} member Link(s) do not reach "
                     "one matching bundle at the far end"
