@@ -48,6 +48,28 @@ SHOW_STANDBY_BRIEF: Final = "show standby brief"
 SHOW_VRRP_BRIEF: Final = "show vrrp brief"
 SHOW_GLBP_BRIEF: Final = "show glbp brief"
 
+# -- The 0.2.0 Analysis commands (#97; spec #92) ---------------------------------------------
+
+SHOW_INVENTORY: Final = "show inventory"
+"""The chassis, stack-member, supervisor and line-card PIDs the EoX Check sends (story 14)."""
+SHOW_SNMP_USER: Final = "show snmp user"
+"""SNMPv3 users and their authentication and privacy protocols (story 60)."""
+SHOW_NTP_ASSOCIATIONS: Final = "show ntp associations"
+"""Which NTP peer, if any, the device is synchronised to (story 60)."""
+SHOW_POLICY_MAP_CONTROL_PLANE: Final = "show policy-map control-plane"
+"""The control-plane service policy, for the CoPP Check (story 60)."""
+SHOW_IP_SSH: Final = "show ip ssh"
+"""SSH's version and, on IOS-XE 17.11 and later, the RSA host key's modulus size.
+
+Chosen over `show crypto key mypubkey rsa` because Cisco documents this command's `Modulus
+Size` line for the SSH key-size Check (field notice FN-72511), and it also reports whether
+SSH is enabled. Where a release does not print the modulus, the key size is `Unknown` and
+the Check is "could not decide", never a pass; lab check K5 confirms whether the other
+command is the better source on the fleet's releases."""
+SHOW_SYSTEM_INSECURE_CONFIGURATION: Final = "show system insecure configuration"
+"""Cisco's own list of configured insecure features. IOS-XE 17.18.2 and later only, so it is
+sent only when the release allows it (story 68); never on classic IOS."""
+
 VRF_PATTERN: Final = r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,31}"
 """A VRF name the tool will put in a command: one word of at most 32 characters."""
 
@@ -89,5 +111,11 @@ ALLOW_LIST: Final = AllowList(
         Exact(SHOW_STANDBY_BRIEF),
         Exact(SHOW_VRRP_BRIEF),
         Exact(SHOW_GLBP_BRIEF),
+        Exact(SHOW_INVENTORY),
+        Exact(SHOW_SNMP_USER),
+        Exact(SHOW_NTP_ASSOCIATIONS),
+        Exact(SHOW_POLICY_MAP_CONTROL_PLANE),
+        Exact(SHOW_IP_SSH),
+        Exact(SHOW_SYSTEM_INSECURE_CONFIGURATION),
     )
 )

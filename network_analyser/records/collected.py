@@ -158,6 +158,119 @@ class StackMember:
     model: str | Unknown
 
 
+@unique
+class InventoryKind(Enum):
+    """The `show inventory` entries whose PIDs the EoX lookup may send (story 14; #97).
+
+    Optics, power supplies, fans and anything else are never kept, so they can never leave
+    the PC.
+    """
+
+    CHASSIS = "chassis"
+    STACK_MEMBER = "stack member"
+    SUPERVISOR = "supervisor"
+    LINE_CARD = "line card"
+
+
+@dataclass(frozen=True, slots=True)
+class InventoryItem:
+    """One hardware entry from `show inventory` that the EoX Check may ask Cisco about.
+
+    Attributes:
+        name: the inventory NAME, as reported, such as `Switch 1` or `Slot 2 - Line Card 1`.
+        kind: chassis, stack member, supervisor or line card.
+        pid: the product id, such as `C9300-48P`.
+        serial: the serial number, kept for the device's own details and never sent.
+    """
+
+    name: str
+    kind: InventoryKind
+    pid: str | Unknown
+    serial: str | Unknown
+
+
+@dataclass(frozen=True, slots=True)
+class SnmpUser:
+    """One SNMPv3 user from `show snmp user` (#97).
+
+    Attributes:
+        name: the user name.
+        auth_protocol: the authentication protocol as reported, such as `SHA-256` or `MD5`.
+        privacy_protocol: the privacy protocol as reported, such as `AES256`, `DES` or `None`.
+        group: the group the user belongs to.
+    """
+
+    name: str
+    auth_protocol: str | Unknown
+    privacy_protocol: str | Unknown
+    group: str | Unknown
+
+
+@dataclass(frozen=True, slots=True)
+class NtpAssociation:
+    """One NTP association from `show ntp associations` (#97).
+
+    Attributes:
+        peer: the peer's address.
+        stratum: its stratum as reported.
+        synchronised: True for the peer the device is synchronised to (the `*` marker).
+    """
+
+    peer: IPv4Address
+    stratum: int | Unknown
+    synchronised: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ControlPlanePolicy:
+    """The service policies applied to the control plane from `show policy-map control-plane`.
+
+    Attributes:
+        service_policies: the policy names attached to the control plane, in order. Empty
+            when none is attached, which is what the CoPP Check reads (#102).
+    """
+
+    service_policies: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SshSettings:
+    """What `show ip ssh` says about the SSH server and its host key (#97).
+
+    Attributes:
+        enabled: whether SSH is enabled.
+        version: the SSH version as reported, such as `2.0` or `1.99`.
+        key_bits: the RSA host key's modulus size in bits. `Unknown` on a release whose
+            `show ip ssh` does not print it (lab check K5).
+    """
+
+    enabled: bool | Unknown
+    version: str | Unknown
+    key_bits: int | Unknown
+
+
+@dataclass(frozen=True, slots=True)
+class InsecureConfigurationItem:
+    """One entry from `show system insecure configuration` (IOS-XE 17.18.2+, #97).
+
+    Cisco's own fields, as Cisco prints them, so the Cisco insecure-list Check can report an
+    unmatched item in Cisco's words (#102, story 67).
+
+    Attributes:
+        module: the Cisco module, such as `SNMP` or `FTP`.
+        command: the CLI command pattern, as Cisco prints it, with any value as a
+            placeholder such as `<STRING>`. The reply's other lines echo configured values,
+            and are never kept.
+        reason: why Cisco flags it.
+        severity: the severity Cisco gives it.
+    """
+
+    module: str | Unknown
+    command: str | Unknown
+    reason: str | Unknown
+    severity: str | Unknown
+
+
 @dataclass(frozen=True, slots=True)
 class Vlan:
     """One VLAN in the device's VLAN database.
@@ -344,6 +457,17 @@ class Collected:
         routing_neighbours: OSPF, EIGRP and BGP neighbours, every VRF.
         static_routes: the static routes, every VRF.
         fhrp: HSRP, VRRP and GLBP groups.
+        inventory: the chassis, stack-member, supervisor and line-card PIDs (#97). None when
+            this Platform's collection does not read it; on IOS/IOS-XE, `Unknown` when it was
+            refused or not understood.
+        snmp_users: the SNMPv3 users, with their protocols (#97). None when not collected.
+        ntp_associations: the NTP peers and which one the device is synchronised to (#97).
+            None when not collected.
+        control_plane: the control-plane service policies (#97). None when not collected.
+        ssh: the SSH server's settings and RSA host key size (#97). None when not collected.
+        insecure_configuration: Cisco's own insecure-configuration entries (#97). None when
+            the Platform has no such command, or an IOS/IOS-XE release below 17.18.2 cannot
+            run it (story 68), so None never means "Cisco found nothing".
     """
 
     stack_members: Reading[tuple[StackMember, ...]] | Unknown
@@ -359,6 +483,12 @@ class Collected:
     routing_neighbours: Reading[tuple[RoutingNeighbour, ...]] | Unknown
     static_routes: Reading[tuple[StaticRoute, ...]] | Unknown
     fhrp: Reading[tuple[FhrpGroup, ...]] | Unknown
+    inventory: Reading[tuple[InventoryItem, ...]] | Unknown | None = None
+    snmp_users: Reading[tuple[SnmpUser, ...]] | Unknown | None = None
+    ntp_associations: Reading[tuple[NtpAssociation, ...]] | Unknown | None = None
+    control_plane: Reading[ControlPlanePolicy] | Unknown | None = None
+    ssh: Reading[SshSettings] | Unknown | None = None
+    insecure_configuration: Reading[tuple[InsecureConfigurationItem, ...]] | Unknown | None = None
 
     @classmethod
     def nothing(cls, reason: str) -> Collected:

@@ -15,6 +15,10 @@ gateway's own reading.
 Per VRF: `show vrf` lists the VRFs; each that carries IPv4 is asked for its ARP table, EIGRP
 and BGP neighbours and static routes with the per-VRF templates. OSPF needs no per-VRF form:
 `show ip ospf neighbor` covers every process, and a neighbour's VRF is its interface's.
+
+The 0.2.0 Analysis commands (#97) are asked last. `show system insecure configuration` is
+asked only when `show version` names IOS-XE 17.18.2 or later (story 68); on an older release
+its part is None, meaning "does not apply", never "Cisco found nothing".
 """
 
 from collections.abc import Callable
@@ -26,12 +30,14 @@ from network_analyser.platforms.collection import Collection, Send
 from network_analyser.platforms.ios_xe import commands as c
 from network_analyser.platforms.ios_xe import parsers
 from network_analyser.platforms.ios_xe.asking import Asker, Part
+from network_analyser.platforms.ios_xe.identify import supports_insecure_configuration
 from network_analyser.platforms.ios_xe.parsers import DEFAULT_VRF, Peer
 from network_analyser.records.collected import (
     NOT_COLLECTED,
     ArpEntry,
     Collected,
     FhrpGroup,
+    InsecureConfigurationItem,
     Interface,
     InterfaceIp,
     Reading,
@@ -85,6 +91,12 @@ def collect(send: Send, version: VersionFacts) -> Collection:
         routing_neighbours=_routing(asker, ips, vrf_names),
         static_routes=_static_routes(asker, vrf_names),
         fhrp=_fhrp(asker),
+        inventory=_single(asker, c.SHOW_INVENTORY, parsers.inventory),
+        snmp_users=_single(asker, c.SHOW_SNMP_USER, parsers.snmp_users),
+        ntp_associations=_single(asker, c.SHOW_NTP_ASSOCIATIONS, parsers.ntp_associations),
+        control_plane=_single(asker, c.SHOW_POLICY_MAP_CONTROL_PLANE, parsers.control_plane),
+        ssh=_single(asker, c.SHOW_IP_SSH, parsers.ssh_settings),
+        insecure_configuration=_insecure_configuration(asker, version),
     )
     return Collection(collected, tuple(asker.problems), PARSER)
 
@@ -92,6 +104,19 @@ def collect(send: Send, version: VersionFacts) -> Collection:
 def _single[T](asker: Asker, command: str, read: Callable[[str], T | None]) -> Reading[T] | Unknown:
     value = asker.ask(command, read)
     return value if isinstance(value, Unknown) else Reading((command,), value)
+
+
+def _insecure_configuration(
+    asker: Asker, version: VersionFacts
+) -> Reading[tuple[InsecureConfigurationItem, ...]] | Unknown | None:
+    """Cisco's insecure list, on IOS-XE 17.18.2+ only (story 68); None on an older release.
+
+    None means the command does not apply, so a Check can say "not applicable" rather than
+    "did not run"; a refused or unreadable reply is `Unknown`, never "Cisco found nothing".
+    """
+    if not supports_insecure_configuration(version):
+        return None
+    return _single(asker, c.SHOW_SYSTEM_INSECURE_CONFIGURATION, parsers.insecure_configuration)
 
 
 def _stack(asker: Asker, version: VersionFacts) -> Reading[tuple[StackMember, ...]] | Unknown:

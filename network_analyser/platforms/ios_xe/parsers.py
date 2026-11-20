@@ -22,11 +22,18 @@ from network_analyser.records.collected import (
     MANAGEMENT_VRFS,
     ArpEntry,
     BundleMember,
+    ControlPlanePolicy,
     FhrpGroup,
     FhrpProtocol,
+    InsecureConfigurationItem,
     InterfaceIp,
+    InventoryItem,
+    InventoryKind,
     MacEntry,
+    NtpAssociation,
     PortChannel,
+    SnmpUser,
+    SshSettings,
     StackMember,
     StaticRoute,
     SwitchportMode,
@@ -537,3 +544,276 @@ def glbp(text: str) -> tuple[FhrpGroup, ...] | None:
         if port is not None and group is not None and virtual is not None:
             found.append(FhrpGroup(FhrpProtocol.GLBP, port, group, virtual))
     return tuple(found)
+
+
+# -- The 0.2.0 Analysis commands (#97) --------------------------------------------------------
+
+_INVENTORY_PID: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9./-]{0,39}")
+_INVENTORY_SERIAL: Final = re.compile(r"[A-Za-z0-9]{1,40}")
+_INVENTORY_NOT_WANTED: Final = re.compile(
+    r"power supply|\bfans?\b|transceiver|optics|\bsfp\b", re.IGNORECASE
+)
+_STACK_MEMBER_NAME: Final = re.compile(r"switch \d{1,2}")
+_SLOT_NAME: Final = re.compile(r"slot \d{1,2}\b")
+_MODULE_NAME: Final = re.compile(r"(?:nim|spa|sm|nm) subslot \d{1,2}")
+
+
+def _inventory_kind(name: str) -> InventoryKind | None:
+    """Which EoX kind an inventory NAME is; None for anything that must never be sent.
+
+    The NAME patterns are the ones Cisco documents and the lab confirms (check K2): `Chassis`,
+    `Switch N`, a supervisor, a `Slot N - ...` line card, and a router's NIM/SPA subslot. An
+    unrecognised name is dropped rather than guessed, so no optic, PSU or fan can leave.
+    """
+    lowered = name.casefold()
+    if _INVENTORY_NOT_WANTED.search(lowered):
+        return None
+    if lowered == "chassis":
+        return InventoryKind.CHASSIS
+    if _STACK_MEMBER_NAME.fullmatch(lowered):
+        return InventoryKind.STACK_MEMBER
+    if "supervisor" in lowered:
+        return InventoryKind.SUPERVISOR
+    if _SLOT_NAME.match(lowered) or _MODULE_NAME.match(lowered) or "uplink module" in lowered:
+        return InventoryKind.LINE_CARD
+    return None
+
+
+def _inventory_pid(value: str) -> str | Unknown:
+    found = value.strip()
+    return (
+        found if _INVENTORY_PID.fullmatch(found) else Unknown("PID not reported by show inventory")
+    )
+
+
+def _inventory_serial(value: str) -> str | Unknown:
+    found = value.strip()
+    return (
+        found
+        if _INVENTORY_SERIAL.fullmatch(found)
+        else Unknown("serial not reported by show inventory")
+    )
+
+
+def inventory(text: str) -> tuple[InventoryItem, ...] | None:
+    """Read `show inventory`: only the chassis, stack-member, supervisor and line-card PIDs.
+
+    Optics, power supplies and fans are dropped here, so they can never be kept or sent
+    (story 14). A reply with no such entry at all is not understood, never "none": every
+    device has a chassis.
+    """
+    if not _has_data(text) or ("NAME:" not in text and "PID:" not in text):
+        return None
+    rows = _rows("show inventory", text)
+    if rows is None:
+        return None
+    found: list[InventoryItem] = []
+    for row in rows:
+        name = fields.label(fields.text(row, "name"))
+        kind = _inventory_kind(name) if name else None
+        if kind is None:
+            continue
+        found.append(
+            InventoryItem(
+                name,
+                kind,
+                _inventory_pid(fields.text(row, "pid")),
+                _inventory_serial(fields.text(row, "sn")),
+            )
+        )
+    return tuple(found) if found else None
+
+
+def snmp_users(text: str) -> tuple[SnmpUser, ...] | None:
+    """Read `show snmp user`: each SNMPv3 user and its protocols. A blank reply has none."""
+    if not _has_data(text):
+        return ()
+    rows = _rows("show snmp user", text)
+    if rows is None:
+        return None
+    found: list[SnmpUser] = []
+    for row in rows:
+        name = fields.label(fields.text(row, "user_name"))
+        if not name:
+            continue
+        found.append(
+            SnmpUser(
+                name,
+                _reported_by(row, "authentication_protocol", "authentication protocol"),
+                _reported_by(row, "privacy_protocol", "privacy protocol"),
+                _reported_by(row, "group_name", "group"),
+            )
+        )
+    return tuple(found)
+
+
+def _reported_by(row: Row, key: str, what: str) -> str | Unknown:
+    value = fields.label(fields.text(row, key))
+    return value or Unknown(f"{what} not reported by show snmp user")
+
+
+_NTP_ROW: Final = re.compile(
+    r"^\s*([*+#x~-]{0,4})\s*(\d{1,3}(?:\.\d{1,3}){3})\s+\S+\s+(\d{1,2})\s+\S+\s+\S+\s+\S+"
+)
+_NTP_HEADER: Final = re.compile(r"^\s*address\s+ref clock\b", re.IGNORECASE)
+_NTP_LEGEND: Final = re.compile(r"^\s*\*\s+sys\.peer\b", re.IGNORECASE)
+
+
+def ntp_associations(text: str) -> tuple[NtpAssociation, ...] | None:
+    """Read `show ntp associations`: the peers, and the `*` one the device syncs to.
+
+    A blank reply, or the table's header alone, means no associations, never "unknown".
+    """
+    if not _has_data(text):
+        return ()
+    found: list[NtpAssociation] = []
+    understood = False
+    for line in text.splitlines():
+        if _NTP_HEADER.match(line) or _NTP_LEGEND.match(line):
+            understood = True
+            continue
+        row = _NTP_ROW.match(line)
+        if row is None:
+            continue
+        understood = True
+        peer = fields.ipv4(row.group(2))
+        if peer is None:
+            return None
+        stratum = fields.number(row.group(3), highest=16)
+        found.append(
+            NtpAssociation(
+                peer,
+                Unknown("stratum not reported by show ntp associations")
+                if stratum is None
+                else stratum,
+                "*" in row.group(1),
+            )
+        )
+    return tuple(found) if understood else None
+
+
+_CONTROL_PLANE: Final = re.compile(r"^\s*Control Plane\b", re.IGNORECASE | re.MULTILINE)
+_SERVICE_POLICY: Final = re.compile(
+    r"^\s*Service-policy\s+(?:input|output)\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE
+)
+
+
+def control_plane(text: str) -> ControlPlanePolicy | None:
+    """Read `show policy-map control-plane`: the policy attached to the control plane.
+
+    An empty policy list means the command answered and no policy is attached, which is
+    what the CoPP Check reads. A blank or unrecognised reply is not understood, so the
+    Check can say "could not decide" rather than raise a false Finding.
+    """
+    if not _has_data(text):
+        return None
+    names = tuple(
+        dict.fromkeys(fields.label(match.group(1)) for match in _SERVICE_POLICY.finditer(text))
+    )
+    if names:
+        return ControlPlanePolicy(names)
+    return ControlPlanePolicy(()) if _CONTROL_PLANE.search(text) else None
+
+
+_SSH_STATUS: Final = re.compile(
+    r"^\s*SSH\s+(Enabled|Disabled)\s*-\s*version\s*(\S+)", re.IGNORECASE | re.MULTILINE
+)
+_SSH_MODULUS: Final = re.compile(
+    r"^\s*Modulus Size\s*:\s*(\d{3,5})\s*bits?", re.IGNORECASE | re.MULTILINE
+)
+
+
+def ssh_settings(text: str) -> SshSettings | None:
+    """Read `show ip ssh`: whether SSH is up, its version, and the RSA modulus if printed.
+
+    A release that does not print `Modulus Size` leaves the key size `Unknown`, never a
+    pass: the Check then says "could not decide" (lab check K5 picks the better command).
+    """
+    if not _has_data(text):
+        return None
+    status = _SSH_STATUS.search(text)
+    modulus = _SSH_MODULUS.search(text)
+    if status is None and modulus is None:
+        return None
+    enabled: bool | Unknown = (
+        Unknown("SSH state not reported by show ip ssh")
+        if status is None
+        else status.group(1).casefold() == "enabled"
+    )
+    version: str | Unknown = (
+        Unknown("SSH version not reported by show ip ssh") if status is None else status.group(2)
+    )
+    key_bits: int | Unknown = (
+        Unknown("RSA modulus not printed by show ip ssh")
+        if modulus is None
+        else int(modulus.group(1))
+    )
+    return SshSettings(enabled, version, key_bits)
+
+
+_INSECURE_TOTAL: Final = re.compile(
+    r"^Total Active Insecure Commands:\s*(\d{1,4})\s*$", re.MULTILINE
+)
+_INSECURE_SCAN: Final = re.compile(r"^Scan Status:\s*(\S.*?)\s*$", re.MULTILINE)
+_INSECURE_ENTRY: Final = re.compile(r"\|\s+ACTIVE INSECURE CONFIGURATION ENTRY\s*\[(\d+)/(\d+)\]")
+_INSECURE_FIELD: Final = re.compile(r"^\s*\|\s+(Module|CLI Command|Reason|Severity):\s*(.*?)\s*$")
+_SECURE_SCAN_DONE: Final = "complete"
+_INSECURE_NOT_REPORTED: Final = "not reported by show system insecure configuration"
+
+
+def insecure_configuration(text: str) -> tuple[InsecureConfigurationItem, ...] | None:
+    """Read `show system insecure configuration` (IOS-XE 17.18.2+): Cisco's own entries.
+
+    Only the entry blocks' fields are kept. The report's walk lines echo each configured
+    value (`snmp-server community <a real string> RO`), so they are never read: an entry's
+    command keeps Cisco's placeholder, as in `snmp-server community <STRING> RO`. The list
+    is returned only when the scan is complete and every counted entry was read, so a stale
+    or partial scan is "not understood", never a short list.
+
+    The output is treated like the running config (story 81): these secret-free facts are in
+    memory only, never written here or quoted in a log, and a Finding built from them (#102)
+    is scanned again by `run_output`'s writer before it reaches a file (#116).
+    """
+    if not _has_data(text):
+        return None
+    total = _INSECURE_TOTAL.search(text)
+    scan = _INSECURE_SCAN.search(text)
+    if total is None or scan is None or scan.group(1).casefold() != _SECURE_SCAN_DONE:
+        return None
+    count = int(total.group(1))
+    if not _INSECURE_ENTRY.search(text):
+        return () if count == 0 else None
+    blocks = _insecure_blocks(text)
+    if len(blocks) != count or not all(
+        "Module" in block and "CLI Command" in block for block in blocks
+    ):
+        return None
+    return tuple(_insecure_item(block) for block in blocks)
+
+
+def _insecure_blocks(text: str) -> list[dict[str, str]]:
+    """Each entry block's fields, between its `ENTRY [n/m]` line and the next one."""
+    blocks: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+    for line in text.splitlines():
+        if _INSECURE_ENTRY.search(line):
+            if current is not None:
+                blocks.append(current)
+            current = {}
+        elif current is not None:
+            field = _INSECURE_FIELD.match(line)
+            if field:
+                current[field.group(1)] = fields.label(field.group(2))
+    if current is not None:
+        blocks.append(current)
+    return blocks
+
+
+def _insecure_item(block: dict[str, str]) -> InsecureConfigurationItem:
+    """One entry block as Cisco's own, secret-free fields."""
+    return InsecureConfigurationItem(
+        module=block["Module"],
+        command=block["CLI Command"],
+        reason=block.get("Reason") or Unknown(_INSECURE_NOT_REPORTED),
+        severity=block.get("Severity") or Unknown(_INSECURE_NOT_REPORTED),
+    )
