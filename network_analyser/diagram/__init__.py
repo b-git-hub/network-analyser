@@ -9,22 +9,26 @@ from network_analyser.diagram.html import draw_html
 from network_analyser.diagram.layout import AreaLabel, Layout, Point, place
 from network_analyser.diagram.topology_file import (
     KNOWN_FORMAT_VERSION,
+    CiscoLookups,
     NewerFormatError,
     Plain,
     TopologyFile,
     TopologyFileError,
+    cisco_lookups,
     read_topology,
 )
 
 __all__ = [
     "KNOWN_FORMAT_VERSION",
     "AreaLabel",
+    "CiscoLookups",
     "Layout",
     "NewerFormatError",
     "Plain",
     "Point",
     "TopologyFile",
     "TopologyFileError",
+    "cisco_lookups",
     "draw_drawio",
     "draw_html",
     "place",

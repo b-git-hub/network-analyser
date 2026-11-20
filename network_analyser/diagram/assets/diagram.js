@@ -62,6 +62,19 @@
   const LABELS = arr(DATA.layout && DATA.layout.labels);
   const posOf = id => POS.get(id) || SPOS.get(id);
 
+  /* ---------- the Findings tab's model, worked out by the tool (#108) ---------- */
+  const FT = DATA.findings && typeof DATA.findings === 'object' ? DATA.findings : {};
+  const CHIPS = arr(FT.chips);
+  const LEVELS_M = arr(FT.levels);
+  const CHECK_BY_KEY = new Map(), FINDING_KEY = new Map();
+  for (const group of LEVELS_M) for (const check of arr(group && group.checks)) {
+    if (!check || typeof check.key !== 'string') continue;
+    CHECK_BY_KEY.set(check.key, check);
+    arr(check.finding_ids).forEach(id => FINDING_KEY.set(id, check.key));
+  }
+  const checkSel = () => (S.check ? CHECK_BY_KEY.get(S.check) : null);
+  const levelClass = level => String(level || '').toLowerCase();
+
   function nameOf(id) {
     const d = DEV.get(id);
     if (d) return str(d.hostname) || str(d.management_ip) || id;
@@ -178,7 +191,6 @@
     return out;
   }
   const EDGES = physicalEdges();
-  const edgesOfItem = id => EDGES.filter(e => e.items.includes(id));
 
   /* ---------- the Routing view (story 147) ---------- */
   const L3_MEMBERS = new Set();
@@ -264,7 +276,7 @@
   })();
 
   /* ---------- what is on screen ---------- */
-  const S = { tab: 'map', view: 'physical', vlan: VLANS.find(n => n !== 1) || VLANS[0] || null, pick: null, sel: null, filter: '' };
+  const S = { tab: 'map', view: 'physical', vlan: VLANS.find(n => n !== 1) || VLANS[0] || null, pick: null, check: null, type: 'All' };
   const REG = new Map();
 
   function deviceNodes(ids, extra) {
@@ -312,23 +324,23 @@
     const count = s => edges.filter(e => e.cls.includes(s)).length;
     return { nodes: deviceNodes(ALL_NODES(), faded), edges, labels: LABELS, counts: { on: count('vlan-on'), br: count('vlan-break'), un: count('vlan-unk') } };
   }
-  /* The Findings tab draws only the selection's neighbourhood, each device where the Map puts it. */
-  function neighbourhoodScene() {
-    const sel = S.sel;
-    if (!sel) return { nodes: [], edges: [], labels: [] };
-    const centres = new Set(sel.centres.filter(id => posOf(id)));
-    const edges = EDGES.filter(e => centres.has(e.a) || centres.has(e.b));
-    const ids = new Set(centres);
-    edges.forEach(e => { ids.add(e.a); ids.add(e.b); });
-    const focus = new Set(sel.focus || []);
+  /* The Findings tab keeps every device where the Map puts it and lights only what the picked
+     Check hit; everything else, neighbours included, dims (story 91). */
+  function findingsScene() {
+    const sel = checkSel();
+    if (!sel) {
+      return { nodes: deviceNodes(ALL_NODES()), edges: EDGES.map(e => Object.assign({}, e, { badge: e.mark })), labels: LABELS };
+    }
+    const hotD = new Set(arr(sel.devices)), hotL = new Set(arr(sel.items));
+    const isHot = e => arr(e.items).some(id => hotL.has(id));
     return {
-      nodes: deviceNodes([...ids], id => (centres.has(id) ? 'centre' : '')),
-      edges: edges.map(e => Object.assign({}, e, { badge: e.mark, cls: focus.has(e.id) ? e.cls.concat('focus') : e.cls })),
-      labels: []
+      nodes: deviceNodes(ALL_NODES(), id => (hotD.has(id) ? 'hot' : 'dim')),
+      edges: EDGES.map(e => Object.assign({}, e, { badge: null, cls: e.cls.concat(isHot(e) ? 'hot' : 'dim') })),
+      labels: LABELS
     };
   }
   function scene() {
-    if (S.tab === 'findings') return neighbourhoodScene();
+    if (S.tab === 'findings') return findingsScene();
     if (S.view === 'routing') return routingScene();
     if (S.view === 'vlan') return vlanScene();
     return physicalScene();
@@ -608,15 +620,30 @@
       row('Id', '<span class="mono">' + esc(a.id) + '</span>') + '</dl></div>' +
       '<div><h4>Learned on</h4>' + table(['Device', 'Interfaces'], rows) + '</div><div><h4>Evidence</h4>' + evidenceList(a.evidence) + '</div></div>';
   }
-  function findingDetail(f) {
-    const items = arr(f.items).filter(i => typeof i === 'string');
-    const first = items.map(i => edgesOfItem(i)[0]).find(Boolean);
-    const named = items.map(i => (LINK.has(i) || BUNDLE.has(i) ? i : nameOf(i)));
-    return '<div class="det"><div><h3>' + h(findingName(f)) + '</h3>' + findingBox(f) + '<dl>' +
-      row('Devices', esc(arr(f.devices).map(d => nameOf(d)).join(', ') || 'none named')) +
-      row('Concerns', '<span class="mono">' + esc(named.join(', ') || 'none named') + '</span>') +
-      row('Id', '<span class="mono">' + esc(f.id) + '</span>') + '</dl><h4>Evidence</h4>' + evidenceList(f.evidence) + '</div></div>' +
-      (first ? refDetail(first.ref) : '');
+  /* The picked Check's pane: Cisco's detail for an Advisory, advice and where for any other
+     Check (stories 93-94). Every value is escaped; the Cisco link is set after the markup is
+     built, from a URL the tool built only after checking the Advisory id (story 51). */
+  function checkDetail(check) {
+    const level = '<span class="pill lv ' + esc(levelClass(check.level)) + '">' + esc(check.level) + '</span>';
+    if (check.advisory) {
+      const a = check.advisory;
+      const id = a.href
+        ? '<a class="mono" data-url="' + esc(a.href) + '" rel="noopener noreferrer" target="_blank">' + esc(a.id) + '</a>'
+        : '<span class="mono">' + esc(a.id) + '</span>';
+      const rows = arr(a.devices).map(d => '<tr>' + td(esc(d.hostname)) + td('<span class="mono">' + esc(d.management_ip) + '</span>') +
+        td('<span class="mono">' + esc(d.model) + '</span>') + td('<span class="mono">' + esc(d.release) + '</span>') +
+        td(esc(d.upgrade_target)) + td(esc(d.latest_release)) + '</tr>');
+      return '<div class="det"><div><h3>' + esc(a.title) + '</h3>' + level + '<span class="pill acc">Advisory</span><dl>' +
+        row('Advisory', id) + row('SIR', esc(a.sir)) + row('CVEs', '<span class="mono">' + esc(arr(a.cves).join(', ') || 'none') + '</span>') +
+        row('Published', esc(a.published)) + row('Updated', esc(a.updated)) + row('Status', esc(a.status)) + '</dl>' +
+        '<p class="fixed">' + esc(a.note) + '</p>' +
+        '<h4>' + esc(String(arr(a.devices).length)) + ' devices on an affected release</h4>' +
+        table(['Hostname', 'Management IP', 'Model', 'Release', 'Upgrade Target', 'Latest Release'], rows) + '</div></div>';
+    }
+    const rows = arr(check.rows).map(f => '<tr>' + td(esc(f.where)) + td(esc(f.what_was_found)) + '</tr>');
+    return '<div class="det"><div><h3>' + esc(check.name) + '</h3>' + level + '<span class="pill acc">' + esc(check.type) + ' Check</span><dl>' +
+      row('Source', esc(check.source)) + '</dl><p><b>What to do:</b> ' + esc(check.what_to_do) + '</p>' +
+      '<h4>' + esc(String(arr(check.rows).length)) + ' Findings</h4>' + table(['Where', 'What was found'], rows) + '</div></div>';
   }
   function refDetail(r) {
     if (r.type === 'device') return deviceDetail(r.id);
@@ -629,103 +656,59 @@
   }
   function detail() {
     const hint = '<div class="det"><p class="hint">' + (S.tab === 'findings'
-      ? 'Pick an item from the list to draw its neighbourhood and see what the Topology recorded.'
+      ? 'Pick a Check to light only the devices and Links it hit, and see what to do.'
       : 'Select a device, Link, Bundle, Subnet or Shared Segment to see what the Topology recorded about it.') + '</p></div>';
-    if (!S.pick) return hint;
-    if (S.pick.finding) { const f = FINDING.get(S.pick.finding); return f ? findingDetail(f) : hint; }
-    const r = REG.get(S.pick.id);
-    return r ? refDetail(r) : hint;
+    if (S.pick) {
+      const r = REG.get(S.pick.id);
+      if (r) return refDetail(r);
+    }
+    const check = checkSel();
+    return check ? checkDetail(check) : hint;
+  }
+  function activateLinks(scope) {
+    /* The URL is data, not markup, so the page itself holds no link that could point anywhere
+       else. The tool built it from an Advisory id that passed the cisco-sa- pattern. */
+    scope.querySelectorAll('[data-url]').forEach(a => { a.setAttribute('href', a.getAttribute('data-url')); });
   }
 
-  /* ---------- the Findings tab's list (story 151) ---------- */
-  const ITEMS = [];
-  function item(o) { o.i = ITEMS.length; ITEMS.push(o); return o; }
-  function centresOfItem(id) {
-    const l = LINK.get(id);
-    if (l) return endsOf(l).map(e => e.device);
-    const b = BUNDLE.get(id);
-    if (b) return arr(b.sides).flatMap(s => arr(s && s.ends)).map(e => e && e.device).filter(d => typeof d === 'string');
-    const s = SEG.get(id);
-    if (s) return [id];
-    return posOf(id) ? [id] : [];
+  /* ---------- the Findings tab's list: by level, then one row per Check (#108) ---------- */
+  function chipBar() {
+    return '<div class="chips" role="group" aria-label="Filter by Check type">' +
+      CHIPS.map(chip => '<button class="chip' + (S.type === chip.type ? ' on' : '') + '" data-type="' + esc(chip.type) + '">' +
+        esc(chip.label) + '</button>').join('') + '</div>';
   }
-  const focusOf = ids => ids.flatMap(id => edgesOfItem(id).map(e => e.id));
-  function findingItem(f) {
-    const items = arr(f.items).filter(i => typeof i === 'string');
-    const centres = [...new Set([...arr(f.devices).filter(d => typeof d === 'string'), ...items.flatMap(centresOfItem)])];
-    const m = markOf(f);
-    return item({ dot: m || 'other', title: centres.slice(0, 2).map(nameOf).join(' ⇄ ') || txt(findingName(f)), sub: txt(f.summary), finding: f.id,
-      sel: { centres, focus: focusOf(items), pick: { finding: f.id } } });
+  const shownCheck = check => S.type === 'All' || check.type === S.type;
+  const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+  function checkButton(check) {
+    const selected = S.check === check.key ? ' on' : '';
+    return '<button class="chk' + selected + (check.soft ? ' soft' : '') + '" data-check="' + esc(check.key) + '">' +
+      '<span class="dot ' + esc(levelClass(check.level)) + '"></span>' +
+      '<span class="ft">' + esc(check.title) + '</span><span class="c">' + esc(check.count_label) + '</span>' +
+      '<span class="k">' + esc(check.subtitle) + '</span></button>';
   }
-  function edgeTitle(id) {
-    const e = edgesOfItem(id)[0];
-    return e ? nameOf(e.a) + ' ' + e.ai + ' ⇄ ' + nameOf(e.b) + ' ' + e.bi : id;
-  }
-  function linkItem(l, dot) {
-    const e = edgesOfItem(l.id)[0];
-    return item({ dot, title: edgeTitle(l.id), sub: txt(l.status) + (typeof l.bundle === 'string' ? ', Bundle member' : '') + ', from ' + [...new Set(arr(l.evidence).map(x => txt(x.source)))].join(', '),
-      sel: { centres: centresOfItem(l.id), focus: focusOf([l.id]), pick: e ? { id: e.id } : null } });
-  }
-  const deviceItem = (id, dot, sub) => item({ dot, title: nameOf(id), sub, sel: { centres: [id], focus: [], pick: { id } } });
-  const byKindOrder = f => (f.kind === CONFLICT ? 1 : RED.has(f.kind) ? 0 : 2);
-
-  const findings = [...FINDING.values()];
-  const LIST = {
-    attention: findings.filter(f => f.kind !== ONE_END).sort((x, y) => byKindOrder(x) - byKindOrder(y)).map(findingItem),
-    notChecked: (function () {
-      const groups = new Map();
-      for (const [subject, rows] of SKIP_BY_ITEM) {
-        const reasons = [...new Set(rows.map(skipText))];
-        const key = 'VLAN check: ' + reasons[0];
-        const e = edgesOfItem(subject)[0];
-        addTo(groups, key, item({ dot: 'unknown', title: edgeTitle(subject), sub: rows.map(r => nameOf(r.device) + ': ' + skipText(r)).join('; '),
-          sel: { centres: centresOfItem(subject), focus: focusOf([subject]), pick: e ? { id: e.id } : null } }));
-      }
-      const perDevice = new Map();
-      SKIPPED.filter(r => r.data !== 'vlan_mismatch').forEach(r => addTo(perDevice, r.device, r));
-      for (const [device, rows] of perDevice) {
-        addTo(groups, 'Data not collected from a Visited Device', deviceItem(device, 'unknown', rows.map(r => txt(r.data) + ' (' + txt(r.reason) + ')').join('; ')));
-      }
-      return [...groups.entries()].sort((x, y) => (x[0] < y[0] ? -1 : 1));
-    })(),
-    oneEnd: findings.filter(f => f.kind === ONE_END).map(findingItem),
-    oneSided: [...LINK.values()].filter(l => l.status === 'one-sided' && endsOf(l).length === 2 && endsOf(l).every(e => DEV.has(e.device))).map(l => linkItem(l, 'acc')),
-    inferred: [...LINK.values()].filter(l => l.status === 'inferred').map(l => linkItem(l, 'acc')),
-    unvisited: (function () {
-      const groups = new Map();
-      for (const u of UNV.values()) {
-        const by = [...new Set(arr(u.reported_by).map(r => nameOf(txt(r.device))))];
-        addTo(groups, str(u.reason) || 'reason not recorded', deviceItem(u.id, 'unv', by.length ? 'reported by ' + by.join(', ') : 'reported by no Visited Device'));
-      }
-      return [...groups.entries()].sort((x, y) => (x[0] < y[0] ? -1 : 1));
-    })(),
-    visited: [...DEV.values()].sort((x, y) => (nameOf(x.id) < nameOf(y.id) ? -1 : 1))
-      .map(d => deviceItem(d.id, 'acc', txt(d.platform) + ' · ' + txt(d.model)))
-  };
-  const FINDING_ITEM = new Map(ITEMS.filter(x => x.finding).map(x => [x.finding, x]));
-
-  const itemButton = x => '<button class="fi" data-i="' + x.i + '"><span class="dot ' + esc(x.dot) + '"></span>' +
-    '<span class="ft">' + esc(x.title) + '</span><span class="k">' + esc(x.sub) + '</span></button>';
-  const count = list => list.length;
-  function section(key, title, items, open, sub) {
-    return '<details data-s="' + key + '"' + (open ? ' open' : '') + '><summary>' + esc(title) + '<span class="n">' + count(items) + '</span></summary>' +
-      (sub ? '<div class="sub">' + esc(sub) + '</div>' : '') + (items.map(itemButton).join('') || '<div class="sub">none</div>') + '</details>';
-  }
-  function groupedSection(key, title, groups, open, sub) {
-    const total = groups.reduce((n, g) => n + g[1].length, 0);
-    return '<details data-s="' + key + '"' + (open ? ' open' : '') + '><summary>' + esc(title) + '<span class="n">' + total + '</span></summary>' +
-      (sub ? '<div class="sub">' + esc(sub) + '</div>' : '') +
-      (groups.map(g => '<div class="rgh">' + esc(g[0]) + ' (' + g[1].length + ')</div>' + g[1].map(itemButton).join('')).join('') || '<div class="sub">none</div>') + '</details>';
+  function levelGroup(group) {
+    const checks = arr(group.checks).filter(shownCheck);
+    if (!checks.length) return '';
+    const findings = checks.reduce((n, check) => n + (num(check.findings) || 0), 0);
+    return '<details class="lvl ' + esc(levelClass(group.level)) + '" data-level="' + esc(group.level) + '"' + (group.open ? ' open' : '') + '>' +
+      '<summary><span class="pill lv ' + esc(levelClass(group.level)) + '">' + esc(group.level) + '</span>' +
+      '<span>' + plural(checks.length, 'Check', 'Checks') + '</span><span class="n">' + plural(findings, 'Finding', 'Findings') + '</span></summary>' +
+      (checks.map(checkButton).join('') || '<div class="sub">none</div>') + '</details>';
   }
   function sideList() {
-    return section('attention', 'Needs attention', LIST.attention, true, 'VLAN Mismatches that break traffic, and conflicting evidence.') +
-      groupedSection('unknown', 'Not checked', LIST.notChecked, true, 'Data was not collected, so these are never called a Mismatch.') +
-      section('oneend', 'VLAN on one end only', LIST.oneEnd, false, 'Often harmless, such as "allowed all" facing a pruned list. Kept apart so it does not drown the rest.') +
-      section('onesided', 'One-sided Links between Visited Devices', LIST.oneSided, false, '') +
-      section('inferred', 'Inferred Links (from MAC/ARP)', LIST.inferred, false, '') +
-      groupedSection('unvisited', 'Unvisited Devices', LIST.unvisited, false, '') +
-      '<details data-s="visited"><summary>All Visited Devices<span class="n">' + LIST.visited.length + '</span></summary>' +
+    const any = LEVELS_M.some(group => arr(group.checks).some(shownCheck));
+    return chipBar() + (any ? LEVELS_M.map(levelGroup).join('') : '<div class="sub">No Check of this type in this topology.json.</div>') +
+      '<details data-s="visited"><summary>All Visited Devices<span class="n">' + DEV.size + '</span></summary>' +
       '<input class="filter" id="filter" type="search" placeholder="Filter by name, Platform or model" aria-label="Filter Visited Devices"><div id="visited-list"></div></details>';
+  }
+  function listVisited(input) {
+    const q = input.value.trim().toLowerCase();
+    const list = [...DEV.values()].sort((x, y) => (nameOf(x.id) < nameOf(y.id) ? -1 : 1));
+    document.getElementById('visited-list').innerHTML = list
+      .filter(d => (nameOf(d.id) + ' ' + txt(d.platform) + ' ' + txt(d.model)).toLowerCase().includes(q))
+      .slice(0, 200)
+      .map(d => '<button class="fi" data-device="' + esc(d.id) + '"><span class="dot acc"></span><span class="ft">' + esc(nameOf(d.id)) +
+        '</span><span class="k">' + esc(txt(d.platform) + ' · ' + txt(d.model)) + '</span></button>').join('') || '<div class="sub">none</div>';
   }
 
   /* ---------- the page ---------- */
@@ -734,7 +717,8 @@
   const markCount = m => EDGES.filter(e => e.mark && e.mark === MARK[m]).length;
   function keyHtml() {
     if (S.tab === 'findings') {
-      return '<span><b class="mk bad">!</b> mismatch</span><span><b class="mk noisy">~</b> one end only</span><span><b class="mk unknown">?</b> not checked</span><span><b class="mk conflict">≠</b> conflict</span>';
+      return '<span><b class="hot-key">lit</b> = the picked Check\'s devices and Links</span><span class="muted">dimmed = everything else</span>' +
+        '<span><b class="mk bad">!</b> mismatch</span><span><b class="mk noisy">~</b> one end only</span><span><b class="mk unknown">?</b> not checked</span><span><b class="mk conflict">≠</b> conflict</span>';
     }
     if (S.view === 'routing') {
       if (!L3_RECORDED) return '<span>This topology.json holds no L3 Adjacencies or Subnets (it was written by an older version), so no routing lines are drawn.</span>';
@@ -767,47 +751,56 @@
     '<button class="tab" role="tab" data-view="routing" aria-selected="false">Routing (L3)</button>' +
     '<button class="tab" role="tab" data-view="vlan" aria-selected="false">VLAN</button></div>' +
     '<div class="key" id="key"></div></div>' +
-    '<div class="body"><aside class="side" id="side" hidden>' + sideList() + '</aside>' +
+    '<div class="asof gut" id="asof" hidden></div>' +
+    '<div class="body"><aside class="side" id="side" hidden></aside>' +
     '<section class="main"><div class="stage"><div class="crumb" id="crumb" hidden></div><svg class="canvas" id="map" role="img" aria-label="Diagram of the Topology"><g class="vp"></g></svg>' +
     '<div class="zoom"><button data-z="in" aria-label="Zoom in">+</button><button data-z="out" aria-label="Zoom out">−</button><button data-z="fit" aria-label="Fit to view">⤢</button></div></div>' +
     '<div class="detail gut" id="detail" aria-live="polite"></div></section></div>';
 
   const svg = document.getElementById('map'), vp = svg.querySelector('.vp'), panel = document.getElementById('detail');
   const side = document.getElementById('side'), keyBox = document.getElementById('key'), crumb = document.getElementById('crumb');
+  const asof = document.getElementById('asof');
   let current = null;
+  function drawSide() {
+    side.innerHTML = sideList();
+    const filter = document.getElementById('filter');
+    if (filter) { filter.addEventListener('input', () => listVisited(filter)); listVisited(filter); }
+  }
+  function markSelected() {
+    side.querySelectorAll('.chk').forEach(b => b.classList.toggle('on', b.getAttribute('data-check') === S.check));
+  }
   function draw(refit) {
     app.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', String(b.getAttribute('data-tab') === S.tab)));
     app.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-selected', String(b.getAttribute('data-view') === S.view)));
     document.getElementById('views').hidden = S.tab !== 'map';
     side.hidden = S.tab !== 'findings';
-    crumb.hidden = S.tab !== 'findings' || !S.sel;
-    crumb.textContent = S.sel ? S.sel.label : '';
-    svg.setAttribute('aria-label', S.tab === 'findings' ? 'Neighbourhood of the selected item' : (S.view === 'routing' ? 'Routing (L3) view' : S.view === 'vlan' ? 'VLAN view' : 'Physical view') + ' of the Topology');
+    asof.hidden = S.tab !== 'findings';
+    asof.innerHTML = '<span>' + esc((FT.lookups && FT.lookups.text) || 'Cisco lookups did not run.') + '</span>';
+    const check = checkSel();
+    const label = check ? check.title : (S.pick && S.pick.id ? nameOf(S.pick.id) : '');
+    crumb.hidden = S.tab !== 'findings' || !label;
+    crumb.textContent = label;
+    svg.setAttribute('aria-label', S.tab === 'findings' ? 'Map of the Topology with the picked Check lit' : (S.view === 'routing' ? 'Routing (L3) view' : S.view === 'vlan' ? 'VLAN view' : 'Physical view') + ' of the Topology');
     current = scene();
     render(vp, current);
     keyBox.innerHTML = keyHtml();
     const vsel = document.getElementById('vsel');
     if (vsel) vsel.addEventListener('change', () => { S.vlan = parseInt(vsel.value, 10); draw(false); });
     panel.innerHTML = detail();
-    side.querySelectorAll('.fi').forEach(b => {
-      if (S.sel && S.sel.i === Number(b.getAttribute('data-i'))) b.setAttribute('aria-current', 'true');
-      else b.removeAttribute('aria-current');
-    });
+    activateLinks(panel);
+    markSelected();
     if (refit) canvas.fit(boundsOf(current));
   }
-  function select(x) {
+  function selectCheck(key) {
+    if (!CHECK_BY_KEY.has(key)) return;
     S.tab = 'findings';
-    S.sel = { i: x.i, centres: x.sel.centres, focus: x.sel.focus, label: x.title };
-    S.pick = x.sel.pick;
-    draw(true);
-  }
-  function walkTo(id) {
-    S.sel = { i: -1, centres: [id], focus: [], label: nameOf(id) };
-    S.pick = { id };
+    S.check = key;
+    S.pick = null;
+    const b = [...side.querySelectorAll('.chk')].find(x => x.getAttribute('data-check') === key);
+    if (b) { const box = b.closest('details'); if (box) box.open = true; }
     draw(true);
   }
   const canvas = attachCanvas(svg, id => {
-    if (S.tab === 'findings' && id && (DEV.has(id) || UNV.has(id) || SEG.has(id))) { walkTo(id); return; }
     S.pick = id ? { id } : null;
     draw(false);
   });
@@ -820,10 +813,6 @@
     if (t === S.tab) return;
     S.tab = t;
     S.pick = null;
-    if (t === 'findings' && !S.sel) {
-      const first = LIST.attention[0] || LIST.notChecked.map(g => g[1][0])[0] || LIST.visited[0];
-      if (first) { select(first); return; }
-    }
     draw(true);
   }));
   app.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => {
@@ -832,32 +821,33 @@
     draw(true);
   }));
   side.addEventListener('click', e => {
-    const b = e.target.closest('.fi');
-    if (!b) return;
-    const x = ITEMS[Number(b.getAttribute('data-i'))];
-    if (x) select(x);
+    const chip = e.target.closest('.chip');
+    if (chip) {
+      S.type = chip.getAttribute('data-type');
+      const selected = checkSel();
+      if (S.type !== 'All' && selected && selected.type !== S.type) S.check = null;
+      drawSide();
+      draw(false);
+      return;
+    }
+    const check = e.target.closest('.chk');
+    if (check) { selectCheck(check.getAttribute('data-check')); return; }
+    const device = e.target.closest('[data-device]');
+    if (device) { S.pick = { id: device.getAttribute('data-device') }; draw(false); }
   });
-  const visitedList = document.getElementById('visited-list'), filter = document.getElementById('filter');
-  function listVisited() {
-    const q = filter.value.trim().toLowerCase();
-    visitedList.innerHTML = LIST.visited.filter(x => (x.title + ' ' + x.sub).toLowerCase().includes(q)).slice(0, 200).map(itemButton).join('') || '<div class="sub">none</div>';
-  }
-  filter.addEventListener('input', listVisited);
-  listVisited();
+  drawSide();
 
   function openFromAddress() {
     /* diagram.html#device=<id> opens that device on the Map tab, and diagram.html#finding=<id>
-       opens that finding on the Findings tab; an id the Topology does not hold is ignored */
+       opens its Check on the Findings tab; an id the Topology does not hold is ignored */
     const m = /^#(device|finding)=([A-Za-z0-9._%-]+)$/.exec(location.hash);
     if (!m) return;
     let id;
     try { id = decodeURIComponent(m[2]); } catch (_) { return; }
     if (m[1] === 'finding') {
-      const x = FINDING_ITEM.get(id);
-      if (!x) return;
-      const box = side.querySelector('details[data-s="' + (FINDING.get(id).kind === ONE_END ? 'oneend' : 'attention') + '"]');
-      if (box) box.open = true;
-      select(x);
+      const key = FINDING_KEY.get(id);
+      if (!key) return;
+      selectCheck(key);
       return;
     }
     if (!DEV.has(id) && !UNV.has(id) && !SEG.has(id)) return;
