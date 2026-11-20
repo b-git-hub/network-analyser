@@ -35,6 +35,27 @@ Before writing code, read [CODING_STANDARDS.md](CODING_STANDARDS.md): its rules 
 
 [docs/wiki/index.md](docs/wiki/index.md) holds dated decisions, process notes and lessons from earlier sessions. Read it before planning or implementation work, and follow [its conventions](docs/wiki/conventions.md) when you add to it.
 
+## Choosing models for subagents
+
+When you coordinate subagents, set `model` on every Agent call. A subagent with no `model` inherits yours, which is usually the most expensive one. Use the cheapest model that fits the role:
+
+| Role | Model |
+|---|---|
+| Planning: map, spec, tickets, decision tickets | Opus |
+| Coordinating, and `code-review` of an integration branch | Opus |
+| Implementing a ticket that touches `credentials`, `device_gateway`, `backup_store`, `trust_store`, the secret scan or redaction, or the command allow-list | Opus |
+| Implementing any other ticket | Sonnet |
+| Exploration that only gathers and summarises facts | Sonnet |
+| Merging a finished ticket branch ([merger brief](docs/wiki/merger-brief.md)) | Sonnet |
+| Retros, wiki log lines, regenerating the lab role, other scripted steps | Sonnet, or Haiku when the steps are fully scripted |
+
+- Never use Haiku to write or change code in `network_analyser/` or `tests/`.
+- If a Sonnet implementer stops to report a security question, or its work fails `code-review` on a security point, hand that ticket to Opus. Don't retry it on Sonnet.
+- When a ticket's tier is unclear, pick Opus and say why in the ticket's log line.
+- All models share one usage budget. Run at most three Opus implementers at a time.
+
+The evidence behind this table, and how to revise it, is in [docs/wiki/model-choice.md](docs/wiki/model-choice.md).
+
 ## Security comes first
 
 Security outranks convenience, speed and features. When a choice trades security for anything else, take the secure option or stop and ask.
