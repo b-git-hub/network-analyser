@@ -221,3 +221,48 @@ def test_what_is_read_cannot_be_changed() -> None:
 
     with pytest.raises(TypeError):
         content["devices"][0]["id"] = "dev-other"
+
+
+def test_cisco_lookups_are_read_when_the_file_records_them() -> None:
+    document = _document()
+    document["cisco_lookups"] = {"ran": True, "when": "2026-11-20T14:02:00+00:00"}
+
+    lookups = diagram.cisco_lookups(diagram.read_topology(_text(document)))
+
+    assert lookups.ran is True
+    assert lookups.when == "2026-11-20T14:02:00+00:00"
+
+
+@pytest.mark.parametrize(
+    "recorded",
+    [None, {}, {"ran": False, "when": None}, {"ran": "yes", "when": 7}],
+)
+def test_a_missing_or_unreadable_lookup_record_reads_as_did_not_run(recorded: object) -> None:
+    document = _document()
+    if recorded is not None:
+        document["cisco_lookups"] = recorded
+
+    lookups = diagram.cisco_lookups(diagram.read_topology(_text(document)))
+
+    assert lookups.ran is False
+    assert lookups.when is None
+
+
+def test_a_device_s_advice_is_read_for_the_advisory_pane() -> None:
+    document = _document()
+    document["devices"][0]["advice"] = {
+        "outcome": "1 Advisory matches",
+        "upgrade_target": "17.12.8",
+        "latest_release": "17.12.10",
+    }
+
+    advice = _content(document)["devices"][0]["advice"]
+
+    assert advice["upgrade_target"] == "17.12.8"
+    assert advice["latest_release"] == "17.12.10"
+
+
+def test_a_device_from_before_advice_reads_it_as_unknown() -> None:
+    advice = _content(_document())["devices"][0]["advice"]
+
+    assert set(advice) == {"unknown"}

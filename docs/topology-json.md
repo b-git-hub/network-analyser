@@ -63,10 +63,17 @@ Ids hold only letters, digits, `.`, `-` and `_`. Items point at devices by id.
 | `subnets` | Subnets (#62): a prefix in one VRF shared by three or more devices. Empty when there are none |
 | `skipped` | data not collected, per device, so its checks were skipped (story 126) |
 | `unknown_interface_names` | interface names the table did not know (story 127) |
+| `cisco_lookups` | optional (#104, read by #108): whether Cisco was asked during the Run and when |
+
+### `cisco_lookups` (#104, optional)
+
+`ran` (true when Cisco was asked) and `when` (when the lookups ran, as fixed ISO 8601 text). Optional: a file with no key, or a Run with `--cisco-lookups off`, reads as "Cisco lookups did not run". Every surface reads it through `diagram.cisco_lookups(topology)`, so the shape changes in one place.
 
 ### `devices[]` (Visited Device)
 
-`id`, `outcome` (`visited` / `partial`), `partial_reason`, `hostname`, `platform`, `model`, `software_version`, `serials[]`, `stack_members[]` (`number`, `serial`, `model`), `management_ip`, `alias_ips[]` (learned aliases and interface addresses), `interfaces[]`, `vlan_database`, `vpc`.
+`id`, `outcome` (`visited` / `partial`), `partial_reason`, `hostname`, `platform`, `model`, `software_version`, `serials[]`, `stack_members[]` (`number`, `serial`, `model`), `management_ip`, `alias_ips[]` (learned aliases and interface addresses), `interfaces[]`, `vlan_database`, `vpc`, and the optional `advice` (#105).
+
+`advice` (#105, read by #108): the per-device Analysis advice: `outcome` (its Advisory outcome: "N Advisories match", "no known Critical/High Advisories for release X" or "could not check: reason"), `upgrade_target` (the release to move to, null when no release in its Train is clear) and `latest_release` (newest overall; `latest_in_train` holds the newest in its Train). Optional, so a file from before #105, or a device Analysis did not advise, has none and the Advisory pane shows "not available" rather than guessing (#89).
 
 `vlan_database` (#64): the VLANs in the device's VLAN database, active or not, as `[first, last]` ranges. Unknown when it was not collected or is incomplete. A trunk's effective VLANs are its `allowed_vlans` that are also here (#61's rule). A file written before #64 lacks the key, which reads as unknown.
 
@@ -140,3 +147,4 @@ A prefix in one VRF on exactly two devices is one adjacency of kind `shared subn
   - Built by #64 (2026-11-19): the diagram schema now reads `adjacencies`, `subnets`, `skipped` and devices' `vlan_database`; `place(...).subnets` positions Subnet nodes. `diagram.html` has the Map tab (Physical, Routing (L3), VLAN views, with Mismatch markers) and the Findings tab, which `#finding=<id>` opens. `diagram.drawio`'s Routing page draws Adjacencies and Subnets. Calls: [spec-37-implementation-calls](wiki/spec-37-implementation-calls.md), item 16.
 - **#66 (Run report):** list `skipped`, `unknown_interface_names` and `findings`; link with the ids above.
 - **#93 (Finding scale, 2026-11-20):** every Finding now carries `level`, `check` (stable id, name, type, `soft`), `what_was_found`, `what_to_do` and `source`, with optional `cisco_detail` and `also_flagged_by_cisco` (records in `records/topology.py`). v1's kinds are mapped in `topology/scale.py`: conflicting evidence and `VLAN on one end only` are Low (the latter `soft`); Bundle member mismatch, differing native VLAN, trunk facing access and differing access VLANs are Medium. New Analysis Findings carry no v1 `kind`, but they do carry a v1 `summary`. `format_version` stays `1` for the reason given under `findings[]`. A later Check ticket builds its own `Check(id, name, type)` and a `Finding` through the record, sorts with `Finding.order` (worst first, a soft Check last in its level) and writes it into `topology.json` as an optional field.
+- **#104, #105:** write the optional `cisco_lookups` top-level record and each device's `advice` record described above. #108 reads them through `diagram.cisco_lookups(topology)` and the Advisory pane, and shows "Cisco lookups did not run" or "not available" when they are absent. Neither field needs a `format_version` bump.
