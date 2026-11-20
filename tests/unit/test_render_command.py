@@ -119,7 +119,7 @@ def test_a_topology_from_a_newer_version_is_refused(
 ) -> None:
     topology = run_folder / "topology.json"
     data = json.loads(topology.read_text(encoding="utf-8"))
-    data["format_version"] = 2
+    data["format_version"] = 3
     topology.write_text(json.dumps(data), encoding="utf-8")
 
     code = _render(str(run_folder))

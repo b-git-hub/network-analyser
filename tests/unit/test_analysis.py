@@ -27,6 +27,7 @@ from network_analyser.records.topology import (
     AdvisoryDetail,
     AnalysisResults,
     CheckType,
+    CiscoDetailKind,
     Finding,
     FindingKind,
     FindingLevel,
@@ -293,9 +294,10 @@ def test_the_advice_shape_accepts_an_advisory_answer() -> None:
 
 def _advisory_detail() -> AdvisoryDetail:
     return AdvisoryDetail(
+        kind=CiscoDetailKind.ADVISORY,
         id="cisco-sa-example-abc123",
         title="Example Advisory",
-        sir="High",
+        sir=FindingLevel.HIGH,
         cvss="8.1",
         cves=("CVE-2026-0001",),
         published="2026-11-01",

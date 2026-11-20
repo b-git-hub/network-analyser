@@ -355,42 +355,82 @@ class Check:
     soft: bool = False
 
 
+@unique
+class CiscoDetailKind(Enum):
+    """Which Cisco detail a Finding carries: an Advisory's, or EoX dates (#93).
+
+    The discriminator on `cisco_detail`: readers branch on it instead of sniffing `id` or
+    `items` (stories 87, 89, 112).
+    """
+
+    ADVISORY = "Advisory"
+    EOX = "EoX"
+
+
+ADVISORY_STATUS: Final = "Affected release"
+"""Story 49's fixed status, carried by every Advisory Finding."""
+
+ADVISORY_FIXED_LINE: Final = (
+    "Matched on software release only. Cisco may limit this Advisory to devices that use a "
+    "particular feature; see 'Vulnerable Products' on Cisco's page."
+)
+"""Story 49's fixed line, so a version-only match is never overread."""
+
+
 @dataclass(frozen=True, slots=True)
 class AdvisoryDetail:
     """Cisco's own detail for an Advisory Finding (stories 49-51).
 
     Attributes:
+        kind: `CiscoDetailKind.ADVISORY`, the discriminator telling a reader this
+            `cisco_detail` is an Advisory rather than EoX.
         id: the Advisory id, such as `cisco-sa-example-abc123`.
         title: its title, in Cisco's words.
-        sir: Cisco's Security Impact Rating: Critical, High, Medium or Low.
+        sir: Cisco's Security Impact Rating, one of the four `FindingLevel`s. The Finding's
+            level equals it (story 47): Cisco's Critical/High/Medium/Low are the same scale.
         cvss: its CVSS score, as Cisco gives it.
         cves: the CVEs it covers, in Cisco's order.
         published: when Cisco published it, as fixed ISO 8601 text.
         updated: when Cisco last updated it, as fixed ISO 8601 text.
         first_fixed: the Advisory's first fixed release in the device's Train; None when
             it has no fix in that Train.
+        status: story 49's fixed status, `ADVISORY_STATUS`.
+        fixed_line: story 49's fixed line, `ADVISORY_FIXED_LINE`.
         hardware_family_not_confirmed: True when an NX-OS match rests on the release alone
             because the Nexus hardware family could not be worked out (story 46).
     """
 
+    kind: CiscoDetailKind
     id: str
     title: str
-    sir: str
+    sir: FindingLevel
     cvss: str
     cves: tuple[str, ...]
     published: str
     updated: str
     first_fixed: str | None
+    status: str = ADVISORY_STATUS
+    fixed_line: str = ADVISORY_FIXED_LINE
     hardware_family_not_confirmed: bool = False
+
+
+@unique
+class EoxKind(Enum):
+    """Whether an EoX item is hardware or software (stories 74-75)."""
+
+    HARDWARE = "hardware"
+    SOFTWARE = "software"
 
 
 @dataclass(frozen=True, slots=True)
 class EoxItem:
-    """One hardware or software item Cisco gives end-of-life dates for (story 74).
+    """One hardware or software item Cisco gives end-of-life dates for (stories 74-75).
 
     Dates are fixed ISO 8601 text; None means Cisco gave none.
 
     Attributes:
+        kind: hardware or software, so a Check can map the item's level without guessing
+            from its name (story 74's hardware vs story 75's software).
         name: the item Cisco names: a PID, or a release string.
         last_date_of_support: Cisco's Last Date of Support.
         end_of_security_support: Cisco's End of Security/Vulnerability Support.
@@ -399,6 +439,7 @@ class EoxItem:
         replacement: Cisco's replacement PID; None when it names none.
     """
 
+    kind: EoxKind
     name: str
     last_date_of_support: str | None = None
     end_of_security_support: str | None = None
@@ -409,12 +450,15 @@ class EoxItem:
 
 @dataclass(frozen=True, slots=True)
 class EoxDetail:
-    """Cisco's EoX detail for a hardware or software Finding (story 74).
+    """Cisco's EoX detail for a hardware or software Finding (stories 74-75).
 
     Attributes:
+        kind: `CiscoDetailKind.EOX`, the discriminator telling a reader this `cisco_detail`
+            is EoX rather than an Advisory.
         items: one per item Cisco named, in Cisco's order.
     """
 
+    kind: CiscoDetailKind
     items: tuple[EoxItem, ...]
 
 
