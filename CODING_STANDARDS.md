@@ -24,7 +24,7 @@ uv run --locked python scripts/check.py
 
 ## 2. Layout and module boundaries ([ADR 0003](docs/adr/0003-modular-monolith-for-v1.md))
 
-One package, `network_analyser/`, with the eleven modules from the spec plus two leaf modules:
+One package, `network_analyser/`, with the eleven modules from the spec plus two leaf modules, and from 0.2.0 the `advisories` module:
 
 | Module | May import (package modules) |
 |---|---|
@@ -34,15 +34,17 @@ One package, `network_analyser/`, with the eleven modules from the spec plus two
 | `run_output` | `records`, `credentials`, `_winsys` |
 | `device_gateway` | `records`, `scope`, `trust_store`, `credentials`, `platforms` |
 | `discovery` | `records`, `scope`, `credentials`, `device_gateway`, `platforms`, `backup_store`, `topology` |
+| `advisories` (0.2.0, #95) | `records`, `credentials`, `_winsys` |
 | `cli` (composition root) | everything |
 
 [tests/arch/test_module_boundaries.py]. Libraries have one owner each:
 
-- `netmiko`, `paramiko`: only `device_gateway`, and inside it only `device_gateway/ssh.py` [security test 3: tests/security/test_3_import_rule.py; tests/arch/test_module_boundaries.py]. `socket`: only `device_gateway`, in `ssh.py` (a full session) and `probe.py` (the Sweep's TCP 22 banner read, which closes before key exchange, #55). The rest of the gateway works on the plain `link.Dial` seam, which tests fake (tests/support/fake_device.py).
+- `netmiko`, `paramiko`: only `device_gateway`, and inside it only `device_gateway/ssh.py` [security test 3: tests/security/test_3_import_rule.py; tests/arch/test_module_boundaries.py]. `socket`: only `device_gateway`, in `ssh.py` (a full session) and `probe.py` (the Sweep's TCP 22 banner read, which closes before key exchange, #55), and `advisories/transport.py`. The rest of the gateway works on the plain `link.Dial` seam, which tests fake (tests/support/fake_device.py).
+- `http.client`, `ssl`, `truststore`: only `advisories/transport.py` (and `truststore` nowhere else): the one outbound HTTPS path, fenced to Cisco ([ADR 0007](docs/adr/0007-cisco-lookups-at-run-end-after-secrets-wiped.md), [ADR 0009](docs/adr/0009-http-client-http-client-with-truststore.md)). Everything above it works on the plain `Transport` seam, which tests fake at `tests/support/fake_cisco.py`.
 - `pyrage`: only `backup_store`. `textfsm`, `ntc_templates`: only `platforms`.
 - `ctypes`, `msvcrt`, `winreg`: only `_winsys`. Every Windows-only call sits in `_winsys` behind a function that also runs (or says it can't) on Linux, so tests can inject a fake. Branch on the platform at module level (`if sys.platform == "win32": def f(): ... else: def f(): ...`), as `_winsys/elevation.py` does; a `sys.platform` check inside a function body trips mypy's `warn_unreachable` under `--platform win32`.
 - `tomllib`: only `cli`. `logging`: only `cli/library_loggers.py`, which keeps the netmiko and paramiko loggers silent. Our own code never uses `logging`.
-- Never: `getpass`, `pickle`, `shelve`, `marshal`, `subprocess`, `http`, `urllib`, `requests`, `ftplib`, `telnetlib`, `faulthandler.enable`, `paramiko.AutoAddPolicy`/`WarningPolicy` [ruff TID251 and the arch test].
+- Never: `getpass`, `pickle`, `shelve`, `marshal`, `subprocess`, `urllib`, `requests`, `http.client` (except `advisories/transport.py`), `ftplib`, `telnetlib`, `faulthandler.enable`, `paramiko.AutoAddPolicy`/`WarningPolicy` [ruff TID251 and the arch test].
 
 Changing the import table or an owner is a design decision: say why in the commit message and update this table.
 
@@ -56,7 +58,7 @@ Changing the import table or an owner is a design decision: say why in the commi
 ## 4. Secrets
 
 - Every Credential Set password and the Backup Passphrase is a `credentials.Secret` from the moment it is typed. Its `str`, `repr` and format show `held in memory`; it cannot be pickled, copied, hashed, compared with `==` (use `same_as`), truth-tested (use `is_empty`) or measured [tests/unit/test_secret.py].
-- **Who may hold the value** (decided 2026-11-18): Credential Set passwords only in `credentials` and `device_gateway`; the Backup Passphrase only in `backup_store`. `.reveal()` may be called only in those three modules, at the last moment, and its result is never stored [tests/arch/test_secret_rules.py]. `device_gateway` gets a set's password, still a `Secret`, only through `CredentialSets.password_for_login`, which nothing outside `credentials` and `device_gateway` may call [tests/arch/test_read_only.py] (#49). The `cli` masked reader returns a `Secret` and never keeps the plain value.
+- **Who may hold the value** (decided 2026-11-18): Credential Set passwords only in `credentials` and `device_gateway`; the Backup Passphrase only in `backup_store`. The Cisco API Key's client ID and secret, and the token from `id.cisco.com`, are `Secret`s too: `advisories` reveals them only to make Cisco's request, and `backup_store` unlocks the key file (ADR 0008; #95). `.reveal()` may be called only in those four modules, at the last moment, and its result is never stored [tests/arch/test_secret_rules.py]. `device_gateway` gets a set's password, still a `Secret`, only through `CredentialSets.password_for_login`, which nothing outside `credentials` and `device_gateway` may call [tests/arch/test_read_only.py] (#49). The `cli` masked reader returns a `Secret` and never keeps the plain value.
 - Secrets never come from options, environment variables or files. Only `_winsys` reads the environment, and only `LOCALAPPDATA`, `USERDOMAIN` and `COMPUTERNAME` by literal name [arch test, ruff TID251]. The one file that reads them gets `"network_analyser/_winsys/<file>.py" = ["TID251"]` in `[tool.ruff.lint.per-file-ignores]`; no other file may. No option name may suggest a secret [tests/unit/test_cli.py].
 - Usernames are not secret.
 
@@ -83,7 +85,7 @@ Changing the import table or an owner is a design decision: say why in the commi
 - Layout: `tests/security/` holds only the six v1 security tests (spec #37), named `test_<n>_*.py` and marked `security`. `tests/arch/` holds static architecture rules. `tests/unit/` holds everything else.
 - A static rule is also tested against a planted violation, so a rule that stops matching fails.
 - Fixtures are synthetic: IPv4 only from RFC 5737 (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24), plus, only to prove a refusal, the blocks the Scope never touches (`records.NEVER_TARGETS`: 0.0.0.0/8, 127.0.0.0/8, 224.0.0.0/4, 240.0.0.0/4), hostnames like `sw-a`, secrets like `CANARY-pw-…`. The lab file's secrets are `CHANGE_ME` [tests/arch/test_fixture_hygiene.py]. Never commit captured device output, configs, `*.age`, `known_hosts` or Run folders.
-- Tests never touch the network; a fixture in `tests/conftest.py` refuses every connection. Fake devices at the `device_gateway` seam.
+- Tests never touch the network; a fixture in `tests/conftest.py` refuses every connection. Fake devices at the `device_gateway` seam, and a fake Cisco at the `advisories` transport seam (`tests/support/fake_cisco.py`).
 - Anything that needs Windows is behind a `_winsys` function with an injected fake in tests, and is checked by hand on Windows (lab checklist).
 
 ## 8. Read-only and allow-list

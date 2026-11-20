@@ -14,6 +14,7 @@ from typing import NoReturn, override
 
 from network_analyser import run_output
 from network_analyser._version import __version__
+from network_analyser.advisories import ProxyConfig
 from network_analyser.cli.exit_codes import ExitCode
 
 PROG = "network-analyser"
@@ -95,6 +96,16 @@ def _fingerprint(text: str) -> str:
     if not _FINGERPRINT.fullmatch(text):
         msg = "must be an OpenSSH SHA256 fingerprint, SHA256: then 43 base64 characters"
         raise argparse.ArgumentTypeError(msg)
+    return text
+
+
+def _proxy(text: str) -> str:
+    """Accept only `host:port` for `--proxy`, with no scheme, path or password (#95)."""
+    try:
+        ProxyConfig.explicit(text)
+    except ValueError:
+        msg = "must be host:port, with no scheme or password"
+        raise argparse.ArgumentTypeError(msg) from None
     return text
 
 
@@ -239,6 +250,15 @@ def _add_run(commands: _Commands) -> None:
         "--progress",
         choices=["live", "log", "quiet"],
         help="how progress is shown (default live; log when output is redirected)",
+    )
+
+    lookups = run.add_argument_group("Cisco lookups")
+    lookups.add_argument(
+        "--proxy",
+        type=_proxy,
+        metavar="HOST:PORT",
+        help="HTTP proxy for Cisco's lookups (default: Windows' own proxy setting). "
+        "HTTPS_PROXY-style environment variables are never read.",
     )
 
 

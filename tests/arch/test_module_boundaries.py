@@ -5,11 +5,13 @@ CODING_STANDARDS.md ("Layout") in step.
 """
 
 import graphlib
+from pathlib import Path
 
 from tests.support.source_scan import (
     LEAF_MODULES,
     MODULES,
     PACKAGE_ROOT,
+    SourceFile,
     imported_names,
     internal_module,
     source_files,
@@ -28,6 +30,9 @@ ALLOWED: dict[str, frozenset[str]] = {
     "diagram": frozenset({"records"}),  # reads only the Topology file
     "backup_store": frozenset({"records", "credentials"}),
     "run_output": frozenset({"records", "credentials", "_winsys"}),
+    # #95: the one egress module. `credentials` is for `Secret` only (the Cisco API Key),
+    # never a password path; `_winsys` reads Windows' proxy setting (story 17).
+    "advisories": frozenset({"records", "credentials", "_winsys"}),
     "device_gateway": frozenset({"records", "scope", "trust_store", "credentials", "platforms"}),
     "discovery": frozenset(
         {
@@ -50,7 +55,13 @@ OWNERS: dict[str, frozenset[str]] = {
     "paramiko": frozenset({"device_gateway/ssh.py"}),
     # #55: the Sweep opens its own TCP socket and closes it before key exchange, so the
     # probe cannot go through Paramiko (that handshake is the key exchange).
-    "socket": frozenset({"device_gateway/ssh.py", "device_gateway/probe.py"}),
+    # #95: the fenced transport is the only other socket, and the only TLS.
+    "socket": frozenset(
+        {"device_gateway/ssh.py", "device_gateway/probe.py", "advisories/transport.py"}
+    ),
+    # #95: the one HTTP client, and the Windows certificate store (ADR 0009).
+    "http": frozenset({"advisories/transport.py"}),
+    "truststore": frozenset({"advisories/"}),
     "pyrage": frozenset({"backup_store/"}),
     "textfsm": frozenset({"platforms/"}),
     "ntc_templates": frozenset({"platforms/"}),
@@ -61,7 +72,6 @@ OWNERS: dict[str, frozenset[str]] = {
     "logging": frozenset({"cli/library_loggers.py"}),
     "faulthandler": frozenset({"cli/app.py"}),  # only to switch it off
     "getpass": frozenset(),
-    "http": frozenset(),
     "urllib": frozenset(),
     "requests": frozenset(),
     "ftplib": frozenset(),
@@ -119,3 +129,85 @@ def test_each_library_is_imported_only_by_its_owner() -> None:
 
 def _owns(owner: str, relative: str) -> bool:
     return relative.startswith(owner) if owner.endswith("/") else relative == owner
+
+
+# #95: `advisories` takes the lookup questions, never a device record (stories 12-14).
+DEVICE_RECORDS = frozenset(
+    {
+        "network_analyser.records.device",
+        "network_analyser.records.collected",
+        "network_analyser.records.topology",
+        "network_analyser.records.run_request",
+    }
+)
+EGRESS_MODULE = "advisories"
+
+
+def device_record_imports(files: list[SourceFile]) -> list[str]:
+    """Find an import of a device record in the module that goes online."""
+    return [
+        f"{source.relative}:{line} imports {name}"
+        for source in files
+        if source.module == EGRESS_MODULE
+        for name, line in imported_names(source)
+        if any(name.startswith(prefix) for prefix in DEVICE_RECORDS)
+    ]
+
+
+def test_advisories_sees_no_device_record() -> None:
+    assert device_record_imports(source_files()) == []
+
+
+def test_the_scan_catches_a_device_record_in_advisories(tmp_path: Path) -> None:
+    package = tmp_path / "network_analyser"
+    (package / "advisories").mkdir(parents=True)
+    (package / "advisories" / "__init__.py").write_text(
+        "from network_analyser.records.device import DeviceRecord\n", encoding="utf-8"
+    )
+
+    assert device_record_imports(source_files(package)) == [
+        "advisories/__init__.py:1 imports network_analyser.records.device",
+        "advisories/__init__.py:1 imports network_analyser.records.device.DeviceRecord",
+    ]
+
+
+# #95: the egress module holds the Cisco API Key's Secret, never a Credential Set password or
+# a device session (story 41; ADR 0008).
+PASSWORD_OR_DEVICE = (
+    "network_analyser.credentials.sets",
+    "network_analyser.credentials.CredentialSet",
+    "network_analyser.credentials.LoginLease",
+    "network_analyser.device_gateway",
+)
+
+
+def password_or_device_imports(files: list[SourceFile]) -> list[str]:
+    """Find a Credential Set password path or a device import in `advisories`."""
+    return [
+        f"{source.relative}:{line} imports {name}"
+        for source in files
+        if source.module == EGRESS_MODULE
+        for name, line in imported_names(source)
+        if any(name.startswith(prefix) for prefix in PASSWORD_OR_DEVICE)
+    ]
+
+
+def test_advisories_imports_no_password_path_and_no_device_gateway() -> None:
+    assert password_or_device_imports(source_files()) == []
+
+
+def test_the_scan_catches_a_password_path_in_advisories(tmp_path: Path) -> None:
+    package = tmp_path / "network_analyser"
+    (package / "advisories").mkdir(parents=True)
+    (package / "advisories" / "__init__.py").write_text(
+        "from network_analyser.credentials.sets import CredentialSets\n"
+        "from network_analyser.device_gateway import visit\n",
+        encoding="utf-8",
+    )
+
+    assert password_or_device_imports(source_files(package)) == [
+        "advisories/__init__.py:1 imports network_analyser.credentials.sets",
+        "advisories/__init__.py:1 imports network_analyser.credentials.sets.CredentialSets",
+        "advisories/__init__.py:2 imports network_analyser.device_gateway",
+        "advisories/__init__.py:2 imports network_analyser.device_gateway.visit",
+    ]
