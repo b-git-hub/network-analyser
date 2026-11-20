@@ -20,6 +20,10 @@ DELETE_OWNERS: frozenset[str] = frozenset(
         # of the Backup Passphrase finishes: the tool's own bookkeeping in the per-user
         # folder, never a Run folder or a Backup.
         "backup_store/change_pending.py",
+        # #103: removes the Cisco API key file for `cisco-key remove` and when the operator
+        # starts over (deleting the check file): the tool's own key file, never a Run folder
+        # or a Backup.
+        "backup_store/cisco_key.py",
     }
 )
 _DELETE_METHODS = frozenset({"unlink", "rmdir"})  # Path.unlink(), Path.rmdir()

@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 from network_analyser.cli import (
     cmd_change_passphrase,
+    cmd_cisco_key,
     cmd_render,
     cmd_role_snippet,
     cmd_run,
@@ -23,4 +24,5 @@ COMMANDS: dict[str, Command] = {
     "trust-key": cmd_trust_key.trust_key,
     "role-snippet": cmd_role_snippet.role_snippet,
     "change-passphrase": cmd_change_passphrase.change_passphrase,
+    "cisco-key": cmd_cisco_key.cisco_key,
 }
