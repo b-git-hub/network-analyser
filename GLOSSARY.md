@@ -51,8 +51,12 @@ A Credential Set that is no longer tried for the rest of a Run because it used u
 _Avoid_: Locked set, disabled set
 
 **Backup Passphrase**:
-The one passphrase the operator types at the start of each Run that locks every Backup, and that is needed again to open one. Like a Credential Set password, it exists only in memory for that Run and is never written anywhere.
+The one passphrase the operator types at the start of each Run that locks every Backup and the stored Cisco API Key, and that is needed again to open them. Like a Credential Set password, it exists only in memory for that Run and is never written anywhere.
 _Avoid_: Backup password, encryption key, master password
+
+**Cisco API Key**:
+The client ID and secret the operator registers with Cisco, needed for any Cisco lookup. It is the only secret the tool keeps between Runs, and it is kept locked with the Backup Passphrase.
+_Avoid_: API token, Cisco credentials, licence key
 
 **Trust Store**:
 The operator's record, kept between Runs, of trusted SSH host keys (and, once an HTTPS Platform is supported, pinned certificate fingerprints), against which every device is checked before a password is sent.
