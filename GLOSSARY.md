@@ -125,3 +125,7 @@ _Avoid_: Issue, alert, vulnerability, result
 **Advisory**:
 A vendor's published security advisory (for Cisco, a PSIRT advisory) that names the software versions it affects.
 _Avoid_: CVE, bulletin, vulnerability notice
+
+**Advisory Store**:
+The tool's local copy of the vendor's Advisories, each one kept only if its vendor signature checks out. Analysis matches Visited Devices' software against it, and a Run refreshes it from the vendor unless told not to.
+_Avoid_: Advisory cache, feed, vulnerability database
