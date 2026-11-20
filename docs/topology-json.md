@@ -64,6 +64,7 @@ Ids hold only letters, digits, `.`, `-` and `_`. Items point at devices by id.
 | `skipped` | data not collected, per device, so its checks were skipped (story 126) |
 | `unknown_interface_names` | interface names the table did not know (story 127) |
 | `cisco_lookups` | optional (#104, read by #108): whether Cisco was asked during the Run and when |
+| `analysis` | Analysis's advice and per-Check list (#94), or `null` before Analysis has run |
 
 ### `cisco_lookups` (#104, optional)
 
@@ -123,6 +124,14 @@ A prefix in one VRF on exactly two devices is one adjacency of kind `shared subn
 - `summary` is one line saying what is wrong, kept so the v1 pages still draw a Topology Finding. `kind` is v1's kind, `null` for an Analysis Finding. A file from before #93 has neither the new keys nor the new shape; its findings still draw.
 - `cisco_detail` is one of two shapes, or `null`: an Advisory's `id`, `title`, `sir`, `cvss`, `cves[]`, `published`, `updated`, `first_fixed` (`null` for no fix in the device's Train) and `hardware_family_not_confirmed`; or an EoX `items[]` of `name`, `last_date_of_support`, `end_of_security_support`, `end_of_sw_maintenance`, `end_of_sale` and `replacement`. Dates are fixed ISO 8601 text.
 - `also_flagged_by_cisco` is `true` when Cisco's own insecure-configuration list flags the same thing.
+
+### `analysis` (#94, 2026-11-20)
+
+`advice[]` and `checks[]`, both optional. `findings` keeps every Finding, v1's and Analysis's together.
+
+- `advice[]`: one per Visited Device, in device id order. `device`, `advisory_outcome`, `upgrade_target`, `latest_release_in_train`, `latest_release`, `upcoming_eox[]`. An Advisory outcome is `{"kind": "matches" | "none" | "could not check", "matched", "release", "reason"}`; `text` is built by the report from those fields. Upgrade Target and both Latest Releases are `not available` until Cisco's answers arrive (spec #92, Further Notes). `upcoming_eox[]` reuses the EoX item shape (`name`, the four dates, `replacement`).
+- `checks[]`: every shipped Check, in Check id order: `{"check": {...}, "ran": true | false, "reason": null | "..."}`. A Check is skipped only when a source it needs was unavailable.
+- No Visited Device gets more than one advice record; Unvisited Devices get none (story 3).
 
 `kind` is `conflicting evidence`, `Bundle member mismatch`, or a VLAN Mismatch (#61, 2026-11-19): `VLAN on one end only`, `differing native VLAN`, `trunk facing access`, `differing access VLANs`. A VLAN Mismatch's `items` is the Link or the Bundle, never a member Link. Its `evidence[].source` is `VLAN` for switchport and VLAN-database commands, or `CDP` when the native VLAN was advertised by an Unvisited Device. `format_version` stays `1`: `kind` and `source` are plain strings an older `render` already keeps.
 
