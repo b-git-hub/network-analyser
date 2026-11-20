@@ -101,7 +101,7 @@ From [Identifying the Platform on first login](https://github.com/b-git-hub/netw
 | ID | Check | Result | Date (UTC) |
 |---|---|---|---|
 | A1 | The exact SSH identification string each node type presents: IOL-L2, Catalyst 8000V and NX-OS 9000v (for example from `ssh -v`, the "remote software version" line). | | |
-| A2 | The NX-OS Sweep pattern: does the NX-OS string match the provisional `OpenSSH_* FIPS`, and do both IOS-XE strings match `Cisco-*`? If not, give the pattern that does. | | |
+| A2 | The NX-OS Sweep pattern: does the NX-OS string match the provisional `OpenSSH_* FIPS`, and do both IOS-XE strings match `Cisco-*`? If not, give the pattern that does. Ticket #55 logs a Sweep host in only when the string matches `SSH-2.0-Cisco-*` or this provisional NX-OS pattern (`SSH-2.0-OpenSSH_* FIPS`). Confirm or correct it before relying on a Sweep. | | |
 | A3 | The error text when a command for the wrong Platform is sent (for example `show port-channel summary` on IOS-XE, `show etherchannel summary` on NX-OS). | | |
 | A4 | Does NX-OS show its copyright header on every login? | | |
 | A5 | Can the `netanalyser` account, under its Device Role, run every identification command (`terminal length 0`, `show version`) on each Platform? | | |
@@ -116,6 +116,7 @@ From [Identifying the Platform on first login](https://github.com/b-git-hub/netw
 | A14 | Key-type pinning ([#49](https://github.com/b-git-hub/network-analyser/issues/49), story 44): a second Run against the same nodes logs in again (each is asked only for the key type stored on the first Run). `trust-key` finds the key of each node, including one that holds only an RSA key. | | |
 | A15 | Platform-limited sets ([#49](https://github.com/b-git-hub/network-analyser/issues/49), provisional until [#54](https://github.com/b-git-hub/network-analyser/issues/54)): a set limited to NX-OS is tried only where the SSH identification string matches the provisional NX-OS pattern (A2), and one limited to IOS/IOS-XE only where it starts `SSH-2.0-Cisco-`. With only an NX-OS-limited set, the IOS-XE nodes are `authentication failed (every eligible set tried)` with no login attempt in `audit.log`. | | |
 | A16 | Optional, config-mode drop ([#49](https://github.com/b-git-hub/network-analyser/issues/49), story 55): on one IOS-XE node, add a test user whose line lands in configuration mode (`autocommand configure terminal` with `autocommand-options nohangup`). A Run with that set is left partial, "a configuration-mode prompt appeared", and `audit.log` shows no `command_sent` line for it. Remove the user afterwards. | | |
+| A17 | Opt-in Sweep ([#55](https://github.com/b-git-hub/network-analyser/issues/55)): `run --sweep` against the lab. Each IOS-XE node and each NX-OS node is logged into. Any other host that answers on TCP 22 is listed and never offered a password. The tool sends no ICMP. The identification strings match A1 and A2; the NX-OS pattern is still provisional until A2 is filled in. | | |
 
 ### B. Commands and the allow-list
 
@@ -146,6 +147,7 @@ From [#14](https://github.com/b-git-hub/network-analyser/issues/14) and [ADR 000
 | C11 | IOS-XE (`role-snippet`, [#53](https://github.com/b-git-hub/network-analyser/issues/53)): does the view keep `commands exec include terminal length 0` and `terminal width 511` with their values, and does the fallback take `privilege exec level 7 terminal length 0`? If the device refuses or drops the value, record the form it keeps; Netmiko's session set-up must still pass. | | |
 | C12 | NX-OS (`role-snippet`): does a new account get `network-operator` by default, and does `no username netanalyser role network-operator` remove it, so that `show user-account netanalyser` lists only `NA-READ`? | | |
 | C13 | TACACS+, only if a TACACS+ server is available (`role-snippet --tacacs`): does `cli-view-name=NA-READ` in the profile place the IOS-XE account in the view, and `shell:roles="NA-READ"` give the NX-OS account only that role? Does an anchored ISE row (`show`, `^version$`) permit `show version` and refuse `show version detail`? | | |
+| C14 | IOS-XE per-VRF commands ([#59](https://github.com/b-git-hub/network-analyser/issues/59)): the view names each per-VRF form by its words before the VRF (`commands exec include show ip arp vrf`, `show ip eigrp vrf`, `show ip bgp vpnv4 vrf`, `show ip route vrf`). Does that let `show ip arp vrf BLUE`, `show ip eigrp vrf BLUE neighbors`, `show ip bgp vpnv4 vrf BLUE summary` and `show ip route vrf BLUE static` run under `NA-READ`? Does `commands exec include show interfaces` also permit `show interfaces switchport` and `show interfaces trunk` (record whether the separate lines are needed)? With `--tacacs`, does the ISE row's VRF pattern permit a VRF name and refuse `BLUE \| redirect ...`? | | |
 
 ### D. Backups
 
@@ -230,6 +232,17 @@ From [NX-OS collection and parsers](https://github.com/b-git-hub/network-analyse
 | I5 | A table with no rows (for example `show ip arp vrf all \| json` in a VRF with no entries, or LLDP with no Neighbours) comes back as an empty reply, not an object with an empty table. | | |
 | I6 | After W1, nx-sw1's entry in `topology.json` has its interfaces (down ones included), VLANs, port-channels, vPC (domain, peer-link, keepalive with its source address) and the `management` VRF marked, and `skipped` lists nothing for it. Record any part listed as skipped and its reason. | | |
 | I7 | The size of `show interface \| json` on the largest Nexus you run (`bytes_received` in `audit.log`). The tool drops a session whose reply passes 1,000,000 characters. | | |
+
+### J. IOS/IOS-XE collection
+
+From [IOS/IOS-XE collection and parsers](https://github.com/b-git-hub/network-analyser/issues/59). The command strings were written from documentation (B1 covers them in general); the replies the parsers read are hand-written, shaped like Catalyst output, and read with ntc-templates `cisco_ios` or the tool's own readers. Run each check on xe-sw1, xe-sw2 and xe-rtr1, logged in as `netanalyser`, and describe what you see; never paste output.
+
+| ID | Check | Result | Date (UTC) |
+|---|---|---|---|
+| J1 | Each collection command on the IOS/IOS-XE allow-list (`network-analyser role-snippet ios-xe` lists them) runs under the `NA-READ` view. After W1, `audit.log` has no `parse_failed` line with reason `denied` for an IOS/IOS-XE node, except for features the node lacks (IOL has no `show etherchannel summary` without a port-channel? record what each answers). | | |
+| J2 | The error texts `ios_xe/replies.py` classifies: a command outside the view (`% Invalid input` with a caret?), a feature that is off (`show ip bgp summary` with no BGP: `% BGP not active`? `show glbp brief` and `show vrrp brief` with none configured: empty, or a `%` line?). Record each first line's form, with any value replaced. | | |
+| J3 | After W1, each IOS/IOS-XE node's entry in `topology.json` has its interfaces (down ones included, with VRF, masks and secondaries), VLANs, port-channels, VRFs (`Mgmt-intf` marked) and stack members, and `skipped` lists nothing for it. Record any part listed as skipped and its reason; `not understood` means a template or reader misread the device's text. | | |
+| J4 | Stack member numbers: on a stack (or StackWise Virtual pair, if any is available), `show version` lists each member with its model and serial, and interfaces on member 2 carry member 2. On a lone switch, interfaces carry no member number. | | |
 
 ## Walkthrough of the tool
 

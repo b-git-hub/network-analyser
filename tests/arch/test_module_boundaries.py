@@ -48,7 +48,9 @@ ALLOWED: dict[str, frozenset[str]] = {
 OWNERS: dict[str, frozenset[str]] = {
     "netmiko": frozenset({"device_gateway/ssh.py"}),
     "paramiko": frozenset({"device_gateway/ssh.py"}),
-    "socket": frozenset({"device_gateway/ssh.py"}),
+    # #55: the Sweep opens its own TCP socket and closes it before key exchange, so the
+    # probe cannot go through Paramiko (that handshake is the key exchange).
+    "socket": frozenset({"device_gateway/ssh.py", "device_gateway/probe.py"}),
     "pyrage": frozenset({"backup_store/"}),
     "textfsm": frozenset({"platforms/"}),
     "ntc_templates": frozenset({"platforms/"}),

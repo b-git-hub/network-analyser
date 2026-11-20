@@ -6,14 +6,18 @@ the `device_gateway` seam (tests/support/run_driver).
 
 import errno
 import json
+from ipaddress import IPv4Address
 
 import pytest
 
 from network_analyser.cli import ExitCode
 from network_analyser.trust_store import TrustStore
 from tests.support import device_text, fake_age
-from tests.support.fake_device import FakeDevice, synthetic_key
+from tests.support.fake_device import DEVICE_CANARY, FakeDevice, synthetic_key
 from tests.support.run_driver import FLAGS, Runner, data_folder, first_run
+
+WRONG = "CANARY-pw-wrong-c4a7"
+"""A password the Credential Set does not hold: a synthetic canary."""
 
 NEIGHBOURS = """\
 -------------------------
@@ -77,10 +81,9 @@ def test_the_run_crawls_to_a_neighbour_and_lists_what_lies_beyond_the_scope(run:
     got = run(*FLAGS, typed=first_run())
 
     assert got.code == ExitCode.CLEAN
-    assert "Run summary: 2 devices tried: 2 visited, 0 partial, 0 unvisited." in got.out
-    assert "192.0.2.2        visited    IOS/IOS-XE  sw-b" in got.out
-    assert "Known but never logged into: 1." in got.out
-    assert "198.51.100.9     unvisited  outside Scope" in got.out
+    assert "Visited      2" in got.out
+    assert "Unvisited    1\n        1  outside Scope" in got.out
+    assert "-- 198.51.100.9    not visited: outside Scope" in got.out  # the log line
     lines = _audit()
     (not_visited,) = [line for line in lines if line["event"] == "neighbour_not_visited"]
     assert not_visited["addresses"] == ["198.51.100.9"]
@@ -103,8 +106,8 @@ def test_one_device_at_two_addresses_is_listed_once_with_its_alias(run: Runner) 
 
     got = run(*FLAGS, typed=first_run())
 
-    assert "Run summary: 1 device tried: 1 visited" in got.out
-    assert "also at 192.0.2.2" in got.out
+    assert "Visited      1" in got.out
+    assert "192.0.2.2       is the same device as 192.0.2.1" in got.out
     assert [line["event"] for line in _audit()].count("alias_found") == 1
     (device,) = _topology()["devices"]
     assert device["alias_ips"] == ["192.0.2.2"]
@@ -124,3 +127,28 @@ def test_a_trust_store_that_cannot_be_written_stops_the_run(
     assert "The Run stopped early: the Trust Store could not be written." in got.out
     assert len(run.network.dialled) == 1  # the Seed only: no further login started
     assert _audit()[-1]["ended"] == "stopped"
+
+
+def test_a_retired_set_is_announced_at_once_and_the_run_stops_with_each_sets_results(
+    run: Runner,
+) -> None:
+    run.network.devices[IPv4Address("192.0.2.2")].password = WRONG
+
+    got = run(*FLAGS, "--failure-budget", "1", typed=first_run())
+
+    assert got.code == ExitCode.STOPPED
+    notice = (
+        "Credential Set 1 (netops-ro) is retired after 1 failed login and will not be tried "
+        "again this Run. A mistyped password is the usual cause."
+    )
+    assert notice in got.out
+    assert got.out.index(notice) < got.out.index("Run STOPPED")
+    assert "   !!   1  authentication failed (every eligible set tried)" in got.out
+    assert "Credential Sets\n   Set 1 (netops-ro): 1 worked, 1 failed, retired" in got.out
+    assert "The Run stopped early: every Credential Set is retired." in got.out
+    assert "check the password and each device's AAA lockout counter" in got.out
+    (retired,) = [line for line in _audit() if line["event"] == "credential_set_retired"]
+    assert retired["username"] == "netops-ro"
+    assert retired["credential_set"] == 1
+    assert DEVICE_CANARY not in got.out
+    assert WRONG not in got.out

@@ -1,8 +1,9 @@
 """The Topology record: what `topology.build` makes and `topology.json` holds (#52).
 
 Its shape is the `topology.json` schema (docs/topology-json.md): each record becomes a JSON
-object with the same field names. Later tickets add to it: VLAN Mismatches (#61), L3
-Adjacency, Subnets and inferred Links (#62). A new optional field needs no format-version bump;
+object with the same field names. VLAN Mismatches (#61) add four finding kinds and a
+`vlan_mismatch` skipped row. Later tickets add L3 Adjacency, Subnets and inferred Links (#62).
+A new optional field needs no format-version bump;
 a change an older `render` would misread does (`topology.FORMAT_VERSION`).
 
 **Stable ids** (`id` fields) are shared by `topology.json`, the diagram (`#device=<id>`,
@@ -13,7 +14,9 @@ order things were found, so the same network gives the same ids in every Run:
 - an Unvisited Device: `unv-` and 12 hex digits from the address or chassis ID it was merged
   on;
 - a Link, Shared Segment, Bundle or finding: `link-`, `seg-`, `bundle-` or `finding-` and 12
-  hex digits from its ends or subjects.
+  hex digits from its ends or subjects;
+- an L3 Adjacency (#62): `adj-` and 12 hex digits from its kind, VRF, devices and prefix;
+- a Subnet (#62): `subnet-` and 12 hex digits from its VRF and prefix.
 
 Ids use only letters, digits, `.`, `-` and `_`. Other items point to devices by id.
 No record here holds a username (story 141).
@@ -21,7 +24,7 @@ No record here holds a username (story 141).
 
 from dataclasses import dataclass
 from enum import Enum, unique
-from ipaddress import IPv4Address, IPv6Address
+from ipaddress import IPv4Address, IPv4Interface, IPv4Network, IPv6Address
 
 from network_analyser.records.collected import Interface, StackMember, VpcState
 from network_analyser.records.device import UnvisitedReason
@@ -40,6 +43,10 @@ class EvidenceSource(Enum):
     ROUTING = "routing"
     MAC = "MAC"
     ARP = "ARP"
+    INTERFACE = "interface"
+    """Interface addressing. Story 124 lists no source for it; calling it routing would be false."""
+    VLAN = "VLAN"
+    """Switchport or VLAN-database output. A CDP native VLAN stays `CDP` (#61)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +56,8 @@ class Evidence:
     Attributes:
         device: the id of the device that reported it.
         command: the command, exactly as sent, whose output said so.
-        source: CDP, LLDP, routing, MAC or ARP.
+        source: CDP, LLDP, routing, MAC, ARP, interface addressing, or VLAN (switchport and the
+            VLAN database).
     """
 
     device: str
@@ -71,6 +79,8 @@ class VisitedDevice:
         management_ip: the address the tool logged into.
         alias_ips: its other addresses: learned aliases, and its interface addresses.
         interfaces: every interface, down ones included.
+        vlan_database: the VLANs listed in its VLAN database, active or not, for the
+            diagram's VLAN view (#64); unknown when not collected or incomplete.
         vpc: its vPC domain; None when it has none.
     """
 
@@ -86,6 +96,7 @@ class VisitedDevice:
     management_ip: IPv4Address
     alias_ips: tuple[IPv4Address, ...]
     interfaces: tuple[Interface, ...] | Unknown
+    vlan_database: frozenset[int] | Unknown
     vpc: VpcState | Unknown | None
 
 
@@ -142,6 +153,8 @@ class LinkStatus(Enum):
     """Both ends report each other."""
     ONE_SIDED = "one-sided"
     """Only one end reports it."""
+    INFERRED = "inferred"
+    """Placed from ARP and the MAC table, on one edge port (story 130)."""
 
 
 @unique
@@ -175,7 +188,8 @@ class Link:
     Attributes:
         id: its stable id.
         ends: its two ends, in id order.
-        status: confirmed when both ends report each other, else one-sided.
+        status: confirmed when both ends report each other, one-sided when only one does,
+            inferred when ARP and the MAC table placed it.
         evidence: every report behind it.
         role: vPC peer-link or peer-keepalive; None otherwise.
         bundle: the id of the Bundle it is a member of; None when in none.
@@ -266,12 +280,20 @@ class Bundle:
 
 @unique
 class FindingKind(Enum):
-    """The kinds of finding the Topology raises. Later tickets add theirs (#61, #62)."""
+    """The kinds of finding the Topology raises. Later tickets add theirs (#62)."""
 
     CONFLICTING_EVIDENCE = "conflicting evidence"
     """Reports disagree about a port: kept, flagged, never resolved silently (story 125)."""
     BUNDLE_MEMBER_MISMATCH = "Bundle member mismatch"
     """A member Link whose far end is not in a matching bundle (story 131)."""
+    VLAN_ON_ONE_END = "VLAN on one end only"
+    """An effective VLAN carried on one end of a Link or Bundle only (story 134)."""
+    DIFFERING_NATIVE_VLAN = "differing native VLAN"
+    """The two ends' native VLANs differ (story 134)."""
+    TRUNK_FACING_ACCESS = "trunk facing access"
+    """A trunk faces an access port (story 134)."""
+    DIFFERING_ACCESS_VLANS = "differing access VLANs"
+    """The two ends' access VLANs differ (story 134)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -293,6 +315,97 @@ class Finding:
     devices: tuple[str, ...]
     items: tuple[str, ...]
     evidence: tuple[Evidence, ...]
+
+
+@unique
+class AdjacencyKind(Enum):
+    """What an L3 Adjacency is (stories 136 and 147)."""
+
+    SHARED_SUBNET = "shared subnet"
+    """The two devices share one prefix in one VRF."""
+    OSPF = "OSPF"
+    EIGRP = "EIGRP"
+    BGP = "BGP"
+
+
+@dataclass(frozen=True, slots=True)
+class AdjacencyEnd:
+    """One device of an L3 Adjacency, and the interfaces it was learned on.
+
+    Attributes:
+        device: the device's id.
+        interfaces: interfaces that reported it, in short-name order. Empty when the protocol
+            named none (BGP) or this device did not report the session.
+    """
+
+    device: str
+    interfaces: tuple[InterfaceName, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class L3Adjacency:
+    """A routed relationship between two devices (stories 136 and 124).
+
+    A shared prefix on exactly two devices is one of these, labelled with the prefix. The
+    same prefix on three or more devices is a `Subnet` instead. A routing-protocol
+    neighbourship is its own adjacency, labelled with the protocol, even when the devices
+    also share a prefix.
+
+    Attributes:
+        id: its stable id.
+        ends: the two devices, in id order.
+        vrf: the VRF the prefix or the neighbourship is in.
+        kind: shared subnet, OSPF, EIGRP or BGP.
+        prefix: the shared prefix; None for a protocol neighbourship.
+        evidence: every report behind it.
+        conflicts: the ids of findings that flag a disagreement about it.
+    """
+
+    id: str
+    ends: tuple[AdjacencyEnd, AdjacencyEnd]
+    vrf: str
+    kind: AdjacencyKind
+    prefix: IPv4Network | None
+    evidence: tuple[Evidence, ...]
+    conflicts: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SubnetAttachment:
+    """One device's address on a Subnet.
+
+    Attributes:
+        device: the device's id.
+        interface: the interface that holds the address.
+        address: the address, with its mask.
+    """
+
+    device: str
+    interface: InterfaceName
+    address: IPv4Interface
+
+
+@dataclass(frozen=True, slots=True)
+class Subnet:
+    """A prefix in one VRF that three or more devices share (story 137).
+
+    It is one node each device attaches to, not a set of pairs.
+
+    Attributes:
+        id: its stable id.
+        vrf: the VRF the prefix is in.
+        prefix: the shared prefix.
+        attachments: one per address, in device, interface and address order.
+        evidence: every report behind it.
+        conflicts: the ids of findings that flag a disagreement about it.
+    """
+
+    id: str
+    vrf: str
+    prefix: IPv4Network
+    attachments: tuple[SubnetAttachment, ...]
+    evidence: tuple[Evidence, ...]
+    conflicts: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,6 +433,28 @@ class UnknownInterfaceName:
 
 
 @dataclass(frozen=True, slots=True)
+class UnplacedNextHop:
+    """A routing next hop that was given neither a Link nor a Shared Segment (#66).
+
+    A hop CDP or LLDP already connects, or that MAC/ARP placed, is not one of these.
+    One that fell on a Shared Segment is drawn, so it is not listed here either.
+
+    Attributes:
+        reporter: the Visited Device that has the route or neighbour.
+        far: the device the next-hop address was resolved to.
+        vrf: the VRF it was learned in.
+        ip: the next-hop address.
+        reason: why no Link was placed, as fixed text. Never a hostname.
+    """
+
+    reporter: str
+    far: str
+    vrf: str
+    ip: IPv4Address
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
 class Topology:
     """The devices and Links found in a Run, and everything learned about them.
 
@@ -334,3 +469,9 @@ class Topology:
     findings: tuple[Finding, ...]
     skipped: tuple[SkippedCheck, ...]
     unknown_interface_names: tuple[UnknownInterfaceName, ...]
+    adjacencies: tuple[L3Adjacency, ...]
+    """L3 Adjacencies (#62): shared prefixes of two devices, and protocol neighbourships."""
+    subnets: tuple[Subnet, ...]
+    """Prefixes in one VRF shared by three or more devices (#62)."""
+    unplaced_next_hops: tuple[UnplacedNextHop, ...] = ()
+    """Next hops with no Link and no Shared Segment (#66). Empty when every hop was placed."""

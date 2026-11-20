@@ -29,6 +29,7 @@ from network_analyser.run_output.folder import (
     run_folder_name,
 )
 from network_analyser.run_output.lock import InstanceLock, take_instance_lock
+from network_analyser.run_output.report import RUN_REPORT_FILE, write_run_report
 from network_analyser.run_output.scanned_file import write_scanned_json, write_scanned_text
 from network_analyser.run_output.trust_folder import TrustFolderCheck, check_trust_folder
 
@@ -36,6 +37,7 @@ __all__ = [
     "AUDIT_LOG_NAME",
     "AUDIT_SCHEMA",
     "LABEL_MAX",
+    "RUN_REPORT_FILE",
     "AuditEventRefusedError",
     "AuditLog",
     "AuditLogError",
@@ -54,6 +56,7 @@ __all__ = [
     "open_audit_log",
     "run_folder_name",
     "take_instance_lock",
+    "write_run_report",
     "write_scanned_json",
     "write_scanned_text",
 ]

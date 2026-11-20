@@ -17,20 +17,45 @@ from network_analyser.records import Platform
 pytestmark = pytest.mark.security
 
 USERNAME = "netops-ro"
+SAMPLE_VRF = "BLUE"
 BOTH_FORMS = pytest.mark.parametrize("tacacs", [False, True], ids=["local", "TACACS+"])
 
 
 def allow_list_commands(platform: Platform, username: str) -> list[str]:
-    """Every command the tool may send to `platform` when it logs in as `username`."""
+    """Every command the tool may send to `platform` when it logs in as `username`.
+
+    A per-VRF template (#59) is filled with a sample VRF name.
+    """
     commands: list[str] = []
     for entry in platforms.ALLOW_LISTS[platform].entries:
         if isinstance(entry, Exact):
             commands.append(entry.command)
         else:
-            filled = entry.fill(username=username)
+            sample = {"username": username, "vrf": SAMPLE_VRF}
+            filled = entry.fill(**{name: sample[name] for name in entry.parameters})
             assert filled is not None
             commands.append(filled)
     return commands
+
+
+def role_rules(platform: Platform, username: str) -> list[str]:
+    """Every allow-list entry as a CLI view or privilege-level rule names it (#59).
+
+    An exact command, or the username template filled, is itself. A template with any other
+    parameter (a VRF name) is its words before that parameter: the view and the privilege
+    level cannot name every VRF (provisional: lab check C14).
+    """
+    rules: list[str] = []
+    for entry in platforms.ALLOW_LISTS[platform].entries:
+        if isinstance(entry, Exact):
+            rules.append(entry.command)
+        elif set(entry.parameters) == {"username"}:
+            filled = entry.fill(username=username)
+            assert filled is not None
+            rules.append(filled)
+        else:
+            rules.append(entry.text.partition("{")[0].rstrip())
+    return rules
 
 
 def config_lines(text: str) -> list[str]:
@@ -48,18 +73,31 @@ def commands_in(text: str) -> list[str]:
     return config_lines(text) + typed
 
 
-def ise_command_set(text: str) -> list[str]:
-    """The ISE command set rows, each read back as the one command it permits."""
-    rows = re.findall(r"^!\s+(\S+)\s+(\S+)\s+\^(.*)\$$", text, flags=re.MULTILINE)
+def ise_command_set(text: str) -> list[tuple[str, str]]:
+    """The ISE command set rows, each as its command word and anchored arguments pattern."""
+    rows = re.findall(r"^!\s+(\S+)\s+(\S+)\s+(\^.*\$)$", text, flags=re.MULTILINE)
     assert rows, "no ISE command set"
-    commands = []
-    for grant, command, arguments in rows:
-        if grant == "Grant":
-            continue
-        assert grant == "PERMIT"
-        unescaped = re.sub(r"\\(.)", r"\1", arguments)
-        commands.append(f"{command} {unescaped}" if unescaped else command)
-    return commands
+    assert all(grant == "PERMIT" for grant, _, _ in rows)
+    return [(command, arguments) for _, command, arguments in rows]
+
+
+def ise_permits(rows: list[tuple[str, str]], command: str) -> list[int]:
+    """The rows that permit `command`, as ISE matches it: the word, then the arguments."""
+    word, _, arguments = command.partition(" ")
+    return [n for n, (w, pattern) in enumerate(rows) if w == word and re.search(pattern, arguments)]
+
+
+def ise_permits_exactly(text: str, platform: Platform) -> None:
+    """Each allow-list command passes exactly one row; each row passes one; nothing longer."""
+    rows = ise_command_set(text)
+    commands = allow_list_commands(platform, USERNAME)
+    assert len(rows) == len(commands)
+    assert sorted(n for c in commands for n in ise_permits(rows, c)) == list(range(len(rows)))
+    for command in commands:
+        assert not ise_permits(rows, f"{command} detail"), command
+        assert not ise_permits(rows, f"{command} | include x"), command
+    assert not ise_permits(rows, f"show ip arp vrf {SAMPLE_VRF} x")
+    assert not ise_permits(rows, "show ip arp vrf a b")
 
 
 def exactly(found: list[str], expected: list[str]) -> None:
@@ -78,14 +116,32 @@ def test_the_ios_xe_view_permits_exactly_the_allow_list(*, tacacs: bool) -> None
     assert lines[0] == "parser view NA-READ"
     included = [line.removeprefix(" commands exec include ") for line in lines[1:]]
     assert all(line.startswith(" commands exec include ") for line in lines[1:])
-    exactly(included, allow_list_commands(Platform.IOS_XE, USERNAME))
+    exactly(included, role_rules(Platform.IOS_XE, USERNAME))
+    assert not [line for line in included if line.startswith("all ")], "never every subcommand"
+
+
+def test_a_per_vrf_rule_is_the_whole_command_up_to_the_vrf_name() -> None:
+    templates = [
+        e
+        for e in platforms.ALLOW_LISTS[Platform.IOS_XE].entries
+        if not isinstance(e, Exact) and "vrf" in e.parameters
+    ]
+    text = platforms.role_snippet(Platform.IOS_XE, USERNAME, tacacs=False)
+
+    assert templates, "IOS/IOS-XE has per-VRF commands (#59)"
+    for template in templates:
+        filled = template.fill(vrf=SAMPLE_VRF)
+        assert filled is not None
+        before, _, _ = filled.partition(f" {SAMPLE_VRF}")
+        assert before.endswith(" vrf")
+        assert f" commands exec include {before}\n" in text
 
 
 def test_the_ios_xe_fallback_level_moves_exactly_the_allow_list() -> None:
     text = platforms.role_snippet(Platform.IOS_XE, USERNAME, tacacs=False)
 
     moved = re.findall(r"^!\s+privilege exec level 7 (.+)$", text, flags=re.MULTILINE)
-    exactly(moved, allow_list_commands(Platform.IOS_XE, USERNAME))
+    exactly(moved, role_rules(Platform.IOS_XE, USERNAME))
     restored = re.findall(r"^!\s+privilege exec level 1 (.+)$", text, flags=re.MULTILINE)
     assert "show" in restored
     assert {command.split()[0] for command in moved} == set(restored)
@@ -97,7 +153,7 @@ def test_the_ios_xe_fallback_level_moves_exactly_the_allow_list() -> None:
 def test_the_ios_xe_tacacs_command_set_permits_exactly_the_allow_list() -> None:
     text = platforms.role_snippet(Platform.IOS_XE, USERNAME, tacacs=True)
 
-    exactly(ise_command_set(text), allow_list_commands(Platform.IOS_XE, USERNAME))
+    ise_permits_exactly(text, Platform.IOS_XE)
     assert re.search(r"^!\s+cli-view-name=NA-READ$", text, flags=re.MULTILINE)
 
 
@@ -133,7 +189,7 @@ def test_the_nx_os_role_permits_exactly_the_allow_list(*, tacacs: bool) -> None:
 def test_the_nx_os_tacacs_command_set_permits_exactly_the_allow_list() -> None:
     text = platforms.role_snippet(Platform.NX_OS, USERNAME, tacacs=True)
 
-    exactly(ise_command_set(text), allow_list_commands(Platform.NX_OS, USERNAME))
+    ise_permits_exactly(text, Platform.NX_OS)
     assert re.search(r'^!\s+shell:roles="NA-READ"$', text, flags=re.MULTILINE)
 
 

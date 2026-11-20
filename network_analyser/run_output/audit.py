@@ -66,6 +66,7 @@ AUDIT_SCHEMA: Final[Mapping[type[AuditEvent], tuple[str, tuple[str, ...]]]] = {
     ),
     events.CtrlCPressed: ("ctrl_c_pressed", ("press", "sessions_running")),
     events.ConnectionAttempted: ("connection_attempted", ("ip", "port", "result", "retry")),
+    events.ProbeAttempted: ("probe_attempted", ("ip", "port", "result", "banner_read")),
     events.OutOfScopeRefused: ("out_of_scope_refused", ("ip", "port", "placement")),
     events.HostKeyChecked: (
         "host_key_checked",

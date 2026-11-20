@@ -8,6 +8,7 @@ The Topology has no role field, so the rows are worked out from the Links:
    them; a row wraps at 24 devices. Within a row, devices sit under the devices they link to.
 3. Devices with no path to the top row sit in one more tier below the rest.
 4. Unvisited Devices sit in their own area below, grouped by reason.
+5. Each Subnet (for the Routing view) sits half a row below the devices on it (#64).
 
 The positions depend only on what the file holds, never on the order it lists things, so
 every view (and `diagram.drawio`) reuses them and a device stays where it was (story 144).
@@ -29,6 +30,7 @@ STEP_Y: Final = 150.0
 TIER_GAP: Final = 24.0
 UNVISITED_ROWS: Final = 6
 UNVISITED_STEP_Y: Final = 54.0
+SUBNET_STEP_X: Final = 120.0
 PEER_LINK: Final = "vPC peer-link"
 PEER_KEEPALIVE: Final = "vPC peer-keepalive"
 NO_REASON: Final = "reason not recorded"
@@ -65,14 +67,22 @@ class AreaLabel:
 
 @dataclass(frozen=True, slots=True)
 class Layout:
-    """Every device's place, by id, and the Unvisited area's labels."""
+    """Every device's place, by id, the Unvisited area's labels, and each Subnet's place.
+
+    Attributes:
+        positions: each Visited, Unvisited Device and Shared Segment, by id.
+        labels: the Unvisited area's labels.
+        subnets: each Subnet (#62) the Routing view draws, by id, placed after the devices
+            so that no device moves for it.
+    """
 
     positions: Mapping[str, Point]
     labels: tuple[AreaLabel, ...]
+    subnets: Mapping[str, Point]
 
 
 def place(topology: TopologyFile) -> Layout:
-    """Return where each Visited, Unvisited Device and Shared Segment sits."""
+    """Return where each Visited, Unvisited Device, Shared Segment and Subnet sits."""
     content = topology.content
     names = {d: _name(d, r) for d, r in _records(content, "devices")}
     names |= {segment: segment for segment, _ in _records(content, "segments")}
@@ -81,7 +91,34 @@ def place(topology: TopologyFile) -> Layout:
     positions: dict[str, Point] = {}
     bottom = _place_tiers(graph, roots, names, positions)
     labels = _place_unvisited(content, positions, bottom)
-    return Layout(positions=MappingProxyType(positions), labels=labels)
+    subnets = _place_subnets(content, positions)
+    return Layout(
+        positions=MappingProxyType(positions),
+        labels=labels,
+        subnets=MappingProxyType(subnets),
+    )
+
+
+def _place_subnets(
+    content: Mapping[str, Plain], positions: Mapping[str, Point]
+) -> dict[str, Point]:
+    """Put each Subnet half a row below the lowest device on it, under their middle.
+
+    Subnets are placed in id order; one that would sit on another moves right.
+    """
+    placed: dict[str, Point] = {}
+    for ident, record in sorted(_records(content, "subnets"), key=lambda item: item[0]):
+        if ident in placed:
+            continue
+        on = sorted({d for d in _devices_of(record, "attachments") if d in positions})
+        if not on:
+            continue
+        x = sum(positions[d].x for d in on) / len(on)
+        y = max(positions[d].y for d in on) + STEP_Y / 2
+        while any(p.y == y and abs(p.x - x) < SUBNET_STEP_X for p in placed.values()):
+            x += SUBNET_STEP_X
+        placed[ident] = Point(x, y)
+    return placed
 
 
 def _records(content: Mapping[str, Plain], key: str) -> Iterable[tuple[str, Mapping[str, Plain]]]:

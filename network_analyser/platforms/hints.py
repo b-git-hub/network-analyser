@@ -17,7 +17,7 @@ the lab confirms them (lab checklist).
 import re
 from typing import Final
 
-from network_analyser.platforms.identify import Unsupported
+from network_analyser.platforms.identify import Unsupported, ssh_id_hint
 from network_analyser.records import Platform
 from network_analyser.records.collected import Neighbour
 
@@ -45,6 +45,20 @@ _SUPPORTED_TEXT: Final = (
     (Platform.NX_OS, re.compile(r"Cisco Nexus Operating System|\bNX-OS\b|\bNexus\d*\b|\bN\dK-")),
     (Platform.IOS_XE, re.compile(r"Cisco IOS XE Software|IOS-XE Software|Cisco IOS Software")),
 )
+
+
+def sweep_platform(ssh_id: str) -> Platform | None:
+    """Return the Platform a Sweep may log into, or None when it must not (story 71).
+
+    IOS/IOS-XE matches ``SSH-2.0-Cisco-``. The NX-OS pattern is provisional
+    (``SSH-2.0-OpenSSH_* FIPS``, lab checklist A2) until a lab confirms the
+    identification string. Anything else, including a wireless LAN controller, is listed
+    in the Sweep results and never offered a password.
+    """
+    hint = ssh_id_hint(ssh_id)
+    if isinstance(hint, Platform):
+        return hint
+    return None
 
 
 def neighbour_hint(neighbour: Neighbour) -> Platform | Unsupported | None:

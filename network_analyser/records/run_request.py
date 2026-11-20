@@ -61,6 +61,7 @@ class RunRequest:
         parallel: devices worked on at once.
         failure_budget: failed logins a Credential Set may spend before it is retired.
         sweep: whether the Scope is swept on TCP 22 for more Seeds.
+        sweep_inflight: probes in flight during a Sweep. Never above 100 (#55).
         timeouts: how long each step with a device may take.
     """
 
@@ -71,4 +72,5 @@ class RunRequest:
     parallel: Sourced[int]
     failure_budget: Sourced[int]
     sweep: Sourced[bool]
+    sweep_inflight: Sourced[int] = Sourced(100, Source.DEFAULT)
     timeouts: Timeouts = Timeouts()

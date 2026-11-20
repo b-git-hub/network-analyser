@@ -33,6 +33,7 @@ from network_analyser.topology import ids
 NO_DECISION = "no crawl decision was recorded for it"
 NO_NAME = "no name was advertised"
 NO_PLATFORM = "no Platform string was advertised"
+INCOMPLETE_VLAN_DATABASE = "the VLAN database is incomplete"
 _NOT_READ = "show version not read"
 
 
@@ -107,8 +108,19 @@ def visited_device(known: Known, addresses: dict[IPv4Address, str]) -> VisitedDe
         management_ip=record.ip,
         alias_ips=tuple(aliases),
         interfaces=interfaces.value if isinstance(interfaces, Reading) else interfaces,
+        vlan_database=vlan_database(known),
         vpc=vpc.value if isinstance(vpc, Reading) else vpc,
     )
+
+
+def vlan_database(device: Known) -> frozenset[int] | Unknown:
+    """Return the VLANs in a device's VLAN database, active or not; unknown if incomplete."""
+    reading = device.collected.vlans
+    if not isinstance(reading, Reading):
+        return reading
+    if reading.gaps:
+        return Unknown(INCOMPLETE_VLAN_DATABASE)
+    return frozenset(vlan.number for vlan in reading.value)
 
 
 def own_addresses(devices: Sequence[Known]) -> dict[IPv4Address, str]:

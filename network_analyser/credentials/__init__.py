@@ -7,6 +7,21 @@ Passphrase is held only in `backup_store` (CODING_STANDARDS.md, "Secrets").
 
 from network_analyser.credentials.scan import BLOCKED, SecretScan
 from network_analyser.credentials.secret import Secret
-from network_analyser.credentials.sets import MAX_SETS, CredentialSet, CredentialSets
+from network_analyser.credentials.sets import (
+    MAX_FAILURE_BUDGET,
+    MAX_SETS,
+    CredentialSet,
+    CredentialSets,
+    LoginLease,
+)
 
-__all__ = ["BLOCKED", "MAX_SETS", "CredentialSet", "CredentialSets", "Secret", "SecretScan"]
+__all__ = [
+    "BLOCKED",
+    "MAX_FAILURE_BUDGET",
+    "MAX_SETS",
+    "CredentialSet",
+    "CredentialSets",
+    "LoginLease",
+    "Secret",
+    "SecretScan",
+]

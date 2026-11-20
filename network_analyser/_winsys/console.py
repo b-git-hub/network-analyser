@@ -67,7 +67,30 @@ if sys.platform == "win32":
         mode = wintypes.DWORD()
         return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
 
+    _STD_OUTPUT_HANDLE = -11
+    _ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+
+    def enable_live_output() -> bool:
+        """Let the console redraw text in place (#56); False if output is not a console.
+
+        Turns on the console's escape-code handling for this process's standard output,
+        which the classic console host leaves off. Asks the process's own output handle,
+        so it works while `sys.stdout` is the scanned stream.
+        """
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(_STD_OUTPUT_HANDLE)
+        mode = wintypes.DWORD()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return False
+        wanted = mode.value | _ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        return bool(kernel32.SetConsoleMode(handle, wanted))
+
 else:
+
+    def enable_live_output() -> bool:
+        """Say whether the process's own standard output is a terminal (#56)."""
+        out = sys.__stdout__
+        return out is not None and out.isatty()
 
     def stdout_is_console() -> bool:
         """Say whether standard output is a terminal, not a file or pipe (#57)."""

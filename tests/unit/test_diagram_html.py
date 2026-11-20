@@ -12,7 +12,15 @@ from collections.abc import Callable
 from typing import Any
 
 from network_analyser import diagram
-from tests.support.topology_documents import device, document, link, read, unvisited_device
+from tests.support.topology_documents import (
+    adjacency,
+    device,
+    document,
+    link,
+    read,
+    subnet,
+    unvisited_device,
+)
 
 HOSTILE = "</script><img src=x onerror=alert(1)>\"'&\u2028"
 DATA_OPEN = '<script type="application/json" id="topology-data">'
@@ -100,8 +108,62 @@ def test_the_page_needs_nothing_from_outside() -> None:
         assert outside not in page
 
 
+def _routed() -> object:
+    data = _two_switches()
+    data["adjacencies"] = [adjacency("adj-000000000001", "dev-S1", "dev-S2", "OSPF")]  # type: ignore[index]
+    data["subnets"] = [  # type: ignore[index]
+        subnet(
+            "subnet-000000000001",
+            "198.51.100.0/24",
+            ("dev-S1", "Vlan99", "198.51.100.1/24"),
+            ("dev-S2", "Vlan99", "198.51.100.2/24"),
+        )
+    ]
+    return data
+
+
+def test_the_page_carries_l3_data_and_where_each_subnet_sits() -> None:
+    topology = read(_routed())
+    spot = diagram.place(topology).subnets["subnet-000000000001"]
+
+    data = _data(diagram.draw_html(topology, lambda text: text))
+
+    assert data["topology"]["adjacencies"][0]["kind"] == "OSPF"
+    assert data["topology"]["subnets"][0]["prefix"] == "198.51.100.0/24"
+    assert data["layout"]["subnets"] == [["subnet-000000000001", spot.x, spot.y]]
+
+
+def test_the_page_has_map_and_findings_tabs_and_three_views() -> None:
+    script = _script(_page(_two_switches()))
+
+    for shown in ("Map", "Findings", "Physical", "Routing (L3)", "VLAN"):
+        assert f">{shown}<" in script
+    assert "#finding=" in script  # the Run report links land on a finding (story 153)
+
+
+def test_device_text_in_findings_and_l3_data_never_reaches_the_page_as_markup() -> None:
+    data = _routed()
+    data["findings"] = [  # type: ignore[index]
+        {"id": "finding-0123456789ab", "kind": HOSTILE, "summary": HOSTILE, "devices": []}
+    ]
+    data["subnets"][0]["vrf"] = HOSTILE  # type: ignore[index]
+    data["skipped"] = [{"device": "dev-S1", "data": "vlans", "reason": HOSTILE}]  # type: ignore[index]
+
+    page = _page(data)
+
+    assert "<img" not in page
+    assert page.count("</script>") == 2
+    assert _data(page)["topology"]["findings"][0]["summary"] == HOSTILE
+
+
 def test_the_same_topology_gives_the_same_page() -> None:
     assert _page(_two_switches()) == _page(_two_switches())
+
+
+def _script(page: str) -> str:
+    found = re.search(r"<script>(.*?)</script>", page, re.DOTALL)
+    assert found is not None
+    return found.group(1)
 
 
 def _digest(text: str) -> str:
