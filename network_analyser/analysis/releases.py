@@ -4,9 +4,12 @@ The family table decided on #78 is keyed on what `show version` names, never on 
 the Platform alone: classic IOS and IOS-XE share one command set, so the release shape tells
 them apart. Only three families are ever looked up (stories 44-45):
 
-- classic IOS, such as `15.2(7)E4` and `12.2(55)SE7`;
-- IOS-XE, such as `16.9.1`, `17.9.4a` and `26.1.1`;
-- NX-OS, such as `9.3(10)` and `7.0(3)I7(9)`.
+- classic IOS, such as `15.2(7)E4`, `12.2(55)SE7` and `15.1(4)M12a`;
+- IOS-XE, such as `16.9.1`, `17.9.4a` and `26.1.2s1`;
+- NX-OS, such as `9.3(10)`, `10.6(3s)` and `7.0(3)I4(8b)`.
+
+A lettered or special running release is an ordinary release: the letters and the digit after
+them (`26.1.2s1`, `10.3(4a)`, `15.1(4)M12a`) are part of the release, never a reason to skip it.
 
 NX-OS in ACI mode (`14.2(4i)`, `15.2(3e)`), IOS-XR and any other shape are not in the table,
 so they are never matched: the device gets a "could not check" Finding instead. IOS-XR never
@@ -39,12 +42,17 @@ _SUFFIX_COMPONENT: Final = re.compile(r"[0-9]+|[A-Za-z]+")
 _ACI_MODE: Final = re.compile(r"1[1-7]\.[0-9]{1,2}\([0-9]{1,3}[a-z][a-z0-9]{0,4}\)")
 # Plain NX-OS: `9.3(10)`, `6.2(16)`, `7.0(3)I7(9)`.
 _NXOS: Final = re.compile(
-    r"(?:[4-9]|10)\.[0-9]{1,2}\([0-9]{1,3}\)(?:[A-Z][0-9]{1,3}\([0-9]{1,3}\))*"
+    r"(?:[4-9]|10)\.[0-9]{1,2}\([0-9]{1,3}[a-z]{0,2}\)"
+    r"(?:[A-Z][0-9]{1,3}\([0-9]{1,3}[a-z]{0,2}\))*"
 )
 # Classic IOS: a parenthesised maintenance rebuild, then a Train letter, such as `15.2(7)E4`.
-_CLASSIC_IOS: Final = re.compile(r"[0-9]{1,2}\.[0-9]{1,2}\([0-9]{1,3}\)[A-Za-z]{1,3}[0-9]{0,3}")
+_CLASSIC_IOS: Final = re.compile(
+    r"[0-9]{1,2}\.[0-9]{1,2}\([0-9]{1,3}\)[A-Za-z]{1,3}[0-9]{0,3}[a-z]?"
+)
 # IOS-XE: dotted releases 16.x through 19.x and from 26.x on, such as `17.9.4a`.
-_IOS_XE: Final = re.compile(r"(?:1[6-9]|2[6-9]|[3-9][0-9])\.[0-9]{1,2}\.[0-9]{1,3}[a-z]{0,2}")
+_IOS_XE: Final = re.compile(
+    r"(?:1[6-9]|2[6-9]|[3-9][0-9])\.[0-9]{1,2}\.[0-9]{1,3}[a-z]{0,2}[0-9]{0,2}"
+)
 # The Nexus hardware families openVuln matches NX-OS on, from the model `show version` names.
 _NEXUS_FAMILIES: Final = (
     (re.compile(r"\bN9K-|\bNexus ?9000\b", re.IGNORECASE), "NEXUS9000"),
@@ -56,7 +64,9 @@ _NEXUS_FAMILIES: Final = (
 )
 _BASE_TRAIN: Final = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}")
 _CLASSIC_TRAIN: Final = re.compile(r"\)([A-Za-z]+)")
-_NXOS_I_TRAIN: Final = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\([0-9]{1,3}\)I[0-9]{1,3}")
+_NXOS_LETTER_TRAIN: Final = re.compile(
+    r"[0-9]{1,3}\.[0-9]{1,3}\([0-9]{1,3}[a-z]{0,2}\)[A-Z][0-9]{1,3}"
+)
 # The `platforms[].name` text Cisco's openVuln reply gives each Nexus series (#126). The names
 # are Cisco's own, as its samples and the 2026 live replies show; a series whose text cannot be
 # confirmed is absent, so its Upgrade Target stays `not available` rather than guessing.
@@ -120,8 +130,10 @@ def train_of(release: str, os_type: OsType) -> str:
     """Return the Train `release` belongs to (GLOSSARY.md: `17.12`, `15.2E`).
 
     IOS-XE and NX-OS use the first two dotted numbers. Classic IOS keeps the Train letter that
-    follows the maintenance rebuild. An NX-OS release with an `I<n>` segment keeps everything up
-    to and including it, so `7.0(3)I7(9)` is in Train `7.0(3)I7`.
+    follows the maintenance rebuild. An NX-OS release with a hardware-line segment, a capital
+    letter and a number such as `I7`, `U6`, `A8`, `F3` or `N1`, keeps everything up to and
+    including it, so `7.0(3)I7(9)` is in Train `7.0(3)I7` and `6.0(2)U6(10)` in `6.0(2)U6`
+    (#137): releases built for different hardware lines are never lumped (story 19).
     """
     match = _BASE_TRAIN.match(release)
     base = match.group(0) if match else release
@@ -130,9 +142,9 @@ def train_of(release: str, os_type: OsType) -> str:
         if suffix is not None:
             return f"{base}{suffix.group(1).upper()}"
     if os_type is OsType.NX_OS:
-        i_train = _NXOS_I_TRAIN.match(release)
-        if i_train is not None:
-            return i_train.group(0)
+        letter_train = _NXOS_LETTER_TRAIN.match(release)
+        if letter_train is not None:
+            return letter_train.group(0)
     return base
 
 
