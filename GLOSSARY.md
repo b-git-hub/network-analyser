@@ -139,15 +139,15 @@ A vendor's published security advisory (for Cisco, a PSIRT advisory) that names 
 _Avoid_: CVE, bulletin, vulnerability notice
 
 **Train**:
-One release line of a Platform's software, such as IOS-XE 17.12 or IOS 15.2E, whose releases share features and hardware support.
+One release line of a Platform's software, such as IOS-XE 17.12, IOS 15.2E or NX-OS 7.0(3)I7, whose releases share features and hardware support. Within a Train, a lettered release comes after its plain release and before the next one: 17.12.7, 17.12.7a, 17.12.7b, 17.12.8.
 _Avoid_: Branch, stream, major version
 
 **Upgrade Target**:
-The release a device should move to at least, to clear every Critical and High Advisory that names its release: the highest of Cisco's first-fixed releases for those Advisories within the device's own Train. It is advice attached to the device's Advisory result, not a Finding.
+The release a device should move to at least, to clear every Critical and High Advisory that names its release and has a fix in the device's own Train. For each such Advisory, take the lowest of Cisco's first-fixed releases in that Train that is above the running release; the Upgrade Target is the highest of those. When some of the Advisories have no fix in the Train, the Upgrade Target says how many it does not clear. It is advice attached to the device's Advisory result, not a Finding.
 _Avoid_: Fixed version, recommended release
 
 **Latest Release**:
-The newest release Cisco offers for a device's model, both within the device's own Train and overall. It is advice shown beside the Upgrade Target, not a Finding.
+The highest release, by version order, that Cisco lists as compatible with a device's model, both within the device's own Train and overall. Every release Cisco lists counts, whatever its lifecycle; release dates are never used. It is advice shown beside the Upgrade Target, not a Finding.
 _Avoid_: Current version, newest version
 
 **Suggested Release**:
