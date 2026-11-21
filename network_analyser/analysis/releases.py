@@ -29,7 +29,9 @@ from network_analyser.records.unknown import Unknown
 
 _BUILD_SUFFIX: Final = re.compile(r"\s*\[build[^\]]*\]", re.IGNORECASE)
 _ZERO_PADDED: Final = re.compile(r"^0+([0-9][a-z]*)$")
-_COMPONENT: Final = re.compile(r"[0-9]+[a-z]*|[A-Za-z]+")
+_PART_SEPARATOR: Final = re.compile(r"[^0-9A-Za-z]+")
+_DIGITS: Final = re.compile(r"[0-9]+")
+_SUFFIX_COMPONENT: Final = re.compile(r"[0-9]+|[A-Za-z]+")
 
 # NX-OS in ACI mode names its releases `major.minor(patch letter)`, such as `14.2(4i)`.
 _ACI_MODE: Final = re.compile(r"1[1-7]\.[0-9]{1,2}\([0-9]{1,3}[a-z][a-z0-9]{0,4}\)")
@@ -52,6 +54,7 @@ _NEXUS_FAMILIES: Final = (
 )
 _BASE_TRAIN: Final = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}")
 _CLASSIC_TRAIN: Final = re.compile(r"\)([A-Za-z]+)")
+_NXOS_I_TRAIN: Final = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\([0-9]{1,3}\)I[0-9]{1,3}")
 _ACI_REASON: Final = "NX-OS in ACI mode is not matched"
 _FAMILY_REASON: Final = "the software family could not be worked out from show version"
 
@@ -103,8 +106,9 @@ def family_reason(release: str | Unknown) -> str:
 def train_of(release: str, os_type: OsType) -> str:
     """Return the Train `release` belongs to (GLOSSARY.md: `17.12`, `15.2E`).
 
-    Classic IOS keeps the Train letter that follows the maintenance rebuild; IOS-XE and NX-OS
-    use the first two dotted numbers.
+    IOS-XE and NX-OS use the first two dotted numbers. Classic IOS keeps the Train letter that
+    follows the maintenance rebuild. An NX-OS release with an `I<n>` segment keeps everything up
+    to and including it, so `7.0(3)I7(9)` is in Train `7.0(3)I7`.
     """
     match = _BASE_TRAIN.match(release)
     base = match.group(0) if match else release
@@ -112,13 +116,38 @@ def train_of(release: str, os_type: OsType) -> str:
         suffix = _CLASSIC_TRAIN.search(release)
         if suffix is not None:
             return f"{base}{suffix.group(1).upper()}"
+    if os_type is OsType.NX_OS:
+        i_train = _NXOS_I_TRAIN.match(release)
+        if i_train is not None:
+            return i_train.group(0)
     return base
 
 
-def release_key(release: str) -> tuple[tuple[int, int | str], ...]:
-    """A sort key that orders releases within one Train, such as `17.9.10` above `17.9.5`."""
+def release_key(release: str) -> tuple[tuple[int, int, tuple[tuple[int, str | int], ...]], ...]:
+    """A sort key that orders any release by Cisco's numbering, across every Platform.
+
+    A release splits into parts at punctuation. A part is a number with an optional suffix, as
+    in `17.12.7a`, `26.1.2s1` or `10.6(3s)`. A plain number sorts before the same number with a
+    suffix, and that sorts before the next number; suffixes order letter by letter, then by any
+    trailing number. The key orders `17.12.7 < 17.12.7a < 17.12.7b < 17.12.8` and the same way
+    for IOS-XE, NX-OS and classic IOS.
+    """
+    return tuple(_part_key(part) for part in _PART_SEPARATOR.split(release) if part)
+
+
+def _part_key(part: str) -> tuple[int, int, tuple[tuple[int, str | int], ...]]:
+    """One release part: a number and its suffix, or a suffix that stands on its own."""
+    digits = _DIGITS.match(part)
+    if digits is not None:
+        return (0, int(digits.group(0)), _suffix_key(part[digits.end() :]))
+    return (1, 0, _suffix_key(part))
+
+
+def _suffix_key(suffix: str) -> tuple[tuple[int, str | int], ...]:
+    """A suffix's letters and trailing numbers, in the order they must compare."""
     return tuple(
-        (0, int(token)) if token.isdigit() else (1, token) for token in _COMPONENT.findall(release)
+        (1, int(token)) if token.isdigit() else (0, token)
+        for token in _SUFFIX_COMPONENT.findall(suffix)
     )
 
 

@@ -28,6 +28,7 @@ from typing import Final
 
 from network_analyser import advisories, analysis
 from network_analyser.advisories import ProxyConfig, Transport
+from network_analyser.analysis.releases import normalise_release, train_of
 from network_analyser.backup_store import CiscoKey
 from network_analyser.credentials import SecretScan
 from network_analyser.records.analysis import (
@@ -81,8 +82,7 @@ from network_analyser.topology.devices import known_devices
 LOOKUPS_DID_NOT_RUN: Final = "Cisco lookups did not run"
 """The reason every Cisco source gives when the online step was not asked (#104)."""
 
-_TRAIN: Final = re.compile(r"^(\d{1,2})\.(\d{1,2})(?:[.(]|$)")
-_LEADING_ZERO: Final = re.compile(r"(?<!\d)0+(\d)")
+_TRAIN: Final = re.compile(r"^\d{1,3}\.\d{1,3}(?:[.(]|$)")
 _CISCO_OS: Final = {
     OsType.IOS: CiscoOsType.IOS,
     OsType.IOS_XE: CiscoOsType.IOS_XE,
@@ -208,26 +208,27 @@ def _advisories(
 
 def _release_answer(answer: AdvisoriesAnswer) -> ReleaseAdvisories:
     question = answer.question
-    train = _train(question.release)
+    os_type = _ANALYSIS_OS[question.os_type]
+    train = _train(question.release, os_type)
     return ReleaseAdvisories(
-        os_type=_ANALYSIS_OS[question.os_type],
+        os_type=os_type,
         release=question.release,
-        advisories=tuple(_advisory(item, train) for item in answer.advisories),
+        advisories=tuple(_advisory(item, train, os_type) for item in answer.advisories),
         hardware_family=question.platform_alias,
     )
 
 
-def _advisory(advisory: CiscoAdvisory, train: str | None) -> AdvisoryAnswer:
+def _advisory(advisory: CiscoAdvisory, train: str | None, os_type: OsType) -> AdvisoryAnswer:
     first_fixed = tuple(
         FixedRelease(trains, release)
         for release in advisory.first_fixed
-        if (trains := _train(release)) is not None
+        if (trains := _train(release, os_type)) is not None
     )
     in_train = next(
         (
             release
             for release in advisory.first_fixed
-            if train is not None and _train(release) == train
+            if train is not None and _train(release, os_type) == train
         ),
         None,
     )
@@ -314,12 +315,12 @@ def _suggestions(
     )
 
 
-def _train(release: str) -> str | None:
-    """The Train a release belongs to, such as `17.9`; None when it cannot be read."""
-    match = _TRAIN.match(_LEADING_ZERO.sub(r"\1", release))
-    if match is None:
+def _train(release: str, os_type: OsType) -> str | None:
+    """The Train a release belongs to, such as `17.9` or `7.0(3)I7`; None if unreadable."""
+    normalised = normalise_release(release)
+    if _TRAIN.match(normalised) is None:
         return None
-    return f"{int(match.group(1))}.{int(match.group(2))}"
+    return train_of(normalised, os_type)
 
 
 def _config_facts(records: tuple[DeviceRecord, ...]) -> tuple[ConfigFacts, ...]:
