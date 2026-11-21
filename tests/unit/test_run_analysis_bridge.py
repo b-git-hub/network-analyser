@@ -1,5 +1,7 @@
 """The bridge from Analysis's questions to `advisories`, and Cisco's answers back (#104)."""
 
+from dataclasses import replace
+
 from network_analyser import topology
 from network_analyser.cli import run_analysis
 from network_analyser.records import Platform
@@ -185,3 +187,27 @@ def test_an_nxos_release_is_not_sent_without_its_hardware_family() -> None:
     asked = run_analysis.lookup_questions(AnalysisInput(topology=nxos))
 
     assert all(question.os_type is not CiscoOsType.NX_OS for question in asked.releases)
+
+
+def test_an_nxos_release_is_sent_with_the_hardware_family_it_was_matched_on() -> None:
+    record = visited("192.0.2.1", "TEST0000A01", platform=Platform.NX_OS)
+    version = record.version
+    assert version is not None
+    nxos = topology.build(
+        [
+            replace(
+                record,
+                version=replace(version, model="N9K-C93180YC-FX", software_version="9.3(10)"),
+            )
+        ]
+    )
+
+    asked = run_analysis.lookup_questions(AnalysisInput(topology=nxos))
+
+    expected = ReleaseQuestion(CiscoOsType.NX_OS, "9.3(10)", "NEXUS9000")
+    assert asked.releases == (expected,)
+    answers = run_analysis.analysis_answers(
+        replace(_replies(), advisories=(AdvisoriesAnswer(expected, ()),)), asked
+    )
+    assert isinstance(answers.advisories, tuple)
+    assert answers.advisories[0].hardware_family == "NEXUS9000"

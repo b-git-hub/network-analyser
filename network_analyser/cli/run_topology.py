@@ -180,7 +180,7 @@ def save_topology(  # noqa: PLR0913 (the file's inputs, every dependency explici
     """
     built = build_topology(records, scope)
     if results is None:
-        results = run_analysis.analysed(built)
+        results = run_analysis.analysed(built, records=records)
     built = dataclasses.replace(
         built,
         findings=results.findings,

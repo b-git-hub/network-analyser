@@ -11,13 +11,15 @@ New Checks are added to `CHECKS`; nothing else in `analysis` needs to change.
 """
 
 import re
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Sequence
 from ipaddress import IPv4Address
 from typing import Final
 
+from network_analyser.analysis import advisory, lifecycle
+from network_analyser.analysis.definition import CheckDefinition
+from network_analyser.analysis.hardening import HARDENING_CHECKS
 from network_analyser.analysis.ids import finding_id
-from network_analyser.records.analysis import AnalysisInput
+from network_analyser.records.analysis import AnalysisInput, SourceUnavailable
 from network_analyser.records.collected import StackMember, VpcState
 from network_analyser.records.platform import Platform
 from network_analyser.records.topology import (
@@ -95,23 +97,6 @@ _CATALYST_9000: Final = re.compile(r"C9[2-6]\d{2}")
 _TRAIN: Final = re.compile(r"^(\d{1,2})\.(\d{1,2})(?:[.(]|$)")
 _LEADING_ZERO: Final = re.compile(r"(?<!\d)0+(\d)")
 _BUNDLE: Final = "BUNDLE"
-
-
-@dataclass(frozen=True, slots=True)
-class CheckDefinition:
-    """One shipped Check and the function that raises its Findings.
-
-    Attributes:
-        check: its stable identity, shown on every Finding it raises.
-        run: returns every Finding it raises for the Run.
-        skip_reason: why this Run cannot run the Check, or None when it can. A Check whose
-            source is unavailable (story 10), or whose built-in classification does not cover
-            what it found, returns the reason here.
-    """
-
-    check: Check
-    run: Callable[[AnalysisInput], tuple[Finding, ...]]
-    skip_reason: Callable[[AnalysisInput], str | None] | None = None
 
 
 def model_drift(data: AnalysisInput) -> tuple[Finding, ...]:
@@ -446,6 +431,12 @@ def _pair(first: str, second: str) -> tuple[str, str]:
     return (first, second) if first < second else (second, first)
 
 
+def advisories_unavailable(data: AnalysisInput) -> str | None:
+    """Why the Advisory Checks could not run: openVuln's outage reason, or None (story 118)."""
+    source = data.answers.advisories
+    return source.reason if isinstance(source, SourceUnavailable) else None
+
+
 def _name(device: VisitedDevice) -> str:
     """What a Finding calls a device: its hostname, else its id."""
     return device.hostname if isinstance(device.hostname, str) else device.id
@@ -453,9 +444,35 @@ def _name(device: VisitedDevice) -> str:
 
 CHECKS: tuple[CheckDefinition, ...] = (
     CheckDefinition(MODEL_DRIFT_CHECK, model_drift),
+    *HARDENING_CHECKS,
     CheckDefinition(STACK_MISMATCH_CHECK, stack_mismatch),
     CheckDefinition(VPC_MISMATCH_CHECK, vpc_mismatch),
     CheckDefinition(BUNDLE_MODE_CHECK, bundle_mode),
     CheckDefinition(TRAIN_SUPPORT_CHECK, train_support, train_support_skip_reason),
+    CheckDefinition(
+        advisory.ADVISORY_CHECK,
+        advisory.advisory_findings,
+        skip_reason=advisories_unavailable,
+    ),
+    CheckDefinition(
+        advisory.COULD_NOT_CHECK_CHECK,
+        advisory.could_not_check_findings,
+        skip_reason=advisories_unavailable,
+    ),
+    CheckDefinition(
+        lifecycle.HARDWARE_EOX_CHECK,
+        lifecycle.hardware_eox,
+        skip_reason=lifecycle.eox_skip_reason,
+    ),
+    CheckDefinition(
+        lifecycle.SOFTWARE_EOX_CHECK,
+        lifecycle.software_eox,
+        skip_reason=lifecycle.eox_skip_reason,
+    ),
+    CheckDefinition(
+        lifecycle.SUGGESTED_RELEASE_CHECK,
+        lifecycle.suggested_release,
+        skip_reason=lifecycle.suggestions_skip_reason,
+    ),
 )
 """Every shipped Check. Order does not matter: results are sorted by Check id."""

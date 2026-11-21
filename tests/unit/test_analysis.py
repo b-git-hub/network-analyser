@@ -40,6 +40,23 @@ B = "192.0.2.2"
 C = "192.0.2.3"
 D = "192.0.2.4"
 MODEL = "C9300-48P"
+HARDENING_CHECKS = (
+    "hardening-brute-force",
+    "hardening-enable-secret",
+    "hardening-fhrp-authentication",
+    "hardening-http-server",
+    "hardening-icmp",
+    "hardening-insecure-mode",
+    "hardening-legacy-services",
+    "hardening-ntp",
+    "hardening-remote-syslog",
+    "hardening-routing-authentication",
+    "hardening-snmp-v1-v2c",
+    "hardening-snmp-v3-priv",
+    "hardening-strength-check",
+    "hardening-telnet",
+    "hardening-weak-secret-types",
+)
 
 
 def _device(
@@ -155,11 +172,31 @@ def test_every_shipped_check_runs_and_one_advice_record_exists_per_visited_devic
     )
 
     assert [run.check.id for run in results.checks] == [
+        "advisory-could-not-check",
+        "advisory-openvuln",
         "consistency-bundle-mode",
         "consistency-model-drift",
         "consistency-stack-mismatch",
         "consistency-standard-support-train",
         "consistency-vpc-mismatch",
+        "hardening-brute-force",
+        "hardening-enable-secret",
+        "hardening-fhrp-authentication",
+        "hardening-http-server",
+        "hardening-icmp",
+        "hardening-insecure-mode",
+        "hardening-legacy-services",
+        "hardening-ntp",
+        "hardening-remote-syslog",
+        "hardening-routing-authentication",
+        "hardening-snmp-v1-v2c",
+        "hardening-snmp-v3-priv",
+        "hardening-strength-check",
+        "hardening-telnet",
+        "hardening-weak-secret-types",
+        "lifecycle-hardware-eox",
+        "lifecycle-software-eox",
+        "lifecycle-suggested-release",
     ]
     assert all(run.ran for run in results.checks)
     assert all(run.reason is None for run in results.checks)
@@ -179,7 +216,10 @@ def test_a_source_unavailable_says_why_and_raises_no_per_device_findings() -> No
     assert advice.latest_release_in_train == "not available"
     assert advice.latest_release == "not available"
     assert advice.upcoming_eox == ()
-    assert results.findings == ()
+    # A Cisco outage raises no Advisory or Consistency Finding; the hardening Checks still
+    # run, and with no config facts each says it could not decide rather than passing.
+    assert all(finding.check.type is CheckType.CONFIGURATION for finding in results.findings)
+    assert all("Could not decide" in finding.what_was_found for finding in results.findings)
 
 
 def test_cisco_answers_are_either_an_answer_or_unavailable() -> None:
@@ -248,9 +288,9 @@ def test_the_lookup_questions_are_deduplicated_and_pattern_valid() -> None:
     assert "S1" not in questions.pids
 
 
-def test_a_release_that_is_not_pattern_valid_is_not_sent() -> None:
+def test_a_release_the_family_table_does_not_hold_is_not_sent() -> None:
     results_input = AnalysisInput(
-        topology=topology.build((_device(A, "S1", "sw-a", release="17.9.4a [build 1]"),))
+        topology=topology.build((_device(A, "S1", "sw-a", release="17.9.4a;drop tables"),))
     )
 
     assert analysis.lookup_questions(results_input).releases == ()
@@ -291,15 +331,35 @@ def test_the_results_fit_topology_json_as_optional_fields() -> None:
     checks = analysis_record["checks"]
     assert isinstance(checks, list)
     assert [item["check"]["id"] for item in checks] == [
+        "advisory-could-not-check",
+        "advisory-openvuln",
         "consistency-bundle-mode",
         "consistency-model-drift",
         "consistency-stack-mismatch",
         "consistency-standard-support-train",
         "consistency-vpc-mismatch",
+        "hardening-brute-force",
+        "hardening-enable-secret",
+        "hardening-fhrp-authentication",
+        "hardening-http-server",
+        "hardening-icmp",
+        "hardening-insecure-mode",
+        "hardening-legacy-services",
+        "hardening-ntp",
+        "hardening-remote-syslog",
+        "hardening-routing-authentication",
+        "hardening-snmp-v1-v2c",
+        "hardening-snmp-v3-priv",
+        "hardening-strength-check",
+        "hardening-telnet",
+        "hardening-weak-secret-types",
+        "lifecycle-hardware-eox",
+        "lifecycle-software-eox",
+        "lifecycle-suggested-release",
     ]
-    assert checks[1]["ran"] is True
-    assert checks[3]["ran"] is False
-    assert "17.9" in checks[3]["reason"]
+    assert checks[3]["ran"] is True
+    assert checks[5]["ran"] is False
+    assert "17.9" in checks[5]["reason"]
 
 
 def test_the_advice_shape_accepts_an_advisory_answer() -> None:

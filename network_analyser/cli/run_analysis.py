@@ -12,9 +12,10 @@ device record in them. `answers_for` asks Cisco through `advisories` with the un
 Checks take (`records.analysis`), keeping "source unavailable: reason" as a source with no
 answers, so an outage never reads as "Cisco said none".
 
-`analysed` is the offline form, used when Cisco was not asked (lookups off, a stopped Run, or
-a Run with no key): every source is unavailable, so the configuration, consistency and v1
-Topology Checks still run.
+`analysed` runs every Check on the built Topology. It takes Cisco's answers when the Run had
+them, and the records' secret-free config facts (#96); without answers it is the offline form
+for a stopped Run, a Run with lookups off, or a Run with no key: every source is unavailable,
+so the configuration, consistency and v1 Topology Checks still run.
 """
 
 import re
@@ -28,6 +29,7 @@ from network_analyser.records.analysis import (
     AdvisoryAnswer,
     AnalysisInput,
     CiscoAnswers,
+    ConfigFacts,
     EoxAnswers,
     FixedRelease,
     HardwareEox,
@@ -57,6 +59,7 @@ from network_analyser.records.cisco import (
 from network_analyser.records.cisco import (
     SourceUnavailable as CiscoSourceUnavailable,
 )
+from network_analyser.records.device import DeviceRecord
 from network_analyser.records.topology import (
     ADVISORY_STATUS,
     AdvisoryDetail,
@@ -67,6 +70,7 @@ from network_analyser.records.topology import (
     FindingLevel,
     Topology,
 )
+from network_analyser.topology.devices import known_devices
 
 LOOKUPS_DID_NOT_RUN: Final = "Cisco lookups did not run"
 """The reason every Cisco source gives when the online step was not asked (#104)."""
@@ -87,21 +91,47 @@ def lookup_questions(data: AnalysisInput) -> CiscoQuestions:
 
     Every value comes from `analysis.lookup_questions`, so it is already pattern-checked,
     de-duplicated and sorted, and holds no hostname, address, serial, count or config line.
-    A PID is used for both EoX and Software Suggestion. An NX-OS release is left out until
-    the Nexus hardware family can be worked out: `advisories` refuses an NX-OS question
-    without one, so sending it would refuse every other question too.
+    A PID is used for both EoX and Software Suggestion. An NX-OS release is sent only with the
+    Nexus hardware family `analysis` worked out (#78, story 46): `advisories` refuses an NX-OS
+    question without one, so leaving it out is what keeps the rest of the batch askable.
     """
     asked = analysis.lookup_questions(data)
     releases = tuple(
-        CiscoReleaseQuestion(_CISCO_OS[question.os_type], question.release)
+        CiscoReleaseQuestion(
+            _CISCO_OS[question.os_type], question.release, question.hardware_family
+        )
         for question in asked.releases
-        if question.os_type is not OsType.NX_OS
+        if question.os_type is not OsType.NX_OS or question.hardware_family is not None
     )
     return CiscoQuestions(
         releases=releases,
         hardware_pids=asked.pids,
         software_releases=tuple(question.release for question in asked.releases),
         suggestion_pids=asked.pids,
+    )
+
+
+def analysed(
+    built: Topology,
+    answers: CiscoAnswers | None = None,
+    *,
+    records: tuple[DeviceRecord, ...] = (),
+) -> AnalysisResults:
+    """Run every Check on `built`, with Cisco's answers and the records' config facts.
+
+    Without `answers`, every source is unavailable, so the offline Checks still run and no
+    per-device Finding is raised from Cisco (story 10). `records` are the same device records
+    `built` was made from; their secret-free config facts ride into `AnalysisInput.config_facts`
+    (#96). With none, every fact reads as `Unknown`, so a Check says it could not decide
+    rather than passing.
+    """
+    without_cisco = CiscoAnswers.unavailable(LOOKUPS_DID_NOT_RUN)
+    return analysis.analyse(
+        AnalysisInput(
+            topology=built,
+            answers=answers if answers is not None else without_cisco,
+            config_facts=_config_facts(records),
+        )
     )
 
 
@@ -140,18 +170,6 @@ def analysis_answers(replies: CiscoReplies, asked: CiscoQuestions) -> CiscoAnswe
         advisories=_advisories(replies.advisories),
         eox=_eox(replies.hardware_eox, replies.software_eox, asked),
         suggestions=_suggestions(replies.suggestions, asked),
-    )
-
-
-def analysed(built: Topology, answers: CiscoAnswers | None = None) -> AnalysisResults:
-    """Run every Check on `built`, with Cisco's answers when the Run had any.
-
-    Without `answers`, every source is unavailable, so the offline Checks still run and no
-    per-device Finding is raised from Cisco (story 10).
-    """
-    without_cisco = CiscoAnswers.unavailable(LOOKUPS_DID_NOT_RUN)
-    return analysis.analyse(
-        AnalysisInput(topology=built, answers=answers if answers is not None else without_cisco)
     )
 
 
@@ -281,3 +299,10 @@ def _train(release: str) -> str | None:
     if match is None:
         return None
     return f"{int(match.group(1))}.{int(match.group(2))}"
+
+
+def _config_facts(records: tuple[DeviceRecord, ...]) -> tuple[ConfigFacts, ...]:
+    """Each Visited Device's facts, under the same id `topology.build` gave it."""
+    return tuple(
+        ConfigFacts(known.id, known.record.config_facts) for known in known_devices(records)
+    )

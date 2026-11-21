@@ -14,10 +14,11 @@ can never look like "Cisco said none" (stories 118-119).
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum, unique
 
+from network_analyser.records.config_facts import ConfigFact, ConfigFacts, FactValue
 from network_analyser.records.topology import AdvisoryDetail, EoxItem, Topology
-from network_analyser.records.unknown import Unknown
 
 __all__ = [
     "AdvisoryAnswer",
@@ -28,6 +29,7 @@ __all__ = [
     "ConfigFacts",
     "DeviceInventory",
     "EoxAnswers",
+    "FactValue",
     "FixedRelease",
     "HardwareEox",
     "HardwareItem",
@@ -53,43 +55,6 @@ class OsType(Enum):
     IOS = "IOS"
     IOS_XE = "IOS-XE"
     NX_OS = "NX-OS"
-
-
-type FactValue = bool | int | str | tuple[str, ...] | Unknown
-"""One config fact's value. It may be `Unknown` when the fact could not be read."""
-
-
-@dataclass(frozen=True, slots=True)
-class ConfigFact:
-    """One secret-free fact read from a device's running config (#96).
-
-    Attributes:
-        name: its fixed name, such as `telnet`.
-        value: its value; `Unknown` when it could not be read.
-    """
-
-    name: str
-    value: FactValue
-
-
-@dataclass(frozen=True, slots=True)
-class ConfigFacts:
-    """The secret-free config facts of one Visited Device (#96).
-
-    Attributes:
-        device: the device's id.
-        facts: every fact that was read, in name order.
-    """
-
-    device: str
-    facts: tuple[ConfigFact, ...] = ()
-
-    def fact(self, name: str) -> FactValue:
-        """Return `name`'s value, or `Unknown` when it was not read (never "absent")."""
-        for item in self.facts:
-            if item.name == name:
-                return item.value
-        return Unknown(f"config fact not collected: {name}")
 
 
 @unique
@@ -178,12 +143,15 @@ class ReleaseAdvisories:
         release: the release asked about, normalised before lookup (story 45).
         advisories: every Advisory Cisco named for it; empty means it named none.
         hardware_family: the Nexus hardware family asked about on NX-OS; None otherwise.
+        unavailable: why Cisco gave no answer for this release, such as
+            `INVALID_IOS_VERSION`; None when it answered (story 53).
     """
 
     os_type: OsType
     release: str
     advisories: tuple[AdvisoryAnswer, ...] = ()
     hardware_family: str | None = None
+    unavailable: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,15 +234,19 @@ class CiscoAnswers:
 
 @dataclass(frozen=True, slots=True)
 class ReleaseQuestion:
-    """One OS type and release to ask Cisco about (stories 12-13, 43-45).
+    """One OS type and release to ask Cisco about (stories 12-13, 43-46).
 
     Attributes:
         os_type: the family the release belongs to.
         release: the release string, pattern-valid and normalised before sending (story 45).
+        hardware_family: the Nexus hardware family openVuln is asked about on NX-OS, such as
+            `NEXUS9000`; None for IOS and IOS-XE, and for an NX-OS device whose family could
+            not be worked out (story 46).
     """
 
     os_type: OsType
     release: str
+    hardware_family: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -300,15 +272,20 @@ class AnalysisInput:
     Attributes:
         topology: the Run's Topology: its Visited Devices, Links, Bundles and v1 Findings.
             Unvisited Devices are in it, and Analysis never uses them (story 3).
-        config_facts: each Visited Device's secret-free facts, once #96 fills them.
+        config_facts: each Visited Device's secret-free facts, read by `platforms` inside the
+            visit (#96). A device with no entry has every fact `Unknown`.
         inventory: each device's hardware PIDs, once #97 and #98 fill them.
         answers: Cisco's answers, or why each source could not be asked.
+        as_of: the moment the Lifecycle Checks judge EoX dates against, as an aware UTC
+            datetime; None means now, so a Run uses its own end and a test can pin a date
+            without reaching for the clock (#106).
     """
 
     topology: Topology
     config_facts: tuple[ConfigFacts, ...] = ()
     inventory: tuple[DeviceInventory, ...] = ()
     answers: CiscoAnswers = field(default_factory=CiscoAnswers)
+    as_of: datetime | None = None
 
     def facts_for(self, device: str) -> ConfigFacts:
         """Return `device`'s config facts, or an empty set whose every fact is `Unknown`."""

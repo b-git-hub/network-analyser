@@ -125,7 +125,7 @@ def finish(  # noqa: PLR0913 (the Run's end, every dependency explicit)
     built = run_topology.build_topology(collected.records(), scope)
     try:
         answers, lookups, replies = _ask(built, key, scan=scan, proxy=proxy, now=now)
-        results = run_analysis.analysed(built, answers)
+        results = run_analysis.analysed(built, answers, records=collected.records())
         audit.record(analysis_event(results, lookups, replies))
         written = run_topology.save_all(
             folder,
