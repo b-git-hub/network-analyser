@@ -27,6 +27,30 @@ gh api repos/b-git-hub/network-analyser/issues/<blocked number>/dependencies/blo
 - Say which ticket blocks which, and why, beside the commands.
 - Also note "Waits on: <ticket name>" in the blocked ticket's body, so the dependency is readable before the operator runs the command.
 
+## Git workflow
+
+**Never push to `main` or merge into it directly.** Every change lands through a pull request,
+including documentation and one-line fixes. The operator approves the PR; merge is theirs.
+
+- **One ticket, one branch, one PR.** Branch from the current integration branch (or from
+  `main` for a standalone change), name it `ticket-<n>-<slug>`, and open the PR once the gate
+  passes. Never reuse another ticket's branch.
+- **Close tickets as they land.** When a ticket is complete and its checks pass, close its
+  issue with a comment pointing at the work —
+  `gh issue close <n> --comment "Delivered on <branch> at <sha>"` — so the board reflects
+  reality. Do not batch closed tickets to the end of the build.
+- **A build task gets one integration branch and one PR.** When a spec breaks into tickets:
+  1. create `build/<spec-or-release>` from `main`;
+  2. create each ticket branch from `build/<spec-or-release>`, and merge it back into that
+     branch when its gate passes — never into `main`;
+  3. close each ticket as it merges, per above;
+  4. when every ticket is in, open **one** PR `build/<spec-or-release>` → `main`, listing the
+     tickets, the gate result and anything operator-only, for a single approval.
+- **Release work is last.** Version bump, changelog, lab role and release notes go on the
+  integration branch after all feature tickets, so the single PR carries the whole release.
+- **Never rewrite `main`.** If something landed wrongly, fix forward with a revert PR.
+- **Tags and releases** are created only after the integration PR is merged.
+
 ## Code
 
 Before writing code, read [CODING_STANDARDS.md](CODING_STANDARDS.md): its rules are enforced by tests, and `uv run --locked python scripts/check.py` must pass.
