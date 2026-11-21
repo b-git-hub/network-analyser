@@ -38,3 +38,11 @@ Decided on [Which configuration, lifecycle and consistency Checks ship](https://
 - **Pull every CSAF file fresh each Run, held in memory:** this stays keyless and signed, but it means about 5,800 requests and roughly 13 MB compressed per Run whatever the estate size (measured 2026-11-20). The operator preferred a few targeted queries.
 - **Look up during the crawl:** results come sooner, but the tool would be online while every device password is in memory.
 - **A separate lookup command after the Run:** this adds a second step to a tool that is usually run once.
+
+## Amendment (2026-11-21)
+
+Decided on [Latest Release and Upgrade Target, given what Cisco provides](https://github.com/b-git-hub/network-analyser/issues/121), after the live checks on [Check the release sources with the Cisco API Key](https://github.com/b-git-hub/network-analyser/issues/120). The decision itself is unchanged: one lookup at the Run's end, after secrets are wiped, sending only distinct values and storing nothing. Three points of wording change.
+
+- **What is sent** also includes a **Nexus series alias** (such as `NEXUS9000`), worked out from the model, as openVuln's `platformAlias` on NX-OS queries. It reveals less than the chassis PID, which is already sent, and it is pattern-checked like every other value.
+- **Software Suggestion** is asked for the Latest Release through its compatible-releases call, which takes **one chassis PID per call** and is paged, at most 20 pages per PID. The "10 PIDs per Suggestion call" batch applies only to the Suggested-releases call.
+- **`currentRelease` is never sent.** It would pair a model with the release it runs, and every value goes out on its own.
