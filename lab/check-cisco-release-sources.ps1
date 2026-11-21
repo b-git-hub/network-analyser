@@ -225,7 +225,10 @@ foreach ($os in @(@('iosxe', $IosXeRelease), @('nxos', $NxosRelease))) {
     $vers = @($rows | ForEach-Object { Get-Field $_ 'nos_version' } | Where-Object { $_ })
     Write-Host "    rows $($rows.Count); distinct versions $(@($vers | Sort-Object -Unique).Count); row fields: $(Get-FieldNames $rows[0])"
     Write-Host "    distinct platform_name values: $(@($rows | ForEach-Object { Get-Field $_ 'platform_name' } | Where-Object { $_ } | Sort-Object -Unique).Count)"
-    Write-Host "    versions zero-padded (e.g. 17.09.x): $(@($vers | Where-Object { $_ -match '\.0\d' }).Count); ending in F or M: $(@($vers | Where-Object { $_ -match '\)[FM]$' }).Count)"
+    # Counted outside the string: Windows PowerShell 5.1 misparses a regex with ')' or '$' inside "$( )".
+    $padded = @($vers | Where-Object { $_ -match '\.0\d' }).Count
+    $suffixed = @($vers | Where-Object { $_ -cmatch '\)[FM]$' }).Count
+    Write-Host "    versions zero-padded (e.g. 17.09.x): $padded; ending in F or M: $suffixed"
     Write-Host "    highest 5 overall: $((Get-Highest $vers 5) -join ', ')"
     foreach ($rel in $os[1]) {
         $t = Get-Train $rel
