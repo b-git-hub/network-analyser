@@ -3,7 +3,9 @@
 A Check is a stable `Check` record and a function from the Run's plain records to its
 Findings. Every shipped Check runs on every Run (story 4). A Check whose feature is not in
 use returns nothing for that device (story 5); it is not skipped. A Check is skipped only
-when a source it needs was unavailable (story 10), and then the reason is recorded.
+when it cannot decide anything at all: a source it needs was unavailable (story 10), or a
+built-in classification, such as the Train support table, does not cover what it found. The
+reason is then recorded and shown, so a skip never passes for a clean result.
 
 New Checks are added to `CHECKS`; nothing else in `analysis` needs to change.
 """
@@ -16,7 +18,7 @@ from typing import Final
 
 from network_analyser.analysis.ids import finding_id
 from network_analyser.records.analysis import AnalysisInput
-from network_analyser.records.collected import VpcState
+from network_analyser.records.collected import StackMember, VpcState
 from network_analyser.records.platform import Platform
 from network_analyser.records.topology import (
     Check,
@@ -43,7 +45,7 @@ STACK_MISMATCH_CHECK: Check = Check(
     "Stack or StackWise Virtual members on different releases or modes",
     CheckType.CONSISTENCY,
 )
-"""Story 71: one Medium Finding per stack whose members differ."""
+"""Story 71: one Medium Finding per stack or StackWise Virtual whose members differ."""
 
 VPC_MISMATCH_CHECK: Check = Check(
     "consistency-vpc-mismatch",
@@ -64,18 +66,30 @@ TRAIN_SUPPORT_CHECK: Check = Check(
     "IOS-XE on a Standard-Support Train",
     CheckType.CONSISTENCY,
 )
-"""Story 72: one Low Finding per Catalyst 9000 on a Standard-Support Train."""
+"""Story 72: one Low Finding per IOS-XE device on a Standard-Support Train."""
 
 STANDARD_SUPPORT_TRAINS: Final = frozenset({"17.13", "17.14", "17.16", "17.17"})
-"""The Catalyst 9000 Trains Cisco gives 12 months of support, from the #76 research.
+"""The IOS-XE Trains Cisco gives 12 months of support, from the #76 research.
 
-Cisco's Catalyst 9200-9600 release guidance, as of September 2026, makes 17.12, 17.15 and
-17.18 Extended-Support Trains (48 months) and 17.13, 17.14, 17.16 and 17.17 Standard-Support
-Trains (12 months). Any other Train is left unclassified rather than guessed at.
+Cisco's "Recommended Releases for Catalyst 9200/9300/9400/9500/9600" (as of September 2026)
+makes 17.12, 17.15 and 17.18 Extended-Support Trains (48 months) and 17.13, 17.14, 17.16 and
+17.17 Standard-Support Trains (12 months). Every other Train is left unclassified rather than
+guessed at: older Trains are already past either support window, and the Lifecycle Checks
+judge them.
 """
 
 EXTENDED_SUPPORT_TRAINS: Final = frozenset({"17.12", "17.15", "17.18"})
-"""The Catalyst 9000 Extended-Support Trains, from the same table."""
+"""The IOS-XE Extended-Support Trains, from the same table."""
+
+_SUPPORT_TRAINS: Final = STANDARD_SUPPORT_TRAINS | EXTENDED_SUPPORT_TRAINS
+"""Every IOS-XE Train the table classifies, either way."""
+
+_IOS_XE_TRAINS: Final = frozenset({"16", "17", "26"})
+"""The major release numbers of IOS-XE's 16.x, 17.x and 26.x Trains.
+
+Classic IOS shares this Platform, and its own Trains (12.x, 15.x) are not in Cisco's IOS-XE
+support table, so they are outside this Check rather than an unclassified Train.
+"""
 
 _CATALYST_9000: Final = re.compile(r"C9[2-6]\d{2}")
 _TRAIN: Final = re.compile(r"^(\d{1,2})\.(\d{1,2})(?:[.(]|$)")
@@ -90,8 +104,9 @@ class CheckDefinition:
     Attributes:
         check: its stable identity, shown on every Finding it raises.
         run: returns every Finding it raises for the Run.
-        skip_reason: why this Run cannot run the Check, or None when it can. Only a Check
-            whose source is unavailable needs one (story 10).
+        skip_reason: why this Run cannot run the Check, or None when it can. A Check whose
+            source is unavailable (story 10), or whose built-in classification does not cover
+            what it found, returns the reason here.
     """
 
     check: Check
@@ -275,11 +290,11 @@ def bundle_mode(data: AnalysisInput) -> tuple[Finding, ...]:
 
 
 def train_support(data: AnalysisInput) -> tuple[Finding, ...]:
-    """Return one Low Finding per Catalyst 9000 on a Standard-Support Train (story 72).
+    """Return one Low Finding per IOS-XE device on a Standard-Support Train (story 72).
 
-    Only a Train the #76 research classifies as Standard-Support raises a Finding.
-    `train_support_skip_reason` skips the Check rather than letting an unclassified Train
-    read as Extended-Support.
+    Only a Train the #76 research classifies as Standard-Support raises a Finding. A Train it
+    does not classify is never guessed at; when no applicable device's Train is classified,
+    `train_support_skip_reason` skips the Check instead.
     """
     findings: list[Finding] = []
     for device in data.topology.devices:
@@ -304,9 +319,7 @@ def train_support(data: AnalysisInput) -> tuple[Finding, ...]:
                 level=FindingLevel.LOW,
                 check=TRAIN_SUPPORT_CHECK,
                 what_was_found=what,
-                what_to_do=(
-                    "Plan a move to an Extended-Support Train (17.12, 17.15 or 17.18)."
-                ),
+                what_to_do="Plan a move to an Extended-Support Train (17.12, 17.15 or 17.18).",
                 source="device reports",
                 summary=what,
             )
@@ -315,32 +328,35 @@ def train_support(data: AnalysisInput) -> tuple[Finding, ...]:
 
 
 def train_support_skip_reason(data: AnalysisInput) -> str | None:
-    """Why the Train Check cannot run, or None when every applicable Train is classified."""
+    """Why the Train Check cannot run, or None when it can decide at least one device.
+
+    The table classifies seven Trains. When every applicable device sits on a Train it does
+    not classify, nothing can be decided and the Check is skipped with those Trains named,
+    rather than letting silence pass for an Extended-Support Train. Once at least one device's
+    Train is classified, the Check runs: a device on an unclassified Train gets no Finding,
+    and the table's coverage is never guessed at.
+    """
     trains = sorted(
         {
             train
             for device in data.topology.devices
             if _train_applies(device)
             for train in (_train(device.software_version),)
-            if isinstance(train, str) and train not in _SUPPORT_TRAINS
+            if isinstance(train, str)
         }
     )
-    if not trains:
+    if not trains or any(train in _SUPPORT_TRAINS for train in trains):
         return None
-    return "Cisco's Catalyst 9000 Train support table does not classify Train " + ", ".join(trains)
+    return "Cisco's IOS-XE Train support table does not classify Train " + ", ".join(trains)
 
 
-_SUPPORT_TRAINS: Final = STANDARD_SUPPORT_TRAINS | EXTENDED_SUPPORT_TRAINS
-
-
-def _member_text(member: object) -> str:
+def _member_text(member: StackMember) -> str:
     """One stack member as a Finding names it: its number, release and mode."""
-    number = getattr(member, "number")
-    release = getattr(member, "software_version")
-    mode = getattr(member, "mode")
+    release = member.software_version
+    mode = member.mode
     shown_release = release if isinstance(release, str) else "an unknown release"
     shown_mode = f"{mode} mode" if isinstance(mode, str) else "an unknown mode"
-    return f"member {number} runs {shown_release} in {shown_mode}"
+    return f"member {member.number} runs {shown_release} in {shown_mode}"
 
 
 def _release_key(release: str) -> str:
@@ -367,8 +383,12 @@ def _is_catalyst_9000(model: object) -> bool:
 
 
 def _train_applies(device: VisitedDevice) -> bool:
-    """The Train Check is IOS-XE only, and its table covers Catalyst 9000 models."""
-    return device.platform is Platform.IOS_XE and _is_catalyst_9000(device.model)
+    """The Train Check covers IOS-XE releases; classic IOS's Trains are outside its table."""
+    release = device.software_version
+    if device.platform is not Platform.IOS_XE or not isinstance(release, str):
+        return False
+    train = _train(release)
+    return train is not None and train.split(".")[0] in _IOS_XE_TRAINS
 
 
 def _vpc_pairs(data: AnalysisInput) -> tuple[tuple[str, str], ...]:
@@ -431,5 +451,11 @@ def _name(device: VisitedDevice) -> str:
     return device.hostname if isinstance(device.hostname, str) else device.id
 
 
-CHECKS: tuple[CheckDefinition, ...] = (CheckDefinition(MODEL_DRIFT_CHECK, model_drift),)
+CHECKS: tuple[CheckDefinition, ...] = (
+    CheckDefinition(MODEL_DRIFT_CHECK, model_drift),
+    CheckDefinition(STACK_MISMATCH_CHECK, stack_mismatch),
+    CheckDefinition(VPC_MISMATCH_CHECK, vpc_mismatch),
+    CheckDefinition(BUNDLE_MODE_CHECK, bundle_mode),
+    CheckDefinition(TRAIN_SUPPORT_CHECK, train_support, train_support_skip_reason),
+)
 """Every shipped Check. Order does not matter: results are sorted by Check id."""

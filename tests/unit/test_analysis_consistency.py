@@ -5,9 +5,9 @@ Catalyst 9000 in bundle mode and an IOS-XE Standard-Support Train are all facts 
 already collected, so these Checks need no new command and no Cisco lookup.
 
 The Standard- and Extended-Support Train list is the one researched on #76 from Cisco's
-Catalyst 9200-9600 release guidance (as of September 2026):
-Extended Support is 17.12, 17.15 and 17.18; Standard Support is 17.13, 17.14, 17.16 and
-17.17. A Train the research does not classify is never guessed at.
+Catalyst 9200-9600 release guidance (C9K-REL, as of September 2026): Extended Support is
+17.12, 17.15 and 17.18; Standard Support is 17.13, 17.14, 17.16 and 17.17. A Train the
+research does not classify is never guessed at.
 """
 
 from dataclasses import replace
@@ -15,7 +15,7 @@ from dataclasses import replace
 import pytest
 
 from network_analyser import analysis, topology
-from network_analyser.records.analysis import AnalysisInput
+from network_analyser.records.analysis import AnalysisInput, CiscoAnswers
 from network_analyser.records.collected import Reading, StackMember
 from network_analyser.records.device import DeviceRecord
 from network_analyser.records.platform import Platform
@@ -31,8 +31,8 @@ from tests.support.topology_records import visited, vpc
 
 A = "192.0.2.1"
 B = "192.0.2.2"
-C = "192.0.2.3"
 C9K = "C9300-48P"
+C8300 = "C8300-1N1S-4T2X"
 SHOW_VERSION = "show version"
 
 
@@ -42,16 +42,14 @@ def _device(  # noqa: PLR0913 (a device's facts, by name)
     hostname: str,
     *,
     model: str | Unknown = C9K,
-    release: str | Unknown = "17.9.4a",
+    release: str | Unknown = "17.12.1",
     platform: Platform = Platform.IOS_XE,
     stack: tuple[StackMember, ...] | None = None,
     vpc_domain: tuple[int, str, str] | None = None,
 ) -> DeviceRecord:
     """Return a Visited Device, with a stack or a vPC domain when one is given."""
     state = (
-        None
-        if vpc_domain is None
-        else vpc(vpc_domain[0], "Po10", (vpc_domain[1], vpc_domain[2]))
+        None if vpc_domain is None else vpc(vpc_domain[0], "Po10", (vpc_domain[1], vpc_domain[2]))
     )
     record = visited(address, serial, hostname, platform=platform, vpc_state=state)
     version = record.version
@@ -67,8 +65,10 @@ def _device(  # noqa: PLR0913 (a device's facts, by name)
     return record
 
 
-def _results(*records: DeviceRecord) -> AnalysisResults:
-    return analysis.analyse(AnalysisInput(topology=topology.build(records)))
+def _results(*records: DeviceRecord, answers: CiscoAnswers | None = None) -> AnalysisResults:
+    return analysis.analyse(
+        AnalysisInput(topology=topology.build(records), answers=answers or CiscoAnswers())
+    )
 
 
 def _findings(results: AnalysisResults, check_id: str) -> list[Finding]:
@@ -134,6 +134,17 @@ def test_stack_members_on_one_release_and_mode_raise_nothing() -> None:
     assert _findings(results, "consistency-stack-mismatch") == []
 
 
+def test_releases_that_differ_only_in_leading_zeros_are_one_release() -> None:
+    members = (
+        StackMember(1, "TEST0000A01", C9K, "17.09.04a", "INSTALL"),
+        StackMember(2, "TEST0000A02", C9K, "17.9.4a", "INSTALL"),
+    )
+
+    results = _results(_device(A, "S1", "sw-a", stack=members))
+
+    assert _findings(results, "consistency-stack-mismatch") == []
+
+
 def test_an_unknown_stack_release_or_mode_is_never_guessed() -> None:
     members = (
         StackMember(1, "TEST0000A01", C9K, Unknown("not in show version"), "INSTALL"),
@@ -147,8 +158,14 @@ def test_an_unknown_stack_release_or_mode_is_never_guessed() -> None:
 
 def test_a_lone_switch_is_not_a_stack_mismatch() -> None:
     results = _results(
-        _device(A, "S1", "sw-a", stack=(StackMember(1, "TEST0000A01", C9K, "17.9.4a", "INSTALL"),))
+        _device(A, "S1", "sw-a", stack=(StackMember(1, "TEST0000A01", C9K, "17.9.4a"),))
     )
+
+    assert _findings(results, "consistency-stack-mismatch") == []
+
+
+def test_a_device_with_an_unread_member_table_raises_nothing() -> None:
+    results = _results(_device(A, "S1", "sw-a"))
 
     assert _findings(results, "consistency-stack-mismatch") == []
 
@@ -169,6 +186,7 @@ def test_two_stacked_devices_each_get_their_own_finding() -> None:
     )
 
     assert sorted(finding.devices for finding in findings) == [("dev-S1",), ("dev-S2",)]
+    assert len({finding.id for finding in findings}) == 2
 
 
 # -- vPC peers --------------------------------------------------------------------------------
@@ -297,7 +315,7 @@ def test_a_device_without_vpc_raises_nothing() -> None:
 
 
 def test_a_catalyst_9000_in_bundle_mode_raises_low() -> None:
-    members = (StackMember(1, "TEST0000A01", C9K, "17.9.4a", "BUNDLE"),)
+    members = (StackMember(1, "TEST0000A01", C9K, "17.12.1", "BUNDLE"),)
 
     (finding,) = _findings(
         _results(_device(A, "S1", "sw-a", stack=members)), "consistency-bundle-mode"
@@ -313,7 +331,7 @@ def test_a_catalyst_9000_in_bundle_mode_raises_low() -> None:
 
 
 def test_a_catalyst_9000_in_install_mode_raises_nothing() -> None:
-    members = (StackMember(1, "TEST0000A01", C9K, "17.9.4a", "INSTALL"),)
+    members = (StackMember(1, "TEST0000A01", C9K, "17.12.1", "INSTALL"),)
 
     results = _results(_device(A, "S1", "sw-a", stack=members))
 
@@ -321,17 +339,15 @@ def test_a_catalyst_9000_in_install_mode_raises_nothing() -> None:
 
 
 def test_bundle_mode_on_another_model_is_not_this_check() -> None:
-    members = (StackMember(1, "TEST0000B01", "C8300-1N1S-4T2X", "17.9.4a", "BUNDLE"),)
+    members = (StackMember(1, "TEST0000B01", C8300, "17.12.1", "BUNDLE"),)
 
-    results = _results(
-        _device(A, "S1", "sw-a", model="C8300-1N1S-4T2X", stack=members)
-    )
+    results = _results(_device(A, "S1", "sw-a", model=C8300, stack=members))
 
     assert _findings(results, "consistency-bundle-mode") == []
 
 
 def test_a_catalyst_9000_whose_mode_was_not_read_raises_nothing() -> None:
-    members = (StackMember(1, "TEST0000A01", C9K, "17.9.4a", Unknown("not in show version")),)
+    members = (StackMember(1, "TEST0000A01", C9K, "17.12.1", Unknown("not in show version")),)
 
     results = _results(_device(A, "S1", "sw-a", stack=members))
 
@@ -365,10 +381,13 @@ def test_ios_xe_on_an_extended_support_train_raises_nothing(release: str) -> Non
     assert _findings(results, "consistency-standard-support-train") == []
 
 
-def test_another_model_is_not_this_check() -> None:
-    results = _results(_device(A, "S1", "sw-a", model="C8300-1N1S-4T2X", release="17.13.1"))
+def test_an_ios_xe_device_that_is_not_a_catalyst_9000_is_still_this_check() -> None:
+    (finding,) = _findings(
+        _results(_device(A, "S1", "sw-a", model=C8300, release="17.13.1")),
+        "consistency-standard-support-train",
+    )
 
-    assert _findings(results, "consistency-standard-support-train") == []
+    assert finding.level is FindingLevel.LOW
 
 
 def test_nx_os_is_not_this_check() -> None:
@@ -384,6 +403,14 @@ def test_nx_os_is_not_this_check() -> None:
     )
 
     assert _findings(results, "consistency-standard-support-train") == []
+    assert _run(results, "consistency-standard-support-train").ran is True
+
+
+def test_a_classic_ios_train_is_outside_this_check() -> None:
+    results = _results(_device(A, "S1", "sw-a", model="WS-C2960X-48FPD-L", release="15.2(7)E4"))
+
+    assert _findings(results, "consistency-standard-support-train") == []
+    assert _run(results, "consistency-standard-support-train").ran is True
 
 
 def test_a_train_the_research_does_not_classify_skips_the_check_instead_of_guessing() -> None:
@@ -396,12 +423,23 @@ def test_a_train_the_research_does_not_classify_skips_the_check_instead_of_guess
     assert "17.9" in run.reason
 
 
-def test_the_train_check_runs_when_every_device_is_classified() -> None:
-    results = _results(_device(A, "S1", "sw-a", release="17.13.1"))
+def test_a_mixed_estate_still_flags_the_classified_device() -> None:
+    results = _results(
+        _device(A, "S1", "sw-a", release="17.9.4a"),
+        _device(B, "S2", "sw-b", release="17.13.1"),
+    )
 
-    run = _run(results, "consistency-standard-support-train")
-    assert run.ran is True
-    assert run.reason is None
+    (finding,) = _findings(results, "consistency-standard-support-train")
+
+    assert finding.devices == ("dev-S2",)
+    assert _run(results, "consistency-standard-support-train").ran is True
+
+
+def test_an_unknown_release_is_never_guessed() -> None:
+    results = _results(_device(A, "S1", "sw-a", release=Unknown("show version not read")))
+
+    assert _findings(results, "consistency-standard-support-train") == []
+    assert _run(results, "consistency-standard-support-train").ran is True
 
 
 def test_each_standard_support_device_gets_its_own_finding() -> None:
@@ -414,4 +452,20 @@ def test_each_standard_support_device_gets_its_own_finding() -> None:
     )
 
     assert sorted(finding.devices for finding in findings) == [("dev-S1",), ("dev-S2",)]
-    assert {finding.id for finding in findings} != set()
+
+
+# -- Story 10: no Cisco lookup is needed ------------------------------------------------------
+
+
+def test_consistency_findings_are_raised_when_cisco_lookups_are_off_or_unavailable() -> None:
+    members = (
+        StackMember(1, "TEST0000A01", C9K, "17.9.4a", "INSTALL"),
+        StackMember(2, "TEST0000A02", C9K, "17.12.1", "INSTALL"),
+    )
+    results = _results(
+        _device(A, "S1", "sw-a", release="17.13.1", stack=members),
+        answers=CiscoAnswers.unavailable("Cisco openVuln could not be reached"),
+    )
+
+    assert _findings(results, "consistency-stack-mismatch") != []
+    assert _findings(results, "consistency-standard-support-train") != []
