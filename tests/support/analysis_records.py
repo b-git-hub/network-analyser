@@ -20,16 +20,21 @@ from network_analyser.records.device import DeviceRecord
 from network_analyser.records.topology import AnalysisResults, CheckRun, Finding
 
 
+def collected_of(*records: DeviceRecord) -> tuple[DeviceCollected, ...]:
+    """Each record's collected show output, keyed by its address, as the Run hands it over."""
+    return tuple(
+        DeviceCollected(record.ip, record.collected)
+        for record in records
+        if record.collected is not None
+    )
+
+
 def analysed(
     *records: DeviceRecord, facts: ConfigFacts | Iterable[ConfigFacts] = ()
 ) -> AnalysisResults:
     """Run Analysis on `records`, handing it their collected show output and `facts`."""
     built = topology.build(records)
-    collected = tuple(
-        DeviceCollected(record.ip, record.collected)
-        for record in records
-        if record.collected is not None
-    )
+    collected = collected_of(*records)
     given = (facts,) if isinstance(facts, ConfigFacts) else tuple(facts)
     return analysis.analyse(AnalysisInput(topology=built, collected=collected, config_facts=given))
 

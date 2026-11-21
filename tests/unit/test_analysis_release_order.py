@@ -30,14 +30,16 @@ from network_analyser.records.topology import (
     Finding,
     FindingLevel,
 )
-from tests.support.topology_records import visited
+from tests.support.analysis_records import collected_of
+from tests.support.topology_records import chassis_inventory, visited
 
 A = "192.0.2.1"
 B = "192.0.2.2"
 C = "192.0.2.3"
 MODEL = "C9300-48P"
 CLASSIC_MODEL = "WS-C2960X-48FPD-L"
-NEXUS_MODEL = "N9K-C93180YC-FX"
+NEXUS_MODEL = "C93180YC-FX"
+NEXUS_CHASSIS = "N9K-C93180YC-FX"
 NEXUS_PLATFORM = "Cisco Nexus 9000 Series Switches"
 ADVISORY = "cisco-sa-order-0001"
 LOWER = "cisco-sa-order-0002"
@@ -52,8 +54,10 @@ def _device(  # noqa: PLR0913 (every device field the Check reads, by name)
     platform: Platform = Platform.IOS_XE,
     model: str = MODEL,
     release: str = "17.12.1",
+    chassis: str | None = None,
 ) -> DeviceRecord:
-    record = visited(address, serial, hostname, platform=platform)
+    inventory = chassis_inventory(chassis) if chassis is not None else None
+    record = visited(address, serial, hostname, platform=platform, inventory=inventory)
     version = record.version
     assert version is not None
     return replace(record, version=replace(version, model=model, software_version=release))
@@ -98,6 +102,7 @@ def _results(*records: DeviceRecord, answers: tuple[ReleaseAdvisories, ...]) -> 
     return analysis.analyse(
         AnalysisInput(
             topology=topology.build(records),
+            collected=collected_of(*records),
             answers=CiscoAnswers(advisories=answers),
         )
     )
@@ -168,6 +173,7 @@ def test_nx_os_releases_order_a_lettered_build_after_its_plain_release(
             "nx-a",
             platform=Platform.NX_OS,
             model=NEXUS_MODEL,
+            chassis=NEXUS_CHASSIS,
             release=running,
         ),
         answers=(
@@ -277,7 +283,15 @@ def test_each_release_gets_the_train_cisco_names(
 ) -> None:
     platform, model, release, os_type, fix_train, fix, train = case
     results = _results(
-        _device(A, "N1", "nx-a", platform=platform, model=model, release=release),
+        _device(
+            A,
+            "N1",
+            "nx-a",
+            platform=platform,
+            model=model,
+            release=release,
+            chassis=NEXUS_CHASSIS if platform is Platform.NX_OS else None,
+        ),
         answers=(
             _answer(
                 os_type,

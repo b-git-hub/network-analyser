@@ -18,6 +18,7 @@ from network_analyser.records.collected import (
     Interface,
     InterfaceIp,
     InventoryItem,
+    InventoryKind,
     MacEntry,
     Neighbour,
     NtpAssociation,
@@ -236,6 +237,16 @@ def visited(  # noqa: PLR0913 (a device's collected data, by name)
         aliases=tuple(ip(a) for a in aliases),
         collected=collected,
     )
+
+
+def chassis_inventory(pid: str) -> tuple[InventoryItem, ...]:
+    """A Nexus's `show inventory | json` as the reader records it: its chassis, by real PID.
+
+    The NX-OS `show version` reader gives a model such as `C93180YC-EX`; the PID with its
+    `N9K-` series prefix is only in `show inventory`, so a test that needs the series passes
+    this as `visited(..., inventory=chassis_inventory("N9K-C93180YC-EX"))`.
+    """
+    return (InventoryItem("Chassis", InventoryKind.CHASSIS, pid, "TEST0000N01"),)
 
 
 def unvisited(address: str, reason: UnvisitedReason) -> DeviceRecord:

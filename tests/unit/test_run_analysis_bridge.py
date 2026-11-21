@@ -40,7 +40,8 @@ from network_analyser.records.cisco import (
     SourceUnavailable as CiscoUnavailable,
 )
 from network_analyser.records.topology import EoxKind, FindingLevel, Topology
-from tests.support.topology_records import visited
+from tests.support.analysis_records import collected_of
+from tests.support.topology_records import chassis_inventory, visited
 
 
 def _built() -> Topology:
@@ -229,19 +230,22 @@ def test_an_nxos_release_is_not_sent_without_its_hardware_family() -> None:
 
 
 def test_an_nxos_release_is_sent_with_the_hardware_family_it_was_matched_on() -> None:
-    record = visited("192.0.2.1", "TEST0000A01", platform=Platform.NX_OS)
+    record = visited(
+        "192.0.2.1",
+        "TEST0000A01",
+        platform=Platform.NX_OS,
+        inventory=chassis_inventory("N9K-C93180YC-FX"),
+    )
     version = record.version
     assert version is not None
-    nxos = topology.build(
-        [
-            replace(
-                record,
-                version=replace(version, model="N9K-C93180YC-FX", software_version="9.3(10)"),
-            )
-        ]
+    record = replace(
+        record, version=replace(version, model="C93180YC-FX", software_version="9.3(10)")
     )
+    nxos = topology.build([record])
 
-    asked = run_analysis.lookup_questions(AnalysisInput(topology=nxos))
+    asked = run_analysis.lookup_questions(
+        AnalysisInput(topology=nxos, collected=collected_of(record))
+    )
 
     expected = ReleaseQuestion(CiscoOsType.NX_OS, "9.3(10)", "NEXUS9000")
     assert asked.releases == (expected,)
