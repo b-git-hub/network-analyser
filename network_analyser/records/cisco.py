@@ -69,6 +69,23 @@ class SourceUnavailable:
 
 
 @dataclass(frozen=True, slots=True)
+class CiscoPlatform:
+    """One `platforms[]` entry in an NX-OS Advisory reply (#126).
+
+    Cisco names the first-fixed releases per platform rather than per Advisory on NX-OS. An
+    entry with no name is dropped before it reaches here, so it can never be mistaken for a
+    series.
+
+    Attributes:
+        name: Cisco's platform name, such as `Cisco Nexus 9000 Series Switches`.
+        first_fixed: the first-fixed releases Cisco gives this platform, in the reply's order.
+    """
+
+    name: str
+    first_fixed: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class CiscoAdvisory:
     """One Advisory from openVuln, as the reply names it.
 
@@ -82,6 +99,7 @@ class CiscoAdvisory:
         last_updated: when Cisco last updated it, as the reply gives it.
         first_fixed: the first releases Cisco names as fixed; empty when it names none,
             as NX-OS replies do.
+        platforms: the per-platform first fixes an NX-OS reply names; empty otherwise (#126).
     """
 
     advisory_id: str
@@ -92,6 +110,7 @@ class CiscoAdvisory:
     first_published: str
     last_updated: str
     first_fixed: tuple[str, ...]
+    platforms: tuple[CiscoPlatform, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

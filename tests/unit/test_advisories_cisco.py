@@ -6,6 +6,8 @@ without the token, so each test also proves the envelope held. All data is synth
 
 from typing import Any
 
+import pytest
+
 from network_analyser.advisories import Pacer, ask_cisco, check_api_key
 from network_analyser.advisories.transport import HttpResponse, TransportFailed
 from network_analyser.credentials import Secret, SecretScan
@@ -65,6 +67,15 @@ def suggested(release: str) -> dict[str, Any]:
         "isSuggested": "Y",
         "releaseDate": "2026-03-01",
         "trainDispName": "17.9",
+    }
+
+
+def platform(name: str | None, *fixes: str) -> dict[str, Any]:
+    return {
+        "id": "1",
+        "name": name,
+        "vulnerabilityState": "vulnerable",
+        "firstFixes": [{"id": "2", "name": fix} for fix in fixes],
     }
 
 
@@ -196,6 +207,54 @@ def test_an_nxos_question_sends_the_nexus_family() -> None:
     ]
     assert isinstance(answers.advisories[0], AdvisoriesAnswer)
     assert answers.advisories[0].question.platform_alias == "NEXUS9000"
+
+
+def test_an_nxos_reply_keeps_the_name_and_first_fixes_of_each_platform() -> None:
+    entry = advisory("cisco-sa-nxos-1", first_fixed=())
+    entry["platforms"] = [
+        platform("Cisco Nexus 9000 Series Switches", "10.4(5)"),
+        platform("Cisco Nexus 3000 Series Switches", "9.3(13)"),
+        platform(None, "10.4(8)"),
+    ]
+    fake = FakeCisco(advisories={("nxos", "10.4(3)", "NEXUS9000"): [entry]})
+
+    answers, _ = lookup(
+        fake, questions(releases=(ReleaseQuestion(CiscoOsType.NX_OS, "10.4(3)", "NEXUS9000"),))
+    )
+
+    (answer,) = answers.advisories
+    assert isinstance(answer, AdvisoriesAnswer)
+    (parsed,) = answer.advisories
+    assert parsed.first_fixed == ()
+    assert [(item.name, item.first_fixed) for item in parsed.platforms] == [
+        ("Cisco Nexus 9000 Series Switches", ("10.4(5)",)),
+        ("Cisco Nexus 3000 Series Switches", ("9.3(13)",)),
+    ]
+
+
+@pytest.mark.parametrize(
+    "platforms",
+    [
+        "not a list",
+        [42],
+        [{"name": 42, "firstFixes": []}],
+        [{"name": "Cisco Nexus 9000 Series Switches", "firstFixes": "10.4(5)"}],
+        [{"name": "Cisco Nexus 9000 Series Switches", "firstFixes": [42]}],
+        [{"name": "Cisco Nexus 9000 Series Switches", "firstFixes": [{"id": "2"}]}],
+    ],
+)
+def test_an_odd_nxos_platforms_reply_is_not_understood(platforms: object) -> None:
+    entry = advisory("cisco-sa-nxos-1")
+    entry["platforms"] = platforms
+    fake = FakeCisco(advisories={("nxos", "10.4(3)", "NEXUS9000"): [entry]})
+
+    answers, _ = lookup(
+        fake, questions(releases=(ReleaseQuestion(CiscoOsType.NX_OS, "10.4(3)", "NEXUS9000"),))
+    )
+
+    (answer,) = answers.advisories
+    assert isinstance(answer, SourceUnavailable)
+    assert "not understood" in answer.reason
 
 
 def test_eox_takes_twenty_values_a_call() -> None:

@@ -21,6 +21,8 @@ difference never hides an Advisory (story 45).
 """
 
 import re
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Final
 
 from network_analyser.records.analysis import OsType
@@ -55,6 +57,17 @@ _NEXUS_FAMILIES: Final = (
 _BASE_TRAIN: Final = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}")
 _CLASSIC_TRAIN: Final = re.compile(r"\)([A-Za-z]+)")
 _NXOS_I_TRAIN: Final = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\([0-9]{1,3}\)I[0-9]{1,3}")
+# The `platforms[].name` text Cisco's openVuln reply gives each Nexus series (#126). The names
+# are Cisco's own, as its samples and the 2026 live replies show; a series whose text cannot be
+# confirmed is absent, so its Upgrade Target stays `not available` rather than guessing.
+_PLATFORM_NAMES: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "NEXUS3000": "Cisco Nexus 3000 Series Switches",
+        "NEXUS5000": "Cisco Nexus 5000 Series Switches",
+        "NEXUS7000": "Cisco Nexus 7000 Series Switches",
+        "NEXUS9000": "Cisco Nexus 9000 Series Switches",
+    }
+)
 _ACI_REASON: Final = "NX-OS in ACI mode is not matched"
 _FAMILY_REASON: Final = "the software family could not be worked out from show version"
 
@@ -164,3 +177,14 @@ def hardware_family(model: str | Unknown) -> str | None:
         (family for pattern, family in _NEXUS_FAMILIES if pattern.search(model)),
         None,
     )
+
+
+def platform_name(family: str | None) -> str | None:
+    """Return the `platforms[].name` text for one Nexus series alias, or None (#126).
+
+    None means Cisco's exact text for that series is not in the built-in table, so its Upgrade
+    Target stays `not available` rather than matching another series' entry.
+    """
+    if family is None:
+        return None
+    return _PLATFORM_NAMES.get(family)
