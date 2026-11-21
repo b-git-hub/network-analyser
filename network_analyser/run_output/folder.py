@@ -131,8 +131,8 @@ def _location_notice(parent: Path, facts: FolderFacts) -> str | None:
         return None
     return (
         f"Notice: the Run folder will be on {place}. Its plaintext files (Topology, "
-        "diagrams, Run report, Audit log) can be read there, and synced or copied Backups "
-        "stay locked with the old passphrase after change-passphrase."
+        "diagrams, Run report, Findings report, Audit log) can be read there, and synced or "
+        "copied Backups stay locked with the old passphrase after change-passphrase."
     )
 
 

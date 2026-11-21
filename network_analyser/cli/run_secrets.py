@@ -39,18 +39,20 @@ _PLATFORM_CHOICES = {"1": Platform.IOS_XE, "2": Platform.NX_OS, "": None}
 # -- Backup Passphrase -------------------------------------------------------------------
 
 
-def backup_passphrase(check_file: Path, ask: Prompter) -> BackupPassphrase | ExitCode:
+def backup_passphrase(
+    check_file: Path, ask: Prompter, *, key_file: Path | None = None
+) -> BackupPassphrase | ExitCode:
     """Set the Backup Passphrase on a first Run, or check it on a later one (stories 20-22)."""
     try:
         if check_file.exists():
             return _unlock(check_file, ask)
-        return _choose(check_file, ask)
+        return _choose(check_file, ask, key_file)
     except CheckFileError as error:
         _stop(f"Refused: {fixed_message(error)} ({console_text(str(check_file))}).")
         return ExitCode.REFUSED
 
 
-def _choose(check_file: Path, ask: Prompter) -> BackupPassphrase | ExitCode:
+def _choose(check_file: Path, ask: Prompter, key_file: Path | None) -> BackupPassphrase | ExitCode:
     ask.say(
         "First Run: choose the Backup Passphrase. It locks every Backup this tool takes.\n"
         f"  It must be at least {backup_store.PASSPHRASE_MIN} characters. It cannot be "
@@ -69,6 +71,16 @@ def _choose(check_file: Path, ask: Prompter) -> BackupPassphrase | ExitCode:
         ask.say("Creating the check file (about a second)...")
         passphrase = backup_store.create_check_file(check_file, first)
         ask.say(f"Backup Passphrase set. Check file created: {console_text(str(check_file))}")
+        # Starting over (a check file deleted by hand) also deletes the key file: a key
+        # locked with the forgotten passphrase is an orphaned secret (story 39).
+        if key_file is not None:
+            try:
+                backup_store.remove_key_file(key_file)
+            except OSError:
+                ask.say(
+                    "  Warning: a leftover Cisco API key file could not be removed. Remove "
+                    f"{console_text(str(key_file))} by hand."
+                )
         return passphrase
     _stop(f"Stopped: no Backup Passphrase was set after {TRIES} tries. {_NO_DEVICE_PASSWORD}")
     return ExitCode.REFUSED

@@ -1,5 +1,5 @@
 """A Run writes `topology.json` at its end, including after Ctrl+C (#52), and draws
-`diagram.html` (#63) and `diagram.drawio` (#65) from it.
+`diagram.html` (#63), `diagram.drawio` (#65) and `findings.html` (#107) from it.
 
 Driven through `main(argv)` with what the operator types; the Seeds are fake devices.
 """
@@ -105,6 +105,24 @@ def test_analysis_runs_at_the_run_s_end_and_its_finding_reaches_every_output(
     assert drift[0]["id"] in redrawn
 
 
+def test_config_facts_from_the_visit_reach_analysis_at_the_run_s_end(
+    run: Runner,
+) -> None:
+    run.seed.replies["show running-config view full"] = device_text.IOS_XE_HARDENING_CONFIG
+
+    got = run(*FLAGS, typed=first_run())
+
+    assert got.code == ExitCode.CLEAN
+    document = _topology()
+    findings = document["findings"]
+    assert isinstance(findings, list)
+    checks = {item["check"]["id"] for item in findings}
+    assert "hardening-telnet" in checks
+    assert "hardening-snmp-v1-v2c" in checks
+    assert "hardening-legacy-services" in checks
+    assert "CANARY-cfg-96-a1b2" not in json.dumps(document)
+
+
 def _second_show_version() -> str:
     """Another serial, hostname and release on the same model."""
     return (
@@ -183,6 +201,7 @@ def test_a_run_stopped_by_ctrl_c_still_writes_topology_json(
     (folder,) = data_folder().runs.iterdir()
     assert (Path(folder) / "diagram.html").is_file()
     assert (Path(folder) / "diagram.drawio").is_file()
+    assert (Path(folder) / "findings.html").is_file()
 
 
 def test_a_topology_that_cannot_be_written_needs_attention(

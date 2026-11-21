@@ -72,6 +72,7 @@ from network_analyser.records import (
 from network_analyser.records import events as ev
 from network_analyser.records.backup import BackupCapture
 from network_analyser.records.collected import NOT_COLLECTED, Collected, Neighbour, Reading
+from network_analyser.records.config_facts import ConfigFact
 from network_analyser.records.device import (
     DeviceRecord,
     LandingPrivilege,
@@ -230,6 +231,7 @@ class _Visitor:
         self.privilege: LandingPrivilege | Unknown | None = None
         self.neighbours: dict[NeighbourProtocol, Neighbours] = {}
         self.collection: Collected | None = None
+        self.config_facts: tuple[ConfigFact, ...] = ()
 
     def run(self) -> DeviceRecord | Alias:
         placement = self.scope.placement(self.ip)
@@ -543,6 +545,8 @@ class _Visitor:
         problem = platforms.backup_problem(platform, config)
         if problem is not None:
             return problem
+        # The facts are taken here, while the config is in hand, and no line of it is kept.
+        self.config_facts = platforms.read_config_facts(platform, config)
         capture = BackupCapture(
             self.ip, platform, facts.hostname, facts.serials, command, captured_at
         )
@@ -658,6 +662,7 @@ class _Visitor:
             landing_privilege=self.privilege,
             version=self.facts,
             collected=self.collected() if platform is not None else None,
+            config_facts=self.config_facts,
         )
 
     def collected(self) -> Collected:

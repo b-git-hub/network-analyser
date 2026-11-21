@@ -40,6 +40,16 @@ B = "192.0.2.2"
 C = "192.0.2.3"
 D = "192.0.2.4"
 MODEL = "C9300-48P"
+HARDENING_CHECKS = (
+    "hardening-enable-secret",
+    "hardening-http-server",
+    "hardening-insecure-mode",
+    "hardening-legacy-services",
+    "hardening-snmp-v1-v2c",
+    "hardening-snmp-v3-priv",
+    "hardening-telnet",
+    "hardening-weak-secret-types",
+)
 
 
 def _device(
@@ -149,9 +159,14 @@ def test_unvisited_devices_get_no_analysis() -> None:
 
 
 def test_every_shipped_check_runs_and_one_advice_record_exists_per_visited_device() -> None:
-    results = _results(_device(A, "S1", "sw-a"), _device(B, "S2", "sw-b"))
+    results = _results(
+        _device(A, "S1", "sw-a", release="17.12.4"),
+        _device(B, "S2", "sw-b", release="17.12.4"),
+    )
 
     assert [run.check.id for run in results.checks] == [
+        "advisory-could-not-check",
+        "advisory-openvuln",
         "config-cisco-insecure-list",
         "config-copp-applied",
         "config-device-role-out-of-date",
@@ -159,7 +174,19 @@ def test_every_shipped_check_runs_and_one_advice_record_exists_per_visited_devic
         "config-ntp-synchronised",
         "config-snmpv3-user-crypto",
         "config-ssh-key-size",
+        "consistency-bundle-mode",
         "consistency-model-drift",
+        "consistency-stack-mismatch",
+        "consistency-standard-support-train",
+        "consistency-vpc-mismatch",
+        "hardening-enable-secret",
+        "hardening-http-server",
+        "hardening-insecure-mode",
+        "hardening-legacy-services",
+        "hardening-snmp-v1-v2c",
+        "hardening-snmp-v3-priv",
+        "hardening-telnet",
+        "hardening-weak-secret-types",
     ]
     assert all(run.reason is None for run in results.checks if run.ran)
     assert {run.check.id for run in results.checks if not run.ran} == {
@@ -185,7 +212,10 @@ def test_a_source_unavailable_says_why_and_raises_no_per_device_findings() -> No
     assert advice.latest_release_in_train == "not available"
     assert advice.latest_release == "not available"
     assert advice.upcoming_eox == ()
-    assert results.findings == ()
+    # A Cisco outage raises no Advisory or Consistency Finding; the hardening Checks still
+    # run, and with no config facts each says it could not decide rather than passing.
+    assert all(finding.check.type is CheckType.CONFIGURATION for finding in results.findings)
+    assert all("Could not decide" in finding.what_was_found for finding in results.findings)
 
 
 def test_cisco_answers_are_either_an_answer_or_unavailable() -> None:
@@ -254,9 +284,9 @@ def test_the_lookup_questions_are_deduplicated_and_pattern_valid() -> None:
     assert "S1" not in questions.pids
 
 
-def test_a_release_that_is_not_pattern_valid_is_not_sent() -> None:
+def test_a_release_the_family_table_does_not_hold_is_not_sent() -> None:
     results_input = AnalysisInput(
-        topology=topology.build((_device(A, "S1", "sw-a", release="17.9.4a [build 1]"),))
+        topology=topology.build((_device(A, "S1", "sw-a", release="17.9.4a;drop tables"),))
     )
 
     assert analysis.lookup_questions(results_input).releases == ()
@@ -297,6 +327,8 @@ def test_the_results_fit_topology_json_as_optional_fields() -> None:
     checks = analysis_record["checks"]
     assert isinstance(checks, list)
     assert [item["check"]["id"] for item in checks] == [
+        "advisory-could-not-check",
+        "advisory-openvuln",
         "config-cisco-insecure-list",
         "config-copp-applied",
         "config-device-role-out-of-date",
@@ -304,10 +336,27 @@ def test_the_results_fit_topology_json_as_optional_fields() -> None:
         "config-ntp-synchronised",
         "config-snmpv3-user-crypto",
         "config-ssh-key-size",
+        "consistency-bundle-mode",
         "consistency-model-drift",
+        "consistency-stack-mismatch",
+        "consistency-standard-support-train",
+        "consistency-vpc-mismatch",
+        "hardening-enable-secret",
+        "hardening-http-server",
+        "hardening-insecure-mode",
+        "hardening-legacy-services",
+        "hardening-snmp-v1-v2c",
+        "hardening-snmp-v3-priv",
+        "hardening-telnet",
+        "hardening-weak-secret-types",
     ]
     drift = next(item for item in checks if item["check"]["id"] == "consistency-model-drift")
     assert drift["ran"] is True
+    train = next(
+        item for item in checks if item["check"]["id"] == "consistency-standard-support-train"
+    )
+    assert train["ran"] is False
+    assert "17.9" in train["reason"]
 
 
 def test_the_advice_shape_accepts_an_advisory_answer() -> None:

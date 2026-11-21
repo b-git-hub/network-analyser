@@ -132,8 +132,46 @@ def test_a_vrf_name_that_does_not_fit_the_allow_list_is_never_sent() -> None:
 def test_stack_members_come_from_show_version_sent_again(sw_a: Collection) -> None:
     assert sw_a.collected.stack_members == Reading(
         ("show version",),
-        (StackMember(1, "TEST0000A01", "C9300-48P"), StackMember(2, "TEST0000A02", "C9300-48P")),
+        (
+            StackMember(1, "TEST0000A01", "C9300-48P", "17.09.04a", "INSTALL"),
+            StackMember(2, "TEST0000A02", "C9300-48P", "17.09.04a", "INSTALL"),
+        ),
     )
+
+
+def test_a_member_table_that_stops_before_the_mode_leaves_it_unknown() -> None:
+    text = """\
+Cisco IOS XE Software, Version 17.09.04a
+Cisco IOS Software [Cupertino], Catalyst L3 Switch Software (CAT9K_IOSXE), Version 17.9.4a, \
+RELEASE SOFTWARE (fc5)
+sw-a uptime is 1 week, 2 days, 3 hours, 4 minutes
+cisco C9300-48P (X86) processor with 1392536K/6147K bytes of memory.
+Processor board ID TEST0000A01
+
+Switch Ports Model              SW Version        SW Image
+------ ----- -----              ----------        ----------
+*    1 56    C9300-48P          17.09.04a         CAT9K_IOSXE
+     2 56    C9300-48P          17.09.04a         CAT9K_IOSXE
+
+Switch 02
+---------
+System Serial Number               : TEST0000A02
+"""
+
+    members = value(collect(Device(), text).collected.stack_members)
+
+    assert [(m.number, m.software_version, m.mode) for m in members] == [
+        (1, "17.09.04a", Unknown("mode not reported by show version")),
+        (2, "17.09.04a", Unknown("mode not reported by show version")),
+    ]
+
+
+def test_bundle_mode_is_read_from_the_member_table() -> None:
+    text = device_text.IOS_XE_SHOW_VERSION.replace("INSTALL", "BUNDLE")
+
+    members = value(collect(Device(), text).collected.stack_members)
+
+    assert [m.mode for m in members] == ["BUNDLE", "BUNDLE"]
 
 
 def test_a_lone_device_is_one_member() -> None:

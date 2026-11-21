@@ -2,7 +2,8 @@
 
 Owns the single locking worker, age passphrase encryption, ciphertext-only
 temp-then-rename writes, the encrypted manifest, the check file, `show-backup`,
-`change-passphrase` and the Run register. No plaintext config ever reaches disk.
+`change-passphrase`, the Run register and the Cisco API Key file (ADR 0008).
+No plaintext config ever reaches disk.
 """
 
 from network_analyser.backup_store.change_pending import (
@@ -24,6 +25,16 @@ from network_analyser.backup_store.check_file import (
     create_check_file,
     passphrase_problem,
     unlock_check_file,
+)
+from network_analyser.backup_store.cisco_key import (
+    KEY_LOCKED_ELSEWHERE,
+    CiscoKey,
+    KeyOutcome,
+    key_file_set_time,
+    lock_key_file,
+    relock_key_file,
+    remove_key_file,
+    unlock_key_file,
 )
 from network_analyser.backup_store.locker import (
     BACKUPS_FOLDER,
@@ -48,6 +59,7 @@ from network_analyser.backup_store.relock import (
 
 __all__ = [
     "BACKUPS_FOLDER",
+    "KEY_LOCKED_ELSEWHERE",
     "MANIFEST_NAME",
     "PASSPHRASE_MIN",
     "BackupLocker",
@@ -55,9 +67,11 @@ __all__ = [
     "ChangeStage",
     "ChangeStatus",
     "CheckFileError",
+    "CiscoKey",
     "FileOutcome",
     "FileResult",
     "Fingerprints",
+    "KeyOutcome",
     "PassphraseFiles",
     "PendingChange",
     "RegisterRefusedError",
@@ -69,12 +83,17 @@ __all__ = [
     "change_status",
     "create_check_file",
     "finish_change",
+    "key_file_set_time",
+    "lock_key_file",
     "passphrase_problem",
     "plan_relock",
     "register_run_folder",
     "registered_run_folders",
+    "relock_key_file",
+    "remove_key_file",
     "resume_change",
     "scrypt_level",
     "start_change",
     "unlock_check_file",
+    "unlock_key_file",
 ]

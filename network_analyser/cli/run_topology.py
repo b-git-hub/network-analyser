@@ -1,6 +1,7 @@
-"""`topology.json` and `diagram.html`: written at the end of every started Run, Ctrl+C included.
+"""`topology.json`, `diagram.html` and `findings.html`: written at the end of a Run.
 
-`topology.json` is #52's; the diagram is then drawn from that file alone (#63).
+Written for every started Run, Ctrl+C included. `topology.json` is #52's; the diagram and the
+Findings report are then drawn from that file alone (#63, #107).
 
 `Collector` keeps each device record as the crawl hands it back, so a Run stopped part way
 still has the records gathered so far. At the end, `save_topology` builds the Topology, runs
@@ -19,7 +20,7 @@ from collections.abc import Callable
 from typing import Final
 
 from network_analyser import run_output, topology
-from network_analyser.cli import diagram_file, run_analysis
+from network_analyser.cli import diagram_file, findings_file, run_analysis
 from network_analyser.cli.exit_codes import ExitCode
 from network_analyser.credentials import SecretScan
 from network_analyser.records.device import DeviceRecord
@@ -100,10 +101,15 @@ def _save(
     scan: SecretScan,
     scope: ScopeRecord | None,
 ) -> bool:
-    """Write `topology.json`, then `diagram.html` from it; False if either failed."""
-    return save_topology(
-        folder, collector.records(), scan, scope=scope
-    ) and diagram_file.save_diagram(folder, scan)
+    """Write `topology.json`, then draw the diagram and the Findings report from it.
+
+    False if any of the three failed.
+    """
+    return (
+        save_topology(folder, collector.records(), scan, scope=scope)
+        and diagram_file.save_diagram(folder, scan)
+        and findings_file.save_findings(folder, scan)
+    )
 
 
 def save_topology(

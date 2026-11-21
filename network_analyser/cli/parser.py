@@ -129,6 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_trust_key(commands)
     _add_role_snippet(commands)
     _add_change_passphrase(commands)
+    _add_cisco_key(commands)
     return parser
 
 
@@ -267,7 +268,7 @@ def _add_render(commands: _Commands) -> None:
         commands,
         "render",
         "redraw the diagram of an earlier Run, in its Run folder",
-        "Redraw diagram.html and diagram.drawio from topology.json, in place. "
+        "Redraw diagram.html, diagram.drawio and findings.html from topology.json, in place. "
         "No device is contacted.",
     )
     render.add_argument("run_folder", metavar="RUN_FOLDER")
@@ -333,7 +334,8 @@ _MANUAL_RESET = r"""forgotten the Backup Passphrase?
   If a change was left unfinished, also delete change-pending.json and
   passphrase-check.previous.age beside it. The next Run then asks for a new passphrase
   twice. Backups locked with the forgotten one stay locked for good: a later
-  change-passphrase lists them as not re-locked."""
+  change-passphrase lists them as not re-locked. A stored Cisco API key is deleted too,
+  because it was locked with the forgotten passphrase (cisco-key set stores a new one)."""
 
 
 def _add_change_passphrase(commands: _Commands) -> None:
@@ -353,4 +355,50 @@ def _add_change_passphrase(commands: _Commands) -> None:
         action="append",
         metavar="DIR",
         help="also re-lock a Run folder that moved since it was registered. Repeatable.",
+    )
+
+
+def _add_cisco_key(commands: _Commands) -> None:
+    cisco_key = commands.add_parser(
+        "cisco-key",
+        help="store, show or remove the Cisco API Key",
+        description="Store, show or remove the Cisco API Key used for Cisco lookups. The key "
+        "is locked\nwith the Backup Passphrase, so it has the same protection as a Backup. "
+        + textwrap.fill(SECRETS_ARE_NEVER_OPTIONS, 79),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        allow_abbrev=False,
+        color=False,
+    )
+    actions = cisco_key.add_subparsers(
+        dest="cisco_key_command", metavar="<action>", title="actions", required=True
+    )
+    set_key = actions.add_parser(
+        "set",
+        help="store the Cisco API Key (asks for the Backup Passphrase)",
+        description="Ask the Backup Passphrase, then the client ID and secret at masked "
+        "prompts, lock\nthem into the key file, and send one token-only request to Cisco to "
+        "check the key.",
+        allow_abbrev=False,
+        color=False,
+    )
+    set_key.add_argument(
+        "--no-check",
+        action="store_true",
+        default=None,
+        help="store the key without the online token check (for offline storage)",
+    )
+    actions.add_parser(
+        "show",
+        help="say whether a key is stored, and show its details",
+        description="Say whether a Cisco API key is stored and when it was set. With the "
+        "Backup Passphrase,\nit also shows the last 4 characters of the client ID.",
+        allow_abbrev=False,
+        color=False,
+    )
+    actions.add_parser(
+        "remove",
+        help="delete the stored Cisco API Key",
+        description="Delete the Cisco API key file after a [y/N] confirmation.",
+        allow_abbrev=False,
+        color=False,
     )

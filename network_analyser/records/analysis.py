@@ -21,8 +21,8 @@ from types import MappingProxyType
 from typing import Final
 
 from network_analyser.records.collected import Collected
+from network_analyser.records.config_facts import ConfigFact, ConfigFacts, FactValue
 from network_analyser.records.topology import AdvisoryDetail, EoxItem, Topology
-from network_analyser.records.unknown import Unknown
 
 __all__ = [
     "DEVICE_ROLE_CHECKS_BY_DATA",
@@ -38,6 +38,7 @@ __all__ = [
     "DeviceCollected",
     "DeviceInventory",
     "EoxAnswers",
+    "FactValue",
     "FixedRelease",
     "HardwareEox",
     "HardwareItem",
@@ -64,9 +65,6 @@ class OsType(Enum):
     IOS_XE = "IOS-XE"
     NX_OS = "NX-OS"
 
-
-type FactValue = bool | int | str | tuple[str, ...] | Unknown
-"""One config fact's value. It may be `Unknown` when the fact could not be read."""
 
 SNMP_V3_USER_CRYPTO: Final = "snmp_v3_user_crypto"
 """The config fact the SNMPv3 crypto Check reads on NX-OS (#102, story 60).
@@ -100,39 +98,6 @@ DEVICE_ROLE_CHECKS_BY_DATA: Final[Mapping[str, tuple[str, ...]]] = MappingProxyT
 Keyed by the `Collected` field each 0.2.0 command fills, so a Platform never repeats a Check
 id and Analysis never imports a Platform. `lifecycle-hardware-eox` is shipped by #106: a Role
 that refuses `show inventory` is already reported against that Check."""
-
-
-@dataclass(frozen=True, slots=True)
-class ConfigFact:
-    """One secret-free fact read from a device's running config (#96).
-
-    Attributes:
-        name: its fixed name, such as `telnet`.
-        value: its value; `Unknown` when it could not be read.
-    """
-
-    name: str
-    value: FactValue
-
-
-@dataclass(frozen=True, slots=True)
-class ConfigFacts:
-    """The secret-free config facts of one Visited Device (#96).
-
-    Attributes:
-        device: the device's id.
-        facts: every fact that was read, in name order.
-    """
-
-    device: str
-    facts: tuple[ConfigFact, ...] = ()
-
-    def fact(self, name: str) -> FactValue:
-        """Return `name`'s value, or `Unknown` when it was not read (never "absent")."""
-        for item in self.facts:
-            if item.name == name:
-                return item.value
-        return Unknown(f"config fact not collected: {name}")
 
 
 @unique
@@ -238,12 +203,15 @@ class ReleaseAdvisories:
         release: the release asked about, normalised before lookup (story 45).
         advisories: every Advisory Cisco named for it; empty means it named none.
         hardware_family: the Nexus hardware family asked about on NX-OS; None otherwise.
+        unavailable: why Cisco gave no answer for this release, such as
+            `INVALID_IOS_VERSION`; None when it answered (story 53).
     """
 
     os_type: OsType
     release: str
     advisories: tuple[AdvisoryAnswer, ...] = ()
     hardware_family: str | None = None
+    unavailable: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -326,15 +294,19 @@ class CiscoAnswers:
 
 @dataclass(frozen=True, slots=True)
 class ReleaseQuestion:
-    """One OS type and release to ask Cisco about (stories 12-13, 43-45).
+    """One OS type and release to ask Cisco about (stories 12-13, 43-46).
 
     Attributes:
         os_type: the family the release belongs to.
         release: the release string, pattern-valid and normalised before sending (story 45).
+        hardware_family: the Nexus hardware family openVuln is asked about on NX-OS, such as
+            `NEXUS9000`; None for IOS and IOS-XE, and for an NX-OS device whose family could
+            not be worked out (story 46).
     """
 
     os_type: OsType
     release: str
+    hardware_family: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -360,7 +332,8 @@ class AnalysisInput:
     Attributes:
         topology: the Run's Topology: its Visited Devices, Links, Bundles and v1 Findings.
             Unvisited Devices are in it, and Analysis never uses them (story 3).
-        config_facts: each Visited Device's secret-free facts, once #96 fills them.
+        config_facts: each Visited Device's secret-free facts, read by `platforms` inside the
+            visit (#96). A device with no entry has every fact `Unknown`.
         collected: each Visited Device's collected show output, for the show-output Checks
             (#102), keyed by the address logged into.
         inventory: each device's hardware PIDs, once #97 and #98 fill them.

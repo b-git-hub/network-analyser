@@ -271,6 +271,78 @@ interface Ethernet1/1
   description to sw-a
 """
 
+# Running configs with the hardening facts (#96). Every secret, hash and community string
+# carries a canary, so a test can prove none of it reaches a record or a Finding.
+HARDENING_CANARIES = (
+    "CANARY-cfg-96-a1b2-enable9",
+    "CANARY-cfg-96-a1b2-enable7",
+    "CANARY-cfg-96-a1b2-user5",
+    "CANARY-cfg-96-a1b2-user7",
+    "CANARY-cfg-96-a1b2-community",
+    "CANARY-cfg-96-a1b2-auth",
+    "CANARY-cfg-96-nxos-user5",
+    "CANARY-cfg-96-nxos-community",
+    "CANARY-cfg-96-nxos-auth",
+)
+
+IOS_XE_HARDENING_CONFIG = """\
+Building configuration...
+
+Current configuration : 2048 bytes
+!
+version 17.9
+hostname sw-a
+!
+enable secret 9 CANARY-cfg-96-a1b2-enable9
+enable password 7 CANARY-cfg-96-a1b2-enable7
+!
+username netops-ro privilege 15 secret 5 CANARY-cfg-96-a1b2-user5
+username legacy password 7 CANARY-cfg-96-a1b2-user7
+!
+ip source-route
+ip http server
+service pad
+service finger
+ip bootp server
+ip rcmd rcp-enable
+ftp-server enable
+tftp-server nvram:startup-config
+!
+snmp-server community public RO
+snmp-server community CANARY-cfg-96-a1b2-community RW
+snmp-server community private RW 99
+snmp-server group N3AUTH v3 auth read v1default
+snmp-server user n3user N3AUTH v3 auth sha CANARY-cfg-96-a1b2-auth
+!
+line con 0
+ logging synchronous
+line vty 0 4
+ transport input telnet ssh
+line vty 5 15
+ transport input ssh
+!
+end
+"""
+
+NXOS_HARDENING_CONFIG = """\
+!Command: show running-config
+!Running configuration last done at: Wed Nov 18 10:15:30 2026
+
+version 9.3(8) Bios:version
+hostname nx-a
+feature telnet
+feature ftp
+username admin password 5 CANARY-cfg-96-nxos-user5  role network-admin
+ip http server
+no ip source-route
+snmp-server community public RW
+snmp-server community CANARY-cfg-96-nxos-community RO 10
+snmp-server group N3AUTH v3 auth
+snmp-server user n3user N3AUTH auth md5 CANARY-cfg-96-nxos-auth
+line vty
+  access-class 10 in
+"""
+
 COMMAND_AUTHORISATION_FAILED = "Command authorization failed.\n"
 IOS_XE_INVALID_INPUT = "                 ^\n% Invalid input detected at '^' marker.\n"
 NXOS_PERMISSION_DENIED = "% Permission denied for the role\n"

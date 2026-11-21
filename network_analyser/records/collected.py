@@ -149,13 +149,29 @@ class Neighbour:
     native_vlan: int | None = None
 
 
+_UNKNOWN_RELEASE: Final = Unknown("release not reported by show version")
+_UNKNOWN_MODE: Final = Unknown("mode not reported by show version")
+
+
 @dataclass(frozen=True, slots=True)
 class StackMember:
-    """One member switch of a stack or StackWise Virtual pair."""
+    """One member switch of a stack or StackWise Virtual pair.
+
+    Attributes:
+        number: its member number, as `show version` lists it.
+        serial: its serial number.
+        model: its model, as the member table reports it.
+        software_version: the release it runs, as its own row reports it (#99). `Unknown` when
+            the member table has no version column or it was not read.
+        mode: its boot mode as the member table reports it, such as `INSTALL` or `BUNDLE`
+            (#99). `Unknown` when it was not read.
+    """
 
     number: int
     serial: str | Unknown
     model: str | Unknown
+    software_version: str | Unknown = _UNKNOWN_RELEASE
+    mode: str | Unknown = _UNKNOWN_MODE
 
 
 @unique

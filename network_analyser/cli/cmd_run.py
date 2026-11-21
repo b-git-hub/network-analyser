@@ -202,7 +202,7 @@ def _secrets(
     """
     if not guard_crash_dumps(ask):
         return ExitCode.REFUSED
-    passphrase = run_secrets.backup_passphrase(data.check_file, ask)
+    passphrase = run_secrets.backup_passphrase(data.check_file, ask, key_file=data.cisco_key_file)
     if isinstance(passphrase, ExitCode):
         return passphrase
     passphrase.add_to_scan(scan)

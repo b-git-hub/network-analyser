@@ -78,11 +78,14 @@ def _has_data(text: str) -> bool:
 
 # -- Stack members (`show version`) -----------------------------------------------------------
 
-_SWITCH_ROW: Final = re.compile(r"^\s*(\*)?\s*(\d{1,2})\s+\d+\s+(\S+)\s+\S+", re.MULTILINE)
+_SWITCH_ROW: Final = re.compile(r"^\s*(\*)?\s*(\d{1,2})\s+\d+\s+(\S+)(.*)$", re.MULTILINE)
 _SWITCH_SECTION: Final = re.compile(r"^Switch 0*(\d{1,2})\s*\n-+\s*$", re.MULTILINE)
 _SERIAL: Final = re.compile(
     r"^(?:System Serial Number\s*:|Processor board ID)\s*([A-Za-z0-9]{1,40})\s*$", re.MULTILINE
 )
+_BOOT_MODES: Final = frozenset({"INSTALL", "BUNDLE"})
+_MODE_COLUMNS: Final = 3
+"""The table's columns after the model when it reports a boot mode: version, image, mode."""
 
 
 def stack_members(
@@ -90,9 +93,10 @@ def stack_members(
 ) -> tuple[StackMember, ...]:
     """Read the stack's member switches from `show version`; one member for a lone device.
 
-    The member table (`Switch Ports Model ...`) gives each number and model; the serial of
-    the switch logged into (`*`) comes before the table, each other member's from its own
-    `Switch 0N` section.
+    The member table (`Switch Ports Model ...`) gives each number, model, release and boot
+    mode; the serial of the switch logged into (`*`) comes before the table, each other
+    member's from its own `Switch 0N` section. A member table that stops short of a column
+    leaves that fact `Unknown`, never guessed (the research on #76 saw the columns vary).
     """
     table_at = text.find("Switch Ports Model")
     if table_at < 0:
@@ -110,14 +114,34 @@ def stack_members(
     for row in _SWITCH_ROW.finditer(text[table_at:]):
         number = int(row.group(2))
         serial = head.group(1) if row.group(1) and head else found.get(number)
+        columns = row.group(4).split()
         members.append(
             StackMember(
                 number,
                 serial or Unknown("serial not found in show version"),
                 fields.word({"model": row.group(3)}, "model", "model"),
+                _release(columns),
+                _mode(columns),
             )
         )
     return tuple(members)
+
+
+def _release(columns: list[str]) -> str | Unknown:
+    """The member's release: the first column after the model, when the table has one."""
+    if not columns:
+        return Unknown("release not reported by show version")
+    return fields.word({"release": columns[0]}, "release", "release")
+
+
+def _mode(columns: list[str]) -> str | Unknown:
+    """The boot mode, only when the table's last column is one Cisco reports."""
+    if len(columns) < _MODE_COLUMNS:
+        return Unknown("mode not reported by show version")
+    found = fields.word({"mode": columns[-1]}, "mode", "mode")
+    if isinstance(found, str) and found.upper() in _BOOT_MODES:
+        return found.upper()
+    return Unknown("mode not reported by show version")
 
 
 # -- Interfaces -------------------------------------------------------------------------------

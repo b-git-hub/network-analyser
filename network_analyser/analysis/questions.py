@@ -3,9 +3,15 @@
 Only PIDs (chassis, stack members, supervisors and line cards) and OS type + release strings
 leave Analysis. Every value is checked against a strict pattern, de-duplicated and sorted, so
 a strange device string is dropped rather than sent (stories 12-14).
+
+The release is normalised before it is a question, and its family comes from the table decided
+on #78 (stories 44-45), so two devices that print the same release differently ask Cisco once.
+An NX-OS device also asks about its Nexus hardware family; a family that cannot be worked out
+asks on release alone, and the Finding says so (story 46).
 """
 
 from network_analyser.analysis.patterns import valid_pid, valid_release
+from network_analyser.analysis.releases import family_of, hardware_family, normalise_release
 from network_analyser.records.analysis import (
     AnalysisInput,
     HardwareItem,
@@ -14,7 +20,6 @@ from network_analyser.records.analysis import (
     OsType,
     ReleaseQuestion,
 )
-from network_analyser.records.platform import Platform
 from network_analyser.records.topology import VisitedDevice
 from network_analyser.records.unknown import Unknown
 
@@ -28,16 +33,20 @@ def lookup_questions(data: AnalysisInput) -> LookupQuestions:
     releases: set[ReleaseQuestion] = set()
     for device in data.topology.devices:
         _add_device_pids(pids, device)
-        os_type = _os_type(device)
-        release = device.software_version
-        if os_type is not None and isinstance(release, str) and valid_release(release):
-            releases.add(ReleaseQuestion(os_type, release))
+        question = _release_question(device)
+        if question is not None:
+            releases.add(question)
     for inventory in data.inventory:
         for item in inventory.items:
             _add_pid(pids, item)
     return LookupQuestions(
         pids=tuple(sorted(pids)),
-        releases=tuple(sorted(releases, key=lambda q: (q.os_type.value, q.release))),
+        releases=tuple(
+            sorted(
+                releases,
+                key=lambda q: (q.os_type.value, q.release, q.hardware_family or ""),
+            )
+        ),
     )
 
 
@@ -58,14 +67,13 @@ def _add_pid(pids: set[str], item: HardwareItem) -> None:
         pids.add(item.pid)
 
 
-def _os_type(device: VisitedDevice) -> OsType | None:
-    """The family a device's release is asked about, or None when the Platform is unknown.
-
-    Classic IOS and IOS-XE share one Platform command set, so both are asked as IOS-XE until
-    the family table decided on #78 can tell them apart (stories 44-45).
-    """
-    if device.platform is Platform.NX_OS:
-        return OsType.NX_OS
-    if device.platform is Platform.IOS_XE:
-        return OsType.IOS_XE
-    return None
+def _release_question(device: VisitedDevice) -> ReleaseQuestion | None:
+    """The one question a device's release asks, or None when its family is not in the table."""
+    os_type = family_of(device.platform, device.software_version)
+    if os_type is None or not isinstance(device.software_version, str):
+        return None
+    release = normalise_release(device.software_version)
+    if not valid_release(release):
+        return None
+    family = hardware_family(device.model) if os_type is OsType.NX_OS else None
+    return ReleaseQuestion(os_type, release, family)

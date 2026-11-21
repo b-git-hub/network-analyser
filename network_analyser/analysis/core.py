@@ -13,9 +13,10 @@ flagged by Cisco" needs every other Check's Findings (story 67).
 from collections.abc import Iterable
 from typing import Final
 
-from network_analyser.analysis.advice import advice_for
-from network_analyser.analysis.checks import CHECKS, CheckDefinition
+from network_analyser.analysis.advisory import advice_for
+from network_analyser.analysis.checks import CHECKS
 from network_analyser.analysis.cisco_list import apply as apply_cisco_list
+from network_analyser.analysis.definition import CheckDefinition
 from network_analyser.records.analysis import AnalysisInput
 from network_analyser.records.topology import AnalysisResults, CheckRun, CheckSkip, Finding
 
@@ -30,10 +31,15 @@ def analyse(data: AnalysisInput) -> AnalysisResults:
 
     v1's Topology Findings are already in `data.topology.findings`; they are returned with
     Analysis's own Findings, worst first, so callers and the Run's outputs see one list.
+    A Check whose source was unavailable is skipped with its reason, and raises nothing.
     """
     findings: list[Finding] = list(data.topology.findings)
     runs: list[CheckRun] = []
     for definition in CHECKS:
+        reason = definition.skip_reason(data) if definition.skip_reason is not None else None
+        if reason is not None:
+            runs.append(CheckRun(check=definition.check, ran=False, reason=reason))
+            continue
         findings.extend(definition.run(data))
         runs.append(_run(definition, data))
     findings = list(apply_cisco_list(data, tuple(findings)))
