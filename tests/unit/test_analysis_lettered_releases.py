@@ -101,10 +101,11 @@ def _question_release(device: DeviceRecord) -> tuple[OsType, str, str | None]:
     return question.os_type, question.release, question.hardware_family
 
 
-@pytest.mark.parametrize(("platform", "model", "running", "os_type", "train", "fix"), LETTERED)
+@pytest.mark.parametrize("case", LETTERED)
 def test_a_lettered_or_special_running_release_gets_its_advisories_and_target(
-    platform: Platform, model: str, running: str, os_type: OsType, train: str, fix: str
+    case: tuple[Platform, str, str, OsType, str, str],
 ) -> None:
+    platform, model, running, os_type, train, fix = case
     device = _device(platform, model, running)
     nexus = platform is Platform.NX_OS
     asked_os, asked_release, family = _question_release(device)
@@ -149,7 +150,7 @@ def test_a_lettered_or_special_running_release_gets_its_advisories_and_target(
 )
 def test_nx_os_letter_trains_are_not_lumped_into_one_train(running: str, train: str) -> None:
     same_line = f"{train}(12)"
-    other_line = f"{running.split('(')[0]}(9)Z9(99)"
+    other_line = f"{running.split('(', maxsplit=1)[0]}(9)Z9(99)"
     device = _device(Platform.NX_OS, NEXUS_MODEL, running)
     listed = (CompatibleRelease(other_line, "MD"), CompatibleRelease(same_line, "MD"))
 
