@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from network_analyser import backup_store, device_gateway
+from network_analyser.advisories import HttpResponse
 from network_analyser.cli import ExitCode, run_end
 from network_analyser.credentials import CredentialSets, Secret
 from network_analyser.records.device import DeviceRecord
@@ -122,6 +123,10 @@ def _suggestion() -> dict[str, Any]:
     }
 
 
+def _status(status: int) -> HttpResponse:
+    return HttpResponse(status=status, body=b"")
+
+
 def _fake() -> FakeCisco:
     return FakeCisco(
         advisories={("iosxe", "17.9.4a", None): [_advisory()]},
@@ -219,7 +224,7 @@ def test_a_run_with_no_key_gives_one_notice_and_one_attention_line(run: Runner) 
     assert (Path(_run_folder()) / "backups").is_dir()  # Backups are kept
 
 
-def test_a_rejected_key_gives_one_attention_line_per_source_and_exit_1(
+def test_a_rejected_key_gives_exactly_one_attention_line_and_exit_1(
     run: Runner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -233,9 +238,46 @@ def test_a_rejected_key_gives_one_attention_line_per_source_and_exit_1(
     assert got.code == ExitCode.NEEDS_ATTENTION
     assert fake.token_calls() == 1  # a rejected key is never retried
     lines = [line for line in got.out.splitlines() if REJECTED in line]
-    assert len(lines) == 3, got.out
-    assert all("cisco-key set" in line for line in lines)
+    assert len(lines) == 1, got.out
+    assert "cisco-key set" in lines[0]
+    assert len([line for line in got.out.splitlines() if "did not run:" in line]) == 1
     assert (Path(_run_folder()) / "backups").is_dir()
+
+
+def test_two_software_suggestion_failures_give_one_attention_line(
+    run: Runner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _store_key()
+    fake = _serve(monkeypatch, _fake())
+    fake.scripted.append(("/software/suggestion/v2/suggestions/releases", _status(400)))
+    fake.scripted.append(("/software/suggestion/v2/suggestions/compatible", _status(404)))
+
+    got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
+
+    assert got.code == ExitCode.NEEDS_ATTENTION
+    lines = [line for line in got.out.splitlines() if "Cisco Software Suggestion" in line]
+    assert lines == ["  Cisco Software Suggestion did not run: Cisco returned HTTP 400."]
+    assert "cisco-key set" not in got.out
+
+
+def test_a_400_on_a_release_is_that_devices_could_not_check_and_no_key_advice(
+    run: Runner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _store_key()
+    fake = _serve(monkeypatch, _fake())
+    fake.advisories = {}
+    fake.advisory_errors = {("iosxe", "17.9.4a", None): (400, "INVALID_IOS_VERSION")}
+
+    got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
+
+    assert "cisco-key set" not in got.out
+    assert REJECTED not in got.out
+    assert "Cisco advisories (openVuln) did not run" not in got.out
+    outcome = _topology(_run_folder())["devices"][0]["advice"]["outcome"]
+    assert outcome.startswith("could not check: Cisco openVuln does not know release 17.9.4a")
+    assert fake.api_requests()[-1].path.startswith("/software")  # the later calls still went out
 
 
 def test_an_unreachable_cisco_gives_one_attention_line_per_source(

@@ -9,6 +9,9 @@ from network_analyser.platforms.textfsm_parse import parse
 from network_analyser.records.device import LandingPrivilege, Unknown, VersionFacts
 
 _TEMPLATES: Final = "cisco_nxos"
+_BRACKETED_SUFFIX: Final = re.compile(r"(?:\s*\[[^\]]*\])+\s*$")
+"""What NX-OS prints after the release: `[build 7.0(3)I7(8.18)]`, `[Feature Release]`. It is
+dropped before the value is checked, so the release reads as one word (story 45; #137)."""
 _ROLES: Final = re.compile(r"^\s*roles:(.*)$", re.MULTILINE)
 _ROLE: Final = re.compile(r"[A-Za-z0-9._-]{1,64}")
 _TOO_LOW_ROLES: Final = frozenset({"priv-0", "priv-1"})
@@ -23,7 +26,9 @@ def read_version(text: str) -> VersionFacts:
     return VersionFacts(
         hostname=fields.word(row, "hostname", "hostname"),
         model=fields.word(row, "platform", "model"),
-        software_version=fields.word(row, "os", "software version"),
+        software_version=fields.word(
+            {"os": _BRACKETED_SUFFIX.sub("", fields.text(row, "os"))}, "os", "software version"
+        ),
         serials=fields.serials(fields.text_list(row, "serial")),
     )
 

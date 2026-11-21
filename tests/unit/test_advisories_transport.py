@@ -170,7 +170,7 @@ def test_windows_proxy_setting_is_used(monkeypatch: pytest.MonkeyPatch) -> None:
 
     fenced(request())
 
-    assert opener.opened[0]["tunnel"] == ("proxy.example", 8080)
+    assert opener.opened[0]["proxy"] == ("proxy.example", 8080)
 
 
 def test_an_explicit_proxy_wins_over_windows(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -184,7 +184,7 @@ def test_an_explicit_proxy_wins_over_windows(monkeypatch: pytest.MonkeyPatch) ->
 
     fenced(request())
 
-    assert opener.opened[0]["tunnel"] == ("chosen.example", 3128)
+    assert opener.opened[0]["proxy"] == ("chosen.example", 3128)
 
 
 def test_proxy_environment_variables_are_never_read(
@@ -198,7 +198,7 @@ def test_proxy_environment_variables_are_never_read(
 
     fenced(request())
 
-    assert opener.opened[0]["tunnel"] is None
+    assert opener.opened[0]["proxy"] is None
 
 
 def test_a_proxy_setting_the_tool_cannot_use_stops_the_run(

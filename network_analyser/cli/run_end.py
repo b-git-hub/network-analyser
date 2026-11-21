@@ -62,8 +62,11 @@ _SOURCES: Final = (
     ("suggestions", "Cisco Software Suggestion"),
     ("compatible", "Cisco Software Suggestion"),
 )
-"""One Needs-attention line per source; the two Software Suggestion calls share one name."""
+"""One Needs-attention line per name, first reason wins: the two Software Suggestion calls share
+one name (#131)."""
 _REJECTED: Final = REJECTED
+_ALL_SOURCES: Final = "Cisco lookups"
+"""The subject of the one line a rejected key gives, however many sources it stopped."""
 _KEY_STEP: Final = f'Run "{PROG} cisco-key set" to store a working key.'
 
 
@@ -218,14 +221,19 @@ def _attention(
     if not lookups.ran:
         return ()  # there was nothing Cisco could be asked, so no source was down
     lines: list[str] = []
+    named: set[str] = set()
+    key_rejected = False
     for name, shown in _SOURCES:
         source = getattr(answers, name)
-        if isinstance(source, SourceUnavailable):
-            line = f"{shown} did not run: {source.reason}."
-            if source.reason == _REJECTED:
-                line = f"{line} {_KEY_STEP}"
-            if line not in lines:
-                lines.append(line)
+        if not isinstance(source, SourceUnavailable) or shown in named:
+            continue
+        named.add(shown)
+        if source.reason == _REJECTED:
+            if not key_rejected:
+                lines.append(f"{_ALL_SOURCES} did not run: {_REJECTED}. {_KEY_STEP}")
+                key_rejected = True
+            continue
+        lines.append(f"{shown} did not run: {source.reason}.")
     return tuple(lines)
 
 
