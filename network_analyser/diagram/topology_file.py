@@ -95,11 +95,12 @@ class DeviceAdvice:
 
     Attributes:
         known: True only when the file holds an advice record for this device.
-        outcome: its Advisory outcome; None when the file records none.
-        upgrade_target: the release to move to; None when the file records null or none.
-        target_recorded: True when the file records the Upgrade Target as either a release
-            or null. False when it is unknown or missing, so a null is never confused with
-            a value this topology.json does not hold.
+        outcome: its Advisory outcome, as fixed text; None when the file records none.
+        upgrade_target: the release to move to, or fixed text such as `no fix in Train T`;
+            None when the file records null or none.
+        target_recorded: True when the file records an `upgrade_target` key whose value is
+            text or null. False when it is unknown or missing, so a null is never confused
+            with a value this topology.json does not hold.
         latest_release: the newest release; None when the file records none.
         latest_in_train: the newest release in its Train; None when the file records none.
     """
@@ -134,7 +135,8 @@ def device_advice(device: Mapping[str, Plain]) -> DeviceAdvice:
         known=True,
         outcome=_text_field(recorded, "outcome"),
         upgrade_target=target if isinstance(target, str) else None,
-        target_recorded=target is None or isinstance(target, str),
+        target_recorded="upgrade_target" in recorded
+        and (target is None or isinstance(target, str)),
         latest_release=_text_field(recorded, "latest_release"),
         latest_in_train=_text_field(recorded, "latest_in_train"),
     )

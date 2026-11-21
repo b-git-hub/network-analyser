@@ -7,9 +7,9 @@ Every decision about what the Map shows on a device box is made here, from the r
   (Critical, High, Medium or Low). A device with no Findings has no badge, not a `0`.
 - The tag shows the device's upgrade path: its Upgrade Target, `no fix in Train` when its
   Advisory outcome reports matches but no release in its Train clears them, or
-  `? could not check` when the Advisory outcome says so. A device with no advice, or with an
-  advice record whose Upgrade Target this file does not hold, has no tag: the tool never
-  guesses (story 97; spec #92, Further Notes).
+  `? could not check` when the Advisory outcome says so. A device whose advice is absent,
+  whose Upgrade Target is unknown, or whose outcome says there are no Critical or High
+  Advisories, has no tag: the tool never guesses (story 97; spec #92, Further Notes).
 - The legend explains both marks to someone reading the Map (story 98).
 
 Positions stay in `layout.place`, so a badge or tag can never move a device.
@@ -34,7 +34,10 @@ COULD_NOT_CHECK_LEGEND: Final = "? could not check = its Advisories could not be
 NO_FIX: Final = "no fix in Train"
 COULD_NOT_CHECK: Final = "? could not check"
 _COULD_NOT_CHECK_PREFIX: Final = "could not check"
-_NO_ADVISORIES_PREFIX: Final = "no known Critical/High Advisories"
+_NO_FIX_PREFIX: Final = "no fix in Train"
+_NO_ADVISORIES: Final = "no Critical/High Advisories"
+_NO_ADVISORIES_PREFIXES: Final = ("no known Critical/High Advisories", _NO_ADVISORIES)
+_NOT_AVAILABLE: Final = "not available"
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,10 +119,16 @@ def _tag(advice: DeviceAdvice) -> tuple[str | None, str]:
         return None, ""
     if advice.outcome is not None and advice.outcome.startswith(_COULD_NOT_CHECK_PREFIX):
         return COULD_NOT_CHECK, "could-not-check"
-    if advice.upgrade_target:
-        return f"\u2191 {advice.upgrade_target}", "target"
-    if advice.target_recorded and (
-        advice.outcome is not None and not advice.outcome.startswith(_NO_ADVISORIES_PREFIX)
+    target = advice.upgrade_target
+    if target is not None and target.startswith(_NO_FIX_PREFIX):
+        return NO_FIX, "no-fix"
+    if target and target not in (_NO_ADVISORIES, _NOT_AVAILABLE):
+        return f"\u2191 {target}", "target"
+    if (
+        target is None
+        and advice.target_recorded
+        and advice.outcome is not None
+        and not advice.outcome.startswith(_NO_ADVISORIES_PREFIXES)
     ):
         return NO_FIX, "no-fix"
     return None, ""

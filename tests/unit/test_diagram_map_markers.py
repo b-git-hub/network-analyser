@@ -10,11 +10,13 @@ import hashlib
 import json
 import re
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from network_analyser import diagram
+from network_analyser.cli import ExitCode, main
 from tests.support.topology_documents import device, document, link, read
 
 HOSTILE = "</script><img src=x onerror=alert(1)>\"'&\u2028"
@@ -98,6 +100,21 @@ def test_a_badge_counts_a_device_s_findings_and_takes_its_worst_level() -> None:
     ]
 
 
+def test_the_badge_colour_follows_the_device_s_worst_level() -> None:
+    data = _switches()
+    data["findings"] = [  # type: ignore[index]
+        _finding("finding-1", "Low", "dev-S1"),
+        _finding("finding-2", "High", "dev-S1"),
+    ]
+
+    page = _page(data)
+
+    assert _marker(data, "dev-S1")["level"] == "High"
+    assert "levelClass(m.level)" in _script(page)
+    for level in ("critical", "high", "medium", "low"):
+        assert f".marker.count.{level} rect" in page
+
+
 def test_a_device_with_no_findings_gets_no_badge() -> None:
     data = _switches()
     data["findings"] = [_finding("finding-1", "High", "dev-S1")]  # type: ignore[index]
@@ -150,6 +167,33 @@ def test_a_finding_from_before_the_scale_does_not_count_towards_a_badge() -> Non
             None,
             "",
         ),
+        (
+            {"outcome": "no Critical/High Advisories", "upgrade_target": None},
+            None,
+            "",
+        ),
+        (
+            {
+                "outcome": "1 Advisory matches",
+                "upgrade_target": "no fix in Train 17.9",
+            },
+            "no fix in Train",
+            "no-fix",
+        ),
+        (
+            {"outcome": "1 Advisory matches", "upgrade_target": "not available"},
+            None,
+            "",
+        ),
+        (
+            {
+                "outcome": "no Critical/High Advisories",
+                "upgrade_target": "no Critical/High Advisories",
+            },
+            None,
+            "",
+        ),
+        ({"outcome": "1 Advisory matches"}, None, ""),
     ],
 )
 def test_a_device_s_tag_shows_its_upgrade_path(
@@ -236,6 +280,71 @@ def test_badges_and_tags_do_not_move_any_device() -> None:
     }
 
     assert _data(_page(quiet))["layout"]["positions"] == _data(_page(marked))["layout"]["positions"]
+
+
+def test_render_redraws_the_markers_from_topology_json(tmp_path: Path) -> None:
+    data = _switches()
+    data["devices"][0]["hostname"] = HOSTILE  # type: ignore[index]
+    data["findings"] = [_finding("finding-1", "Critical", "dev-S1")]  # type: ignore[index]
+    data["devices"][0]["advice"] = {  # type: ignore[index]
+        "outcome": "1 Advisory matches",
+        "upgrade_target": "17.12.8",
+    }
+    data["devices"][1]["advice"] = {  # type: ignore[index]
+        "outcome": "2 Advisories match",
+        "upgrade_target": None,
+    }
+    data["devices"][2]["advice"] = {  # type: ignore[index]
+        "outcome": "could not check: show version was not read",
+        "upgrade_target": None,
+    }
+    (tmp_path / "topology.json").write_text(json.dumps(data), encoding="utf-8")
+
+    assert main(["render", str(tmp_path)], elevated=lambda: False) == ExitCode.CLEAN
+
+    page = (tmp_path / "diagram.html").read_text(encoding="utf-8")
+    markers = _data(page)["markers"]
+    assert [(m["device"], m["count"], m["level"], m["tag"]) for m in markers["devices"]] == [
+        ("dev-S1", 1, "Critical", "\u2191 17.12.8"),
+        ("dev-S2", 0, "", "no fix in Train"),
+        ("dev-S3", 0, "", "? could not check"),
+    ]
+    assert markers["legend"]["badge"] == BADGE_LEGEND
+    assert markers["legend"]["target"] == TARGET_LEGEND
+    assert markers["legend"]["no_fix"] == NO_FIX_LEGEND
+    assert markers["legend"]["could_not_check"] == COULD_NOT_CHECK_LEGEND
+    for level in ("critical", "high", "medium", "low"):
+        assert f".marker.count.{level} rect" in page
+    assert "<img" not in page
+    script = _script(page)
+    assert page.count("</script>") == 2
+    assert "default-src 'none'" in page
+    assert f"script-src 'sha256-{_digest(script)}'" in page
+    for call in ("fetch(", "XMLHttpRequest", "WebSocket", "sendBeacon", "import("):
+        assert call not in script
+
+
+def test_render_keeps_every_device_in_place_when_it_adds_markers(tmp_path: Path) -> None:
+    quiet, marked = tmp_path / "quiet", tmp_path / "marked"
+    quiet.mkdir()
+    marked.mkdir()
+    data = _switches()
+    (quiet / "topology.json").write_text(json.dumps(data), encoding="utf-8")
+    data["findings"] = [_finding("finding-1", "Critical", "dev-S1")]  # type: ignore[index]
+    data["devices"][0]["advice"] = {  # type: ignore[index]
+        "outcome": "1 Advisory matches",
+        "upgrade_target": "17.12.8",
+    }
+    (marked / "topology.json").write_text(json.dumps(data), encoding="utf-8")
+
+    for folder in (quiet, marked):
+        assert main(["render", str(folder)], elevated=lambda: False) == ExitCode.CLEAN
+
+    positions = [
+        _data((folder / "diagram.html").read_text(encoding="utf-8"))["layout"]["positions"]
+        for folder in (quiet, marked)
+    ]
+    assert positions[0] == positions[1]
 
 
 def test_markers_are_drawn_on_the_map_only() -> None:

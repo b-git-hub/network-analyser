@@ -391,7 +391,7 @@
     }
     const tag = str(m.tag);
     if (tag) {
-      const label = short(tag, 24), w = Math.min(128, 14 + label.length * 6.2);
+      const label = short(tag, 18), w = Math.min(128, 14 + label.length * 6.2);
       out += '<g class="marker tag ' + esc(str(m.tag_kind) || '') + '" transform="translate(0,20)">' +
         '<title>' + esc(tag) + '</title>' +
         '<rect x="' + (-w / 2).toFixed(1) + '" y="3" width="' + w.toFixed(1) + '" height="15" rx="3"/>' +

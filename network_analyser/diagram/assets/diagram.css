@@ -106,7 +106,7 @@ header.top h1{font-size:15px;margin:0;font-weight:650}
 .edge.mk-bad .ln{stroke:var(--bad)}
 .edge.mk-noisy .ln{stroke:var(--warn);opacity:.8}
 .edge.mk-conflict .ln{stroke:var(--conflict)}
-.node.has-bad rect{stroke:var(--bad);stroke-width:2.4}
+.node.has-bad > rect{stroke:var(--bad);stroke-width:2.4}
 
 /* Map badges and Upgrade Target tags (#109, stories 96-98) */
 .marker{pointer-events:none}
@@ -125,7 +125,7 @@ header.top h1{font-size:15px;margin:0;font-weight:650}
 @media (prefers-color-scheme: dark){ .marker.count text{fill:#0f141a} }
 
 .node.faded{opacity:.28}
-.node.centre rect{stroke-width:2.4}
+.node.centre > rect{stroke-width:2.4}
 .edge.focus .ln{stroke:var(--accent);stroke-width:3}
 
 /* Routing view */

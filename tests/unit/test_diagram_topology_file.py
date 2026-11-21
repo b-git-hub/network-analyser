@@ -365,6 +365,15 @@ def test_a_null_upgrade_target_is_recorded_but_an_unknown_one_is_not() -> None:
     assert diagram.device_advice(second).target_recorded is False
 
 
+def test_a_missing_upgrade_target_is_not_read_as_a_null_one() -> None:
+    document = _document()
+    document["devices"][0]["advice"] = {"outcome": "1 Advisory matches"}
+
+    advice = diagram.device_advice(_content(document)["devices"][0])
+
+    assert (advice.upgrade_target, advice.target_recorded) == (None, False)
+
+
 def test_a_null_advice_record_reads_as_not_known() -> None:
     document = _document()
     document["devices"][0]["advice"] = None
