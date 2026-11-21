@@ -24,6 +24,7 @@ from network_analyser.records.platform import CredentialSetResult
 from network_analyser.records.run_request import RunRequest
 from network_analyser.records.run_summary import RunReport, RunReportFacts
 from network_analyser.records.sweep import SweepResult
+from network_analyser.records.topology import AnalysisResults, CiscoLookups
 
 NOT_WRITTEN = (
     "Warning: run-report.html could not be written in the Run folder. The rest of this Run's "
@@ -61,6 +62,10 @@ class Draft:
         ending: completed once the crawl returns; stopped on Ctrl+C; crashed until then.
         ctrl_c: True when Ctrl+C raised out of the crawl, so the reason is that press.
         captured: what the crawl kept. None when it never started.
+        analysis_results: Analysis's Run-end results, Cisco's answers included (#104);
+            None when the Run never got there, so the report analyses offline.
+        cisco_lookups: whether Cisco was asked and when (#104).
+        extra_attention: the Run-end's Needs-attention lines, such as a Cisco source down.
     """
 
     folder: run_output.RunFolder
@@ -72,6 +77,9 @@ class Draft:
     ending: RunEnding = RunEnding.CRASHED
     ctrl_c: bool = False
     captured: Captured | None = None
+    analysis_results: AnalysisResults | None = None
+    cisco_lookups: CiscoLookups | None = None
+    extra_attention: tuple[str, ...] = ()
 
     def capture(self, captured: Captured) -> None:
         """Keep what the crawl had. Called from the crawl's own finally."""
@@ -101,17 +109,26 @@ def _report(draft: Draft) -> RunReport:
     if draft.ending is RunEnding.STOPPED and stopped is None and draft.ctrl_c:
         stopped = STOPPED_BY_CTRL_C
     built = topology.build(records, scope=draft.request.scope.value)
-    # #94: the report shows Analysis Findings too. It does not use the online step's answers;
-    # the Run-end results in topology.json are the ones #104 and #110 will share.
-    results = analysis.analyse(AnalysisInput(topology=built))
-    built = dataclasses.replace(built, findings=results.findings, analysis=results.summary)
+    # #94/#104: the report shows Analysis Findings too, with the Run-end's own results
+    # (Cisco's answers included) when it got that far; otherwise it analyses offline.
+    results = (
+        draft.analysis_results
+        if draft.analysis_results is not None
+        else analysis.analyse(AnalysisInput(topology=built))
+    )
+    built = dataclasses.replace(
+        built,
+        findings=results.findings,
+        analysis=results.summary,
+        cisco_lookups=draft.cisco_lookups or CiscoLookups(ran=False),
+    )
     crawl = CrawlResult(
         devices=records,
         stopped=stopped,
         credential_sets=credential_sets,
         sweep=sweep,
     )
-    attention = tuple(summary.attention_items(crawl, backups))
+    attention = tuple(summary.attention_items(crawl, backups, extra=draft.extra_attention))
     if draft.ending is RunEnding.CRASHED:
         attention = (*attention, _CRASHED)
     return RunReport(

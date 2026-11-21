@@ -1,6 +1,7 @@
 """The TOML run file given with `--from` (spec #37 stories 2, 12-13; decision #31).
 
-It holds only `label`, `scope`, `exclude`, `seeds`, `parallel`, `failure_budget` and `sweep`.
+It holds only `label`, `scope`, `exclude`, `seeds`, `parallel`, `failure_budget`, `sweep` and
+`cisco_lookups`.
 It is checked strictly and fails closed: a key that looks like a secret, `runs_dir`, any
 other unknown key, or a value of the wrong kind refuses the Run. Values are never echoed,
 and neither is the parser's error text, in case a line holds a secret typed by mistake.
@@ -16,7 +17,16 @@ from network_analyser import run_output
 from network_analyser.cli.parser import FAILURE_BUDGET_MAX, PARALLEL_MAX
 from network_analyser.cli.text import escape_controls
 
-RUN_FILE_KEYS = ("label", "scope", "exclude", "seeds", "parallel", "failure_budget", "sweep")
+RUN_FILE_KEYS = (
+    "label",
+    "scope",
+    "exclude",
+    "seeds",
+    "parallel",
+    "failure_budget",
+    "sweep",
+    "cisco_lookups",
+)
 
 # The same names `tests/unit/test_cli.py` keeps out of the option list.
 _SECRET_LIKE = re.compile(r"pass|secret|key(?!s)|token|pwd|credential", re.IGNORECASE)
@@ -40,6 +50,7 @@ class RunFile:
     parallel: int | None = None
     failure_budget: int | None = None
     sweep: bool | None = None
+    cisco_lookups: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +82,7 @@ def load(path: str) -> RunFile | RunFileRefused:
         parallel=_get(checked, "parallel", int),
         failure_budget=_get(checked, "failure_budget", int),
         sweep=_get(checked, "sweep", bool),
+        cisco_lookups=_get(checked, "cisco_lookups", bool),
     )
 
 
@@ -143,7 +155,7 @@ def _check_value(key: str, value: object) -> object:
             return _whole_number(value, PARALLEL_MAX)
         case "failure_budget":
             return _whole_number(value, FAILURE_BUDGET_MAX)
-        case _:  # "sweep": the keys were checked before the values
+        case _:  # "sweep" and "cisco_lookups": the keys were checked before the values
             return value if isinstance(value, bool) else _Problem("must be true or false")
 
 

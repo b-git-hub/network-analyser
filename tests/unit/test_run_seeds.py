@@ -70,8 +70,8 @@ def test_a_run_visits_its_seed_audits_every_step_and_ends_clean(run: Runner) -> 
         "command_sent",
     ]
     # Then the collection commands (#59); this fake device denies them all, each audited.
-    assert set(steps[12:-2]) == {"command_sent", "parse_failed"}
-    assert steps[-2:] == ["device_finished", "run_ended"]
+    assert set(steps[12:-3]) == {"command_sent", "parse_failed"}
+    assert steps[-3:] == ["device_finished", "analysis", "run_ended"]
     commands = [line["command"] for line in _audit() if line["event"] == "command_sent"]
     assert commands[:7] == [
         "terminal length 0",

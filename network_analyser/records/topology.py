@@ -782,6 +782,22 @@ class UnplacedNextHop:
 
 
 @dataclass(frozen=True, slots=True)
+class CiscoLookups:
+    """Whether Cisco was asked this Run, and when (ticket #104).
+
+    It is the top-level `cisco_lookups` record in `topology.json`, so every page that says
+    whether lookups ran reads one shape.
+
+    Attributes:
+        ran: True only when `advisories` was asked, so a key was unlocked.
+        when: when the lookups ran, as fixed ISO 8601 text; None when Cisco was not asked.
+    """
+
+    ran: bool
+    when: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Topology:
     """The devices and Links found in a Run, and everything learned about them.
 
@@ -804,3 +820,5 @@ class Topology:
     """Next hops with no Link and no Shared Segment (#66). Empty when every hop was placed."""
     analysis: AnalysisSummary | None = None
     """Analysis's advice and Check list (#94); None until Analysis has run."""
+    cisco_lookups: CiscoLookups | None = None
+    """Whether Cisco was asked and when (#104); None when this Run did not ask."""

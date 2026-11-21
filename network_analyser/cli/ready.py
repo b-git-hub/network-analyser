@@ -25,6 +25,8 @@ def ready_block(
     sets: tuple[CredentialSetView, ...],
     runs_parent: Sourced[Path],
     started: datetime,
+    *,
+    key_stored: bool,
 ) -> str:
     """Return the Ready-to-start block, one line per setting (story 14)."""
     folder = runs_parent.value / run_output.run_folder_name(started, request.label.value)
@@ -59,6 +61,7 @@ def ready_block(
             f"{budget.value} {logins} per set, then it is retired ({budget.source.value})",
         )
     )
+    lines.append(_row("Cisco lookups", _lookups(request, key_stored=key_stored)))
     lines.append(_row("Options", _options(request)))
     return "\n".join(lines)
 
@@ -81,6 +84,14 @@ def _describe_set(view: CredentialSetView) -> str:
     limit = f"{view.platform_limit.value} only" if view.platform_limit else "any Platform"
     username = escape_controls(view.username, limit=_SHOWN_AT_MOST)
     return f"{username}: {limit}; password {HELD_IN_MEMORY}"
+
+
+def _lookups(request: RunRequest, *, key_stored: bool) -> str:
+    """Say whether Cisco lookups are on and whether a key is stored (story 7)."""
+    switch = request.cisco_lookups
+    state = "on" if switch.value else "off"
+    key = "Cisco API key stored" if key_stored else "no Cisco API key stored"
+    return f"{state} ({switch.source.value}); {key}"
 
 
 def _options(request: RunRequest) -> str:

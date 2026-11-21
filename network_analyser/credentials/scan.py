@@ -9,6 +9,10 @@ can warn once, never saying which set matched.
 The scan lives in `credentials`, so the modules that write never hold a secret: they hand
 text in and get redacted text back. The values are revealed only for the search itself and
 never kept anywhere else.
+
+The scan keeps its own copy of each value from the moment it is typed, so it can still redact
+after the Run has wiped its `Secret`s (`Secret.wipe()`, ADR 0007). That copy is dropped by
+`forget()` once every output is written.
 """
 
 import threading
@@ -23,11 +27,11 @@ BLOCKED: Final = "[blocked]"
 class SecretScan:
     """The Run's secrets, watched for in every line the tool writes."""
 
-    __slots__ = ("__hits", "__lock", "__secrets")
+    __slots__ = ("__hits", "__lock", "__values")
 
     def __init__(self) -> None:
         """Start with nothing to watch for. Add secrets with `watch` as they are typed."""
-        self.__secrets: list[Secret] = []
+        self.__values: list[str] = []
         self.__hits = 0
         self.__lock: Final = threading.Lock()
 
@@ -35,8 +39,17 @@ class SecretScan:
         """Look for `secret` in everything scanned from now on. An empty one is ignored."""
         if secret.is_empty():
             return
+        value = secret.reveal()
         with self.__lock:
-            self.__secrets.append(secret)
+            self.__values.append(value)
+
+    def forget(self) -> None:
+        """Drop every watched value once the Run's outputs are written.
+
+        The hit count stays, so the one warning at the Run's end still holds.
+        """
+        with self.__lock:
+            self.__values.clear()
 
     def contains_secret(self, text: str) -> tuple[str, int]:
         """Return `text` with every watched secret replaced by `[blocked]`, and the hit count.
@@ -45,8 +58,8 @@ class SecretScan:
         left showing. Safe to call from several threads at once.
         """
         with self.__lock:
-            secrets = tuple(self.__secrets)
-        stretches = _merge(_matches(text, secrets))
+            values = tuple(self.__values)
+        stretches = _merge(_matches(text, values))
         if not stretches:
             return text, 0
         parts: list[str] = []
@@ -66,8 +79,8 @@ class SecretScan:
         will need again: the caller refuses it instead.
         """
         with self.__lock:
-            secrets = tuple(self.__secrets)
-        return bool(_matches(text, secrets))
+            values = tuple(self.__values)
+        return bool(_matches(text, values))
 
     @property
     def hits(self) -> int:
@@ -83,7 +96,7 @@ class SecretScan:
 
     @override
     def __repr__(self) -> str:
-        return f"SecretScan({len(self.__secrets)} secrets, {HELD_IN_MEMORY})"
+        return f"SecretScan({len(self.__values)} secrets, {HELD_IN_MEMORY})"
 
     @override
     def __reduce_ex__(self, protocol: object) -> NoReturn:
@@ -91,11 +104,10 @@ class SecretScan:
         raise TypeError(msg)
 
 
-def _matches(text: str, secrets: tuple[Secret, ...]) -> list[tuple[int, int]]:
+def _matches(text: str, values: tuple[str, ...]) -> list[tuple[int, int]]:
     """Every (start, stop) where a secret occurs, overlapping occurrences included."""
     found: list[tuple[int, int]] = []
-    for secret in secrets:
-        value = secret.reveal()
+    for value in values:
         start = text.find(value)
         while start != -1:
             found.append((start, start + len(value)))

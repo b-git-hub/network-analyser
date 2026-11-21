@@ -7,7 +7,9 @@ pickled or copied; it has no length; and `reveal()` is the one way to the value,
 use is easy to find (tests/arch checks where `reveal()` may be called).
 
 Python cannot wipe a string from memory, so a `Secret` promises only that the tool never
-shows or writes the value, not that the value is erased when the Run ends.
+shows or writes the value, not that the value is erased when the Run ends. `wipe()` drops the
+reference the object holds and refuses every later `reveal()`; the Run calls it at its end,
+before it goes online, so the tool holds no device secret while Cisco is asked (ADR 0007).
 """
 
 import hmac
@@ -24,11 +26,15 @@ class Secret:
     needs it (Paramiko for a login, pyrage for a lock), and never keep the result.
     """
 
-    __slots__ = ("__value",)
+    __slots__ = ("__value", "__wiped")
+
+    __value: str
+    __wiped: bool
 
     def __init__(self, value: str) -> None:
         """Hold `value`, typed at a hidden prompt."""
-        self.__value: Final = value
+        self.__value: str = value
+        self.__wiped = False
 
     @override
     def __init_subclass__(cls) -> NoReturn:
@@ -37,12 +43,34 @@ class Secret:
         raise TypeError(msg)
 
     def reveal(self) -> str:
-        """Return the value. The only way to it."""
+        """Return the value. The only way to it.
+
+        Raises:
+            RuntimeError: the secret was wiped, so it must never be used again.
+        """
+        if self.__wiped:
+            msg = "this secret was wiped at the end of the Run"
+            raise RuntimeError(msg)
         return self.__value
+
+    def wipe(self) -> None:
+        """Drop the value and refuse every later `reveal()`, at the Run's end (ADR 0007).
+
+        Python cannot erase the characters of a string already made, so this releases the
+        reference this object holds and makes a later use a bug. The Run calls it once every
+        Backup is locked and before Cisco is asked. A wiped secret still `is_empty()`.
+        """
+        self.__value = ""
+        self.__wiped = True
+
+    @property
+    def wiped(self) -> bool:
+        """Say whether `wipe()` was called, for the Run end to prove no secret is held."""
+        return self.__wiped
 
     def same_as(self, other: Secret) -> bool:
         """Say, in constant time, whether two secrets hold the same value (story 27)."""
-        return hmac.compare_digest(self.__value.encode(), other.__value.encode())
+        return hmac.compare_digest(self.reveal().encode(), other.reveal().encode())
 
     def is_empty(self) -> bool:
         """Say whether nothing was typed, so an empty password can be refused (story 24)."""

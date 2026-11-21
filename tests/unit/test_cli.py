@@ -96,6 +96,8 @@ def test_every_run_flag_of_the_frozen_surface_parses(
             "log",
             "--proxy",
             "proxy.example:8080",
+            "--cisco-lookups",
+            "off",
         ]
     )
 
@@ -125,6 +127,7 @@ REFUSED = [
     pytest.param(["run", "--progress", "fancy"], id="unknown progress view"),
     pytest.param(["run", "--proxy", "http://proxy.example:8080"], id="proxy with a scheme"),
     pytest.param(["run", "--proxy", "proxy.example"], id="proxy without a port"),
+    pytest.param(["run", "--cisco-lookups", "maybe"], id="lookups not on or off"),
     pytest.param(["run", "--par", "5"], id="abbreviated flag"),
     pytest.param(["role-snippet", "pan-os"], id="unsupported platform"),
     pytest.param(["trust-key", "192.0.2.10"], id="trust-key without fingerprint"),

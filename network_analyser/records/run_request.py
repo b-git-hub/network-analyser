@@ -62,6 +62,7 @@ class RunRequest:
         failure_budget: failed logins a Credential Set may spend before it is retired.
         sweep: whether the Scope is swept on TCP 22 for more Seeds.
         sweep_inflight: probes in flight during a Sweep. Never above 100 (#55).
+        cisco_lookups: whether Cisco is asked at the Run's end (#104).
         timeouts: how long each step with a device may take.
     """
 
@@ -73,4 +74,5 @@ class RunRequest:
     failure_budget: Sourced[int]
     sweep: Sourced[bool]
     sweep_inflight: Sourced[int] = Sourced(100, Source.DEFAULT)
+    cisco_lookups: Sourced[bool] = Sourced(True, Source.DEFAULT)  # noqa: FBT003 (default on)
     timeouts: Timeouts = Timeouts()

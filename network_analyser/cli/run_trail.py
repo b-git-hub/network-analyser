@@ -15,6 +15,8 @@ from network_analyser import _winsys, run_output
 from network_analyser._version import __version__
 from network_analyser.cli import backup_summary, summary
 from network_analyser.cli.exit_codes import ExitCode
+from network_analyser.cli.run_end import EndOutcome
+from network_analyser.cli.run_topology import Conclusion
 from network_analyser.credentials import CredentialSets, SecretScan
 from network_analyser.records import RunRequest
 from network_analyser.records.backup import BackupResults
@@ -35,16 +37,21 @@ AUDIT_STOP = (
 )
 
 type Crawl = Callable[[run_output.AuditLog], tuple[CrawlResult, BackupResults]]
+type EndStep = Callable[[run_output.AuditLog, CrawlResult], EndOutcome]
 
 
-def run_with_audit_trail(
+def run_with_audit_trail(  # noqa: PLR0913, PLR0917 (the Run's trail, every dependency explicit)
     request: RunRequest,
     sets: CredentialSets,
     folder: run_output.RunFolder,
     scan: SecretScan,
     crawl: Crawl,
-) -> ExitCode:
-    """Open `audit.log`, record the Run's start, run `crawl`, and record how the Run ended.
+    end: EndStep,
+) -> Conclusion:
+    """Open `audit.log`, record the Run's start, run `crawl`, then `end`, then its end.
+
+    `end` is the Run's end (#104): it unlocks the key, asks Cisco, runs Analysis and writes
+    the outputs, inside the trail, so its `analysis` event lands before the Run-end event.
 
     Raises:
         KeyboardInterrupt: Ctrl+C during the Run; it is recorded first.
@@ -61,6 +68,7 @@ def run_with_audit_trail(
         unvisited = len(result.devices) - visited + len(result.unvisited)
         written = backup_summary.written(backups)
         ending = RunEnding.STOPPED if result.stopped else RunEnding.COMPLETED
+        outcome = end(audit, result)
         audit.record(RunEnded(ending, visited, unvisited, written, scan.hits))
     except run_output.AuditLogError:
         return _audit_stop()
@@ -73,8 +81,24 @@ def run_with_audit_trail(
         raise
     finally:
         audit.close()
-    print(summary.final_summary(result, backups, elapsed_s=time.monotonic() - started))
-    return summary.exit_code(result, backups, scan_hits=scan.hits)
+    print(
+        summary.final_summary(
+            result,
+            backups,
+            elapsed_s=time.monotonic() - started,
+            extra_attention=outcome.attention,
+        )
+    )
+    return Conclusion(
+        summary.exit_code(
+            result,
+            backups,
+            scan_hits=scan.hits,
+            extra_attention=outcome.attention,
+        ),
+        written=outcome.written,
+        attempted=True,
+    )
 
 
 def _run_started(
@@ -103,9 +127,9 @@ def _record_last(audit: run_output.AuditLog, event: AuditEvent) -> None:
         audit.record(event)
 
 
-def _audit_stop() -> ExitCode:
+def _audit_stop() -> Conclusion:
     print(f"{AUDIT_STOP} No device was contacted.", file=sys.stderr)
-    return ExitCode.STOPPED
+    return Conclusion(ExitCode.STOPPED)
 
 
 def warn_of_scan_hits(scan: SecretScan) -> None:

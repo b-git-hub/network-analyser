@@ -115,6 +115,15 @@ class BackupPassphrase:
         """
         scan.watch(self.__secret)
 
+    def wipe(self) -> None:
+        """Wipe the Backup Passphrase at the Run's end, before Cisco is asked (ADR 0007)."""
+        self.__secret.wipe()
+
+    @property
+    def wiped(self) -> bool:
+        """Say whether the passphrase was wiped, for the Run end to prove it."""
+        return self.__secret.wiped
+
     @override
     def __init_subclass__(cls) -> NoReturn:
         """Refuse subclasses: one could add a way to the passphrase."""

@@ -21,7 +21,12 @@ from tests.support.fake_device import FakeNetwork
 
 BACKUP_CANARY = "CANARY-pp-4e7a-backup"
 DEVICE_CANARY = fake_device.DEVICE_CANARY
-FLAGS = ("--scope", "192.0.2.0/24", "--seed", "192.0.2.1")
+FLAGS = ("--scope", "192.0.2.0/24", "--seed", "192.0.2.1", "--cisco-lookups", "off")
+"""The Scope and Seed every Run test uses, with Cisco lookups off unless a test turns them on.
+
+A run with lookups on and no stored key rightly ends Needs-attention (story 35), so a test
+that does not test the online step stays offline. Pass `--cisco-lookups on` after these flags
+to ask Cisco; argparse keeps the last value."""
 
 
 @dataclass(frozen=True)

@@ -65,8 +65,17 @@ def scope_and_seeds(
         ),
         sweep=swept,
         sweep_inflight=_option(args.sweep_inflight, None, SWEEP_INFLIGHT_MAX),
+        cisco_lookups=_lookups(
+            getattr(args, "cisco_lookups", None), from_file=from_file.cisco_lookups
+        ),
         timeouts=_timeouts(args),
     )
+
+
+def _lookups(flag: str | None, *, from_file: bool | None) -> Sourced[bool]:
+    """The Cisco lookups switch: the flag, else the run file, else on (#104, story 8)."""
+    given = _given(None if flag is None else flag == "on", from_file)
+    return given or Sourced(True, Source.DEFAULT)  # noqa: FBT003 (the default is on)
 
 
 def _timeouts(args: argparse.Namespace) -> Timeouts:
