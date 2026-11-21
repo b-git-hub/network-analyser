@@ -164,6 +164,26 @@ def test_advisories_become_analysis_answers_with_cisco_s_detail() -> None:
     )
 
 
+def test_one_release_cisco_does_not_know_leaves_the_other_releases_answered() -> None:
+    unknown = ReleaseQuestion(CiscoOsType.IOS_XE, "17.99.1")
+    replies = _replies()
+    replies = replace(
+        replies,
+        advisories=(
+            AdvisoriesAnswer(unknown, (), unavailable="INVALID_IOS_VERSION"),
+            *replies.advisories,
+        ),
+    )
+
+    answers = run_analysis.analysis_answers(replies, _asked())
+
+    assert isinstance(answers.advisories, tuple)
+    bad, good = answers.advisories
+    assert (bad.release, bad.advisories, bad.unavailable) == ("17.99.1", (), "INVALID_IOS_VERSION")
+    assert good.unavailable is None
+    assert len(good.advisories) == 1
+
+
 def test_eox_becomes_one_answer_per_pid_and_per_release_asked() -> None:
     answers = run_analysis.analysis_answers(_replies(), _asked())
 

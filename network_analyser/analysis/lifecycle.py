@@ -38,6 +38,7 @@ from network_analyser.records.analysis import (
     SoftwareEox,
     SourceUnavailable,
 )
+from network_analyser.records.lookup_values import is_safe_pid
 from network_analyser.records.topology import (
     Check,
     CheckType,
@@ -71,6 +72,7 @@ SUGGESTED_RELEASE_CHECK: Final = Check(
 )
 """Story 77: a Low Finding when the release is not one Cisco suggests for its PID."""
 
+_PID_NOT_SENT: Final = "the PID was not sent to Cisco because it does not match the safe pattern"
 _EOX_SOURCE: Final = "Cisco EoX"
 _SUGGESTION_SOURCE: Final = "Cisco Software Suggestion"
 _REPLACE: Final = (
@@ -177,6 +179,9 @@ def suggested_release(data: AnalysisInput) -> tuple[Finding, ...]:
         model = device.model
         if not isinstance(model, str) or not model:
             findings.append(_suggested_could_not_check(device, "the model is not readable"))
+            continue
+        if not is_safe_pid(model):
+            findings.append(_suggested_could_not_check(device, _PID_NOT_SENT))
             continue
         answer = by_pid.get(model)
         if answer is None or not answer.releases:

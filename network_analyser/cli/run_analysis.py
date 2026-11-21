@@ -221,6 +221,7 @@ def _release_answer(answer: AdvisoriesAnswer) -> ReleaseAdvisories:
         release=question.release,
         advisories=tuple(_advisory(item, train, os_type) for item in answer.advisories),
         hardware_family=question.platform_alias,
+        unavailable=answer.unavailable,
     )
 
 
