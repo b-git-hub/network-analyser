@@ -198,6 +198,13 @@ class FakeCisco:
         rest = path.removeprefix(EOX_PREFIX)
         kind, _, tail = rest.partition("/")
         page_text, _, values_text = tail.partition("/")
+        if "?" in page_text:  # the documented query form: `/1?input1=release,OSType&input2=...`
+            page_text, _, query = page_text.partition("?")
+            values_text = ",".join(
+                value.partition(",")[0]
+                for name, value in _params(query).items()
+                if name.startswith("input")
+            )
         page = int(page_text)
         values = values_text.split(",")
         if kind == "EOXByProductID":
