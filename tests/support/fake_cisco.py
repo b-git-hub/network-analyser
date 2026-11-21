@@ -80,6 +80,14 @@ class FakeCisco:
     compatible_last_page: dict[str, int] = field(default_factory=dict)
     """The `paginationResponseRecord.lastIndex` one PID reports."""
 
+    advisory_errors: dict[tuple[str, str, str | None], tuple[int, str]] = field(
+        default_factory=dict
+    )
+    """An HTTP status and error code (empty for a bare body) for one openVuln question."""
+
+    compatible_errors: dict[str, tuple[int, str]] = field(default_factory=dict)
+    """An HTTP status and error code (empty for a bare body) for one chassis PID."""
+
     page_records: dict[tuple[str, int], list[dict[str, Any]]] = field(default_factory=dict)
     """Records for one EoX page, when a test needs paging instead of the maps above."""
 
@@ -181,8 +189,10 @@ class FakeCisco:
         if not is_safe_release(release):
             msg = f"release left without its pattern: {release!r}"
             raise UnsafeValueSentError(msg)
-        advisories = self.advisories.get((os_type, release, params.get("platformAlias")), [])
-        return _json(200, {"advisories": advisories})
+        key = (os_type, release, params.get("platformAlias"))
+        if key in self.advisory_errors:
+            return _error(*self.advisory_errors[key])
+        return _json(200, {"advisories": self.advisories.get(key, [])})
 
     def _eox(self, path: str) -> HttpResponse:
         rest = path.removeprefix(EOX_PREFIX)
@@ -190,10 +200,9 @@ class FakeCisco:
         page_text, _, values_text = tail.partition("/")
         page = int(page_text)
         values = values_text.split(",")
+        if kind == "EOXByProductID":
+            values = [_pid_from_wire(value) for value in values]
         for value in values:
-            if kind == "EOXByProductID" and not is_safe_pid(value):
-                msg = f"PID left without its pattern: {value!r}"
-                raise UnsafeValueSentError(msg)
             if kind == "EOXBySWReleaseString" and not is_safe_release(value):
                 msg = f"release left without its pattern: {value!r}"
                 raise UnsafeValueSentError(msg)
@@ -220,12 +229,11 @@ class FakeCisco:
         )
 
     def _suggestions(self, path: str) -> HttpResponse:
-        values = path.removeprefix(SUGGESTION_PREFIX).split(",")
+        values = [
+            _pid_from_wire(value) for value in path.removeprefix(SUGGESTION_PREFIX).split(",")
+        ]
         entries: list[dict[str, Any]] = []
         for value in values:
-            if not is_safe_pid(value):
-                msg = f"PID left without its pattern: {value!r}"
-                raise UnsafeValueSentError(msg)
             if value in self.suggestions:
                 entries.append(
                     {
@@ -244,10 +252,10 @@ class FakeCisco:
 
     def _compatible(self, path: str) -> HttpResponse:
         rest = path.removeprefix(COMPATIBLE_PREFIX)
-        product_id, _, query = rest.partition("?")
-        if not is_safe_pid(product_id):
-            msg = f"PID left without its pattern: {product_id!r}"
-            raise UnsafeValueSentError(msg)
+        wire_id, _, query = rest.partition("?")
+        product_id = _pid_from_wire(wire_id)
+        if product_id in self.compatible_errors:
+            return _error(*self.compatible_errors[product_id])
         page_text = _params(query).get("pageIndex", "1")
         if not page_text.isdigit() or int(page_text) < 1:
             msg = f"pageIndex was not a page number: {page_text!r}"
@@ -281,6 +289,22 @@ def _check_authorization(request: HttpRequest) -> None:
         raise UnsafeValueSentError(msg)
 
 
+def _pid_from_wire(wire: str) -> str:
+    """Return the PID a path segment names, proving it left the PC in its safe wire form.
+
+    A licence suffix's `/` may only arrive as `%2F`: a raw `/` would change the path, and any
+    other `%` is not a PID character at all.
+    """
+    if "/" in wire:
+        msg = f"a PID reached the path with a raw slash: {wire!r}"
+        raise UnsafeValueSentError(msg)
+    pid = wire.replace("%2F", "/")
+    if not is_safe_pid(pid):
+        msg = f"PID left without its pattern: {wire!r}"
+        raise UnsafeValueSentError(msg)
+    return pid
+
+
 def _params(query: str) -> dict[str, str]:
     params: dict[str, str] = {}
     for part in query.split("&"):
@@ -288,6 +312,10 @@ def _params(query: str) -> dict[str, str]:
             key, _, value = part.partition("=")
             params[key] = value
     return params
+
+
+def _error(status: int, code: str) -> HttpResponse:
+    return _json(status, {"errorCode": code, "errorMessage": "synthetic"} if code else {})
 
 
 def _json(status: int, document: object, headers: tuple[tuple[str, str], ...] = ()) -> HttpResponse:

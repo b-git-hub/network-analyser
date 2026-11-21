@@ -10,7 +10,6 @@ An NX-OS device also asks about its Nexus hardware family; a family that cannot 
 asks on release alone, and the Finding says so (story 46).
 """
 
-from network_analyser.analysis.patterns import valid_pid, valid_release
 from network_analyser.analysis.releases import family_of, hardware_family, normalise_release
 from network_analyser.records.analysis import (
     AnalysisInput,
@@ -20,6 +19,7 @@ from network_analyser.records.analysis import (
     OsType,
     ReleaseQuestion,
 )
+from network_analyser.records.lookup_values import is_safe_pid, is_safe_release
 from network_analyser.records.topology import VisitedDevice
 from network_analyser.records.unknown import Unknown
 
@@ -72,7 +72,7 @@ def _add_device_pids(pids: set[str], device: VisitedDevice) -> None:
 
 
 def _add_pid(pids: set[str], item: HardwareItem) -> None:
-    if valid_pid(item.pid):
+    if is_safe_pid(item.pid):
         pids.add(item.pid)
 
 
@@ -82,7 +82,7 @@ def _release_question(device: VisitedDevice) -> ReleaseQuestion | None:
     if os_type is None or not isinstance(device.software_version, str):
         return None
     release = normalise_release(device.software_version)
-    if not valid_release(release):
+    if not is_safe_release(release):
         return None
     family = hardware_family(device.model) if os_type is OsType.NX_OS else None
     return ReleaseQuestion(os_type, release, family)

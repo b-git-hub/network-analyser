@@ -2,8 +2,10 @@
 
 The token is requested at most once per Session, and only when a call needs it. An auth
 rejection from Cisco stops the Session: no further request is made, so a bad or revoked key is
-never hammered (story 36). Only a rate limit, a 5xx or a connection failure is retried, and
-only once, after `Retry-After` when Cisco sends it (story 19).
+never hammered (story 36). A key problem is only a 401, an auth-coded 403 or a 400
+`invalid_client` from the token endpoint; any other 4xx from `apix.cisco.com` fails that one
+call and the Session carries on (#131). Only a rate limit, a 5xx or a connection failure is
+retried, and only once, after `Retry-After` when Cisco sends it (story 19).
 
 Everything kept for the Audit log is a count (`CiscoCallTally`); the client ID, the secret and
 the token never leave this object except as the `Authorization` header of a request. All three
@@ -60,6 +62,9 @@ _TOKEN_LIMIT: Final = 8192
 _TOKEN_VALUE: Final = re.compile(r"[A-Za-z0-9._~+/-]{16,8192}={0,2}")
 """A token's characters only: a reply cannot inject a header with it (story 117)."""
 
+_INVALID_CLIENT: Final = "invalid_client"
+"""The error code the token endpoint gives a client ID or secret it does not know."""
+
 _HTTP_OK = 200
 _HTTP_BAD_REQUEST = 400
 _HTTP_UNAUTHORIZED = 401
@@ -75,6 +80,7 @@ class CallOutcome(Enum):
     OK = "ok"
     REJECTED = "rejected"
     UNAVAILABLE = "unavailable"
+    CALL_FAILED = "call failed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +88,8 @@ class Call:
     """One logical call's outcome.
 
     Attributes:
-        outcome: ok, rejected (never retried), or unavailable.
+        outcome: ok; rejected (the key is not usable, never retried, stops every call);
+            call failed (Cisco refused this one call, so the others carry on); or unavailable.
         response: the reply, when one came.
         reason: fixed text for an unavailable call.
         retryable: whether the single retry may be made (a limit, a 5xx or no connection).
@@ -257,40 +264,56 @@ class Session:
         self._pacer.back_off(delay)
         return self._attempt(endpoint, request, retry=True)
 
-    def _attempt(  # noqa: PLR0911 (one return per fixed outcome, each named)
-        self, endpoint: CiscoEndpoint, request: HttpRequest, *, retry: bool
-    ) -> Call:
+    def _attempt(self, endpoint: CiscoEndpoint, request: HttpRequest, *, retry: bool) -> Call:
         self._counts[endpoint][0] += 1
         if retry:
             self._counts[endpoint][2] += 1
         reply = self._transport(request)
         if isinstance(reply, TransportFailed):
             return Call(CallOutcome.UNAVAILABLE, None, reply.reason, retryable=True)
-        status = reply.status
-        if status == _HTTP_OK:
-            return Call(CallOutcome.OK, reply)
-        if status in {_HTTP_BAD_REQUEST, _HTTP_UNAUTHORIZED}:
-            return Call(CallOutcome.REJECTED, reply, REJECTED)
-        if status == _HTTP_FORBIDDEN:
-            code = header(reply, "X-Mashery-Error-Code") or ""
-            if code in AUTH_ERROR_CODES:
-                return Call(CallOutcome.REJECTED, reply, REJECTED)
-            if code in RATE_LIMIT_CODES:
-                return Call(
-                    CallOutcome.UNAVAILABLE, reply, "Cisco rate limited the calls", retryable=True
-                )
-            # A 403 with an unrecognised code is treated as auth, so it is never retried.
-            return Call(CallOutcome.REJECTED, reply, REJECTED)
-        if status == _HTTP_TOO_MANY_REQUESTS:
-            return Call(
-                CallOutcome.UNAVAILABLE, reply, "Cisco rate limited the calls", retryable=True
-            )
-        return Call(
-            CallOutcome.UNAVAILABLE,
-            reply,
-            f"Cisco returned HTTP {status}",
-            retryable=status >= _HTTP_SERVER_ERROR,
-        )
+        return _classified(endpoint, reply)
+
+
+def _classified(endpoint: CiscoEndpoint, reply: HttpResponse) -> Call:
+    """Say what one reply means: only a key problem is `REJECTED`, which stops every call.
+
+    A 401, an auth-coded 403 and, from the token endpoint, a 400 `invalid_client` mean the key
+    is not usable. A rate limit and a 5xx may be tried once more. Any other client error is that
+    one call's failure: `CALL_FAILED` from `apix.cisco.com`, never a rejected key (#131).
+    """
+    if reply.status == _HTTP_OK:
+        return Call(CallOutcome.OK, reply)
+    known = _key_or_limit(endpoint, reply)
+    if known is not None:
+        return known
+    reason = f"Cisco returned HTTP {reply.status}"
+    if reply.status >= _HTTP_SERVER_ERROR:
+        return Call(CallOutcome.UNAVAILABLE, reply, reason, retryable=True)
+    if endpoint is not CiscoEndpoint.TOKEN and reply.status >= _HTTP_BAD_REQUEST:
+        return Call(CallOutcome.CALL_FAILED, reply, reason)
+    return Call(CallOutcome.UNAVAILABLE, reply, reason)
+
+
+def _key_or_limit(endpoint: CiscoEndpoint, reply: HttpResponse) -> Call | None:
+    """Return the call for a key problem or a rate limit, or None for any other status."""
+    rejected = Call(CallOutcome.REJECTED, reply, REJECTED)
+    limited = Call(CallOutcome.UNAVAILABLE, reply, "Cisco rate limited the calls", retryable=True)
+    if reply.status == _HTTP_UNAUTHORIZED:
+        return rejected
+    if reply.status == _HTTP_TOO_MANY_REQUESTS:
+        return limited
+    if reply.status == _HTTP_FORBIDDEN:
+        code = header(reply, "X-Mashery-Error-Code") or ""
+        if code in AUTH_ERROR_CODES:
+            return rejected
+        return limited if code in RATE_LIMIT_CODES else None
+    if reply.status == _HTTP_BAD_REQUEST and _is_invalid_client(endpoint, reply):
+        return rejected
+    return None
+
+
+def _is_invalid_client(endpoint: CiscoEndpoint, reply: HttpResponse) -> bool:
+    return endpoint is CiscoEndpoint.TOKEN and _error_code(reply) == _INVALID_CLIENT
 
 
 def _may_retry(reply: Call) -> bool:
