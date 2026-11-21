@@ -12,6 +12,7 @@ from enum import Enum, unique
 from ipaddress import IPv4Address
 
 from network_analyser.records.collected import Collected
+from network_analyser.records.config_facts import ConfigFact
 from network_analyser.records.events import DeviceOutcome
 from network_analyser.records.host_keys import HostKeyCheck
 from network_analyser.records.platform import CredentialSetView, Platform
@@ -89,6 +90,9 @@ class DeviceRecord:
         collected: what the device's commands told the tool (`records.collected`, #52;
             filled by #59 and #60); None when the visit never got that far, or before the
             collection tickets, in which case the Topology lists every part as unknown.
+        config_facts: the secret-free facts `platforms` read from the running config at
+            capture time (`records.config_facts`, #96); empty when no config was captured.
+            A fact that is not here reads as `Unknown`, never as "off".
     """
 
     ip: IPv4Address
@@ -103,3 +107,4 @@ class DeviceRecord:
     version: VersionFacts | None = None
     aliases: tuple[IPv4Address, ...] = ()
     collected: Collected | None = None
+    config_facts: tuple[ConfigFact, ...] = ()

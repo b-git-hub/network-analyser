@@ -16,8 +16,8 @@ can never look like "Cisco said none" (stories 118-119).
 from dataclasses import dataclass, field
 from enum import Enum, unique
 
+from network_analyser.records.config_facts import ConfigFact, ConfigFacts, FactValue
 from network_analyser.records.topology import AdvisoryDetail, EoxItem, Topology
-from network_analyser.records.unknown import Unknown
 
 __all__ = [
     "AdvisoryAnswer",
@@ -28,6 +28,7 @@ __all__ = [
     "ConfigFacts",
     "DeviceInventory",
     "EoxAnswers",
+    "FactValue",
     "FixedRelease",
     "HardwareEox",
     "HardwareItem",
@@ -53,43 +54,6 @@ class OsType(Enum):
     IOS = "IOS"
     IOS_XE = "IOS-XE"
     NX_OS = "NX-OS"
-
-
-type FactValue = bool | int | str | tuple[str, ...] | Unknown
-"""One config fact's value. It may be `Unknown` when the fact could not be read."""
-
-
-@dataclass(frozen=True, slots=True)
-class ConfigFact:
-    """One secret-free fact read from a device's running config (#96).
-
-    Attributes:
-        name: its fixed name, such as `telnet`.
-        value: its value; `Unknown` when it could not be read.
-    """
-
-    name: str
-    value: FactValue
-
-
-@dataclass(frozen=True, slots=True)
-class ConfigFacts:
-    """The secret-free config facts of one Visited Device (#96).
-
-    Attributes:
-        device: the device's id.
-        facts: every fact that was read, in name order.
-    """
-
-    device: str
-    facts: tuple[ConfigFact, ...] = ()
-
-    def fact(self, name: str) -> FactValue:
-        """Return `name`'s value, or `Unknown` when it was not read (never "absent")."""
-        for item in self.facts:
-            if item.name == name:
-                return item.value
-        return Unknown(f"config fact not collected: {name}")
 
 
 @unique
@@ -300,7 +264,8 @@ class AnalysisInput:
     Attributes:
         topology: the Run's Topology: its Visited Devices, Links, Bundles and v1 Findings.
             Unvisited Devices are in it, and Analysis never uses them (story 3).
-        config_facts: each Visited Device's secret-free facts, once #96 fills them.
+        config_facts: each Visited Device's secret-free facts, read by `platforms` inside the
+            visit (#96). A device with no entry has every fact `Unknown`.
         inventory: each device's hardware PIDs, once #97 and #98 fill them.
         answers: Cisco's answers, or why each source could not be asked.
     """

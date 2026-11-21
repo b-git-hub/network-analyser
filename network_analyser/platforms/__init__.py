@@ -17,6 +17,7 @@ from typing import Final
 from network_analyser.platforms import neighbours
 from network_analyser.platforms.allowlist import AllowList, Exact, Template
 from network_analyser.platforms.collection import Collection, Problem, Send
+from network_analyser.platforms.config_facts import read_config_facts
 from network_analyser.platforms.hints import neighbour_hint
 from network_analyser.platforms.identify import (
     Hint,
@@ -196,6 +197,7 @@ __all__ = [
     "neighbour_hint",
     "permits",
     "privilege_command",
+    "read_config_facts",
     "read_neighbours",
     "read_privilege",
     "read_version",
