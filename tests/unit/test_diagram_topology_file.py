@@ -45,7 +45,7 @@ def _content(document: object) -> Any:  # noqa: ANN401 (read-only JSON data, rea
 def test_a_run_s_topology_json_is_read() -> None:
     read = diagram.read_topology(_text(_document()))
 
-    assert read.format_version == 2
+    assert read.format_version == 3
     content: Any = read.content
     devices = content["devices"]
     assert isinstance(devices, tuple)
@@ -66,17 +66,17 @@ def test_a_format_version_1_file_from_an_older_run_is_still_read() -> None:
 
 def test_a_newer_format_version_is_refused() -> None:
     document = _document()
-    document["format_version"] = 3
+    document["format_version"] = 4
 
     with pytest.raises(diagram.NewerFormatError):
         diagram.read_topology(_text(document))
 
 
-def test_a_pre_0_2_0_reader_refuses_a_format_version_2_file(
+def test_a_0_2_0_reader_refuses_a_format_version_3_file(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Story 113: an older `render` (which knew only version 1) refuses a newer file."""
-    monkeypatch.setattr(topology_file, "KNOWN_FORMAT_VERSION", 1)
+    """Story 113: an older `render` (which knew only versions 1 and 2) refuses a newer file."""
+    monkeypatch.setattr(topology_file, "KNOWN_FORMAT_VERSION", 2)
     document = _document()
 
     with pytest.raises(diagram.NewerFormatError):

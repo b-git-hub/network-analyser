@@ -664,13 +664,13 @@
         : '<span class="mono">' + esc(a.id) + '</span>';
       const rows = arr(a.devices).map(d => '<tr>' + td(esc(d.hostname)) + td('<span class="mono">' + esc(d.management_ip) + '</span>') +
         td('<span class="mono">' + esc(d.model) + '</span>') + td('<span class="mono">' + esc(d.release) + '</span>') +
-        td(esc(d.upgrade_target)) + td(esc(d.latest_release)) + '</tr>');
+        td(esc(d.upgrade_target)) + td(esc(String(d.not_cleared))) + td(esc(d.latest_release)) + '</tr>');
       return '<div class="det"><div><h3>' + esc(a.title) + '</h3>' + level + '<span class="pill acc">Advisory</span><dl>' +
         row('Advisory', id) + row('SIR', esc(a.sir)) + row('CVEs', '<span class="mono">' + esc(arr(a.cves).join(', ') || 'none') + '</span>') +
         row('Published', esc(a.published)) + row('Updated', esc(a.updated)) + row('Status', esc(a.status)) + '</dl>' +
         '<p class="fixed">' + esc(a.note) + '</p>' +
         '<h4>' + esc(String(arr(a.devices).length)) + ' devices on an affected release</h4>' +
-        table(['Hostname', 'Management IP', 'Model', 'Release', 'Upgrade Target', 'Latest Release'], rows) + '</div></div>';
+        table(['Hostname', 'Management IP', 'Model', 'Release', 'Upgrade Target', 'Not cleared', 'Latest Release'], rows) + '</div></div>';
     }
     const rows = arr(check.rows).map(f => '<tr>' + td(esc(f.where)) + td(esc(f.what_was_found)) + '</tr>');
     return '<div class="det"><div><h3>' + esc(check.name) + '</h3>' + level + '<span class="pill acc">' + esc(check.type) + ' Check</span><dl>' +
@@ -753,6 +753,7 @@
     const levels = arr(L.levels).map(l => '<span><span class="marker-dot ' + esc(levelClass(l)) + '"></span>' + esc(l) + '</span>').join('');
     return '<span>' + esc(str(L.badge) || '') + '</span>' + levels +
       '<span><b class="marker-key target">' + esc(str(L.target) || '') + '</b></span>' +
+      '<span><b class="marker-key target">' + esc(str(L.target_partial) || '') + '</b></span>' +
       '<span><b class="marker-key no-fix">' + esc(str(L.no_fix) || '') + '</b></span>' +
       '<span><b class="marker-key could-not-check">' + esc(str(L.could_not_check) || '') + '</b></span>';
   }

@@ -257,7 +257,11 @@ def _matched_callout(
 
 
 def _target_callout(advice: DeviceAdvice) -> tuple[str, str]:
-    """The callout for a recorded Upgrade Target: a release, or its fixed "no fix" text."""
+    """The callout for a recorded Upgrade Target: a release, or its fixed "no fix" text.
+
+    A target that does not clear every Advisory says so, and names the Train the rest need
+    (#124, story 23).
+    """
     target = advice.upgrade_target
     if target is None:
         return ("no-fix", _no_fix(advice))
@@ -266,7 +270,14 @@ def _target_callout(advice: DeviceAdvice) -> tuple[str, str]:
         return ("no-fix", target)
     if lowered.startswith("no critical"):
         return ("none", "no Critical/High Advisories")
-    return ("upgrade", f"Upgrade to {target} or later")
+    return ("upgrade", f"Upgrade to {target} or later{_leaves_open(advice)}")
+
+
+def _leaves_open(advice: DeviceAdvice) -> str:
+    """What the target leaves open, or nothing when it clears every Advisory (#124)."""
+    if advice.not_cleared <= 0:
+        return ""
+    return f" (does not clear {advice.not_cleared} Advisories: {_no_fix(advice)})"
 
 
 def _no_fix(advice: DeviceAdvice) -> str:

@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final
 
-KNOWN_FORMAT_VERSION: Final = 2
+KNOWN_FORMAT_VERSION: Final = 3
 NOT_RECORDED: Final = "not recorded in this topology.json"
 
 type Plain = str | int | float | bool | tuple[Plain, ...] | Mapping[str, Plain] | None
@@ -103,6 +103,8 @@ class DeviceAdvice:
         latest_release: the newest release; None when the file records none.
         latest_in_train: the newest release in its Train; None when the file records none.
         train: the Train it is on, used by "no fix in Train T" (#107); None when not recorded.
+        not_cleared: how many Advisories the Upgrade Target leaves open (#124); 0 when the file
+            records none or the target clears every Advisory.
     """
 
     known: bool
@@ -112,10 +114,11 @@ class DeviceAdvice:
     latest_release: str | None
     latest_in_train: str | None
     train: str | None
+    not_cleared: int
 
 
 def device_advice(device: Mapping[str, Plain]) -> DeviceAdvice:
-    """Return the one reading of a device's `advice` record (#105, #107, #109).
+    """Return the one reading of a device's `advice` record (#105, #107, #109, #124).
 
     Every surface that shows a device's Advisory outcome, Upgrade Target, Latest Release or
     Train goes through here, so a change to the field's shape is a change in one place.
@@ -131,6 +134,7 @@ def device_advice(device: Mapping[str, Plain]) -> DeviceAdvice:
             latest_release=None,
             latest_in_train=None,
             train=None,
+            not_cleared=0,
         )
     target = recorded.get("upgrade_target")
     return DeviceAdvice(
@@ -142,12 +146,19 @@ def device_advice(device: Mapping[str, Plain]) -> DeviceAdvice:
         latest_release=_text_field(recorded, "latest_release"),
         latest_in_train=_text_field(recorded, "latest_in_train"),
         train=_text_field(recorded, "train"),
+        not_cleared=_count_field(recorded, "not_cleared"),
     )
 
 
 def _text_field(record: Mapping[str, Plain], field: str) -> str | None:
     value = record.get(field)
     return value if isinstance(value, str) else None
+
+
+def _count_field(record: Mapping[str, Plain], field: str) -> int:
+    """A non-negative whole number the file records, or 0 when it records none."""
+    value = record.get(field)
+    return value if type(value) is int and value >= 0 else 0
 
 
 class _Leaf:
@@ -192,10 +203,12 @@ _ADVICE: dict[str, _Schema] = {
     "latest_release": LEAF,
     "latest_in_train": LEAF,
     "train": LEAF,
+    "not_cleared": LEAF,
 }
 """Per-device Analysis advice (#105): its Advisory outcome, Upgrade Target and Latest
 Release, plus the optional Train it is on, so the Findings report can say "no fix in Train T"
-(#107). Optional, so a file from before #105 reads it as unknown."""
+(#107), and how many Advisories the target leaves open (#124). Optional, so a file from before
+#105 reads it as unknown."""
 _DEVICE: dict[str, _Schema] = {
     "id": ID,
     "outcome": LEAF,

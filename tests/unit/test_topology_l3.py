@@ -558,7 +558,7 @@ def test_the_document_carries_adjacencies_and_subnets() -> None:
     )
     document = json.loads(json.dumps(topology.to_document(built)))
 
-    assert document["format_version"] == 2
+    assert document["format_version"] == 3
     kinds = {item["kind"] for item in document["adjacencies"]}
     assert kinds == {"OSPF", "shared subnet"}
     shared = next(item for item in document["adjacencies"] if item["kind"] == "shared subnet")

@@ -7,10 +7,13 @@ Every decision about what the Map shows on a device box is made here, from the r
   (Critical, High, Medium or Low). A device with no Findings has no badge, not a `0`.
 - The tag shows the device's upgrade path: its Upgrade Target, `no fix in Train` when its
   Advisory outcome reports matches but no release in its Train clears them, or
-  `? could not check` when the Advisory outcome says so. A device whose advice is absent,
-  whose Upgrade Target is unknown, or whose outcome says there are no Critical or High
-  Advisories, has no tag: the tool never guesses (story 97; spec #92, Further Notes).
-- The legend explains both marks to someone reading the Map (story 98).
+  `? could not check` when the Advisory outcome says so. A target that still leaves Advisories
+  open adds `(no fix in Train)`, so the gap shows on the Map (#124, story 27). A device whose
+  advice is absent, whose Upgrade Target is unknown, or whose outcome says there are no
+  Critical or High Advisories, has no tag: the tool never guesses (story 97; spec #92,
+  Further Notes).
+- The legend explains every mark to someone reading the Map (story 98), the combined tag
+  included (#124).
 
 Positions stay in `layout.place`, so a badge or tag can never move a device.
 """
@@ -29,9 +32,13 @@ from network_analyser.diagram.topology_file import (
 
 BADGE_LEGEND: Final = "Badge = number of Findings on the device, coloured by its worst level"
 TARGET_LEGEND: Final = "\u2191 17.12.8 = the Upgrade Target to move to"
+TARGET_PARTIAL_LEGEND: Final = (
+    "\u2191 17.12.8 (no fix in Train) = the target still does not clear every Advisory"
+)
 NO_FIX_LEGEND: Final = "no fix in Train = no release in its Train clears its Advisories"
 COULD_NOT_CHECK_LEGEND: Final = "? could not check = its Advisories could not be checked"
 NO_FIX: Final = "no fix in Train"
+PARTIAL_SUFFIX: Final = " (no fix in Train)"
 COULD_NOT_CHECK: Final = "? could not check"
 _COULD_NOT_CHECK_PREFIX: Final = "could not check"
 _NO_FIX_PREFIX: Final = "no fix in Train"
@@ -61,11 +68,17 @@ class DeviceMarker:
 
 @dataclass(frozen=True, slots=True)
 class MarkerLegend:
-    """What the Map's legend says about the badge and each tag (story 98)."""
+    """What the Map's legend says about the badge and each tag (story 98).
+
+    Attributes:
+        target_partial: the combined tag for a target that still leaves Advisories open
+            (#124), so the legend explains it.
+    """
 
     badge: str
     levels: tuple[str, ...]
     target: str
+    target_partial: str
     no_fix: str
     could_not_check: str
 
@@ -123,7 +136,8 @@ def _tag(advice: DeviceAdvice) -> tuple[str | None, str]:
     if target is not None and target.startswith(_NO_FIX_PREFIX):
         return NO_FIX, "no-fix"
     if target and target not in (_NO_ADVISORIES, _NOT_AVAILABLE):
-        return f"\u2191 {target}", "target"
+        suffix = PARTIAL_SUFFIX if advice.not_cleared > 0 else ""
+        return f"\u2191 {target}{suffix}", "target"
     if (
         target is None
         and advice.target_recorded
@@ -139,6 +153,7 @@ def _legend() -> MarkerLegend:
         badge=BADGE_LEGEND,
         levels=LEVELS,
         target=TARGET_LEGEND,
+        target_partial=TARGET_PARTIAL_LEGEND,
         no_fix=NO_FIX_LEGEND,
         could_not_check=COULD_NOT_CHECK_LEGEND,
     )

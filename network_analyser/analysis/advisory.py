@@ -7,9 +7,10 @@ release cannot be checked ends with exactly one "could not check" Low Finding an
 outcome, so silence never reads as safe (stories 52-53).
 
 Advice is attached to the device, never a Finding (story 58): the Advisory outcome, the Upgrade
-Target (the highest first-fixed release for its Critical and High Advisories, within its Train,
-stories 55-56) and the Latest Release (story 57). The Latest Release and the NX-OS Upgrade
-Target stay `not available` until #89 settles their sources; Analysis never guesses them.
+Target (the highest of each Advisory's first fix above the running release in its Train, with
+how many Advisories it leaves open, stories 20-24) and the Latest Release (story 57). The Latest
+Release and the NX-OS Upgrade Target stay `not available` until #127 and #126 give them their
+sources; Analysis never guesses them.
 """
 
 import re
@@ -77,8 +78,8 @@ class Match:
 
     Attributes:
         answer: Cisco's answer, with the Advisory's own detail.
-        first_fixed: the Advisory's highest first-fixed release in the device's Train; None
-            when Cisco names no fix there.
+        first_fixed: the Advisory's lowest first-fixed release in the device's Train that is
+            above the running release; None when it has no fix there (#124).
     """
 
     answer: AdvisoryAnswer
@@ -138,13 +139,16 @@ def advice_for(data: AnalysisInput) -> tuple[DeviceAdvice, ...]:
     for device in data.topology.devices:
         resolved = _resolve(data, device)
         latest_in_train, latest = _latest(data.answers.suggestions, device)
+        target, not_cleared = _upgrade_target(resolved)
         advice.append(
             DeviceAdvice(
                 device=device.id,
                 advisory_outcome=resolved.outcome,
-                upgrade_target=_upgrade_target(resolved),
+                upgrade_target=target,
                 latest_release_in_train=latest_in_train,
                 latest_release=latest,
+                train=resolved.train,
+                not_cleared=not_cleared,
             )
         )
     return tuple(advice)
@@ -200,7 +204,7 @@ def _resolve_release(data: AnalysisInput, device: VisitedDevice, release: str) -
             f"Cisco openVuln does not know release {normalised} ({answer.unavailable})",
         )
     train = train_of(normalised, os_type)
-    matches = tuple(_match(advisory, train) for advisory in _flagged(answer.advisories))
+    matches = tuple(_match(advisory, train, normalised) for advisory in _flagged(answer.advisories))
     kind = AdvisoryOutcomeKind.MATCHES if matches else AdvisoryOutcomeKind.NONE
     return DeviceAdvisory(
         device=device,
@@ -244,14 +248,20 @@ def _flagged(advisories: tuple[AdvisoryAnswer, ...]) -> tuple[AdvisoryAnswer, ..
     return tuple(kept)
 
 
-def _match(answer: AdvisoryAnswer, train: str) -> Match:
-    """Keep the Advisory and its highest first-fixed release in `train`, if it has one."""
-    fixes = [
+def _match(answer: AdvisoryAnswer, train: str, running: str) -> Match:
+    """Keep the Advisory and its lowest first fix in `train` above the running release.
+
+    A fix at or below the running release does not clear the Advisory (story 22): it is
+    ignored, so the Advisory reads as having no fix in the Train when none is left (#124).
+    """
+    above = [
         entry.release
         for entry in answer.first_fixed
-        if entry.release is not None and entry.train.casefold() == train.casefold()
+        if entry.release is not None
+        and entry.train.casefold() == train.casefold()
+        and release_key(entry.release) > release_key(running)
     ]
-    fixed = max(fixes, key=release_key) if fixes else None
+    fixed = min(above, key=release_key) if above else None
     return Match(answer=answer, first_fixed=fixed)
 
 
@@ -335,23 +345,28 @@ def _could_not_check_finding(resolved: DeviceAdvisory) -> Finding:
     )
 
 
-def _upgrade_target(resolved: DeviceAdvisory) -> str:
-    """The highest first-fixed release in the device's Train, or the fixed reason it has none.
+def _upgrade_target(resolved: DeviceAdvisory) -> tuple[str, int]:
+    """The highest per-Advisory first fix, and how many Advisories it leaves open (#124).
 
-    The tool never picks another Train (story 56). NX-OS stays `not available` because openVuln
-    names no first-fixed release for it and #89 has not settled another source (spec, Further
-    Notes).
+    Each Advisory's fix is the lowest release in the device's Train that is above the running
+    release (story 20). The target is the highest of those (story 21), and `not_cleared` counts
+    the Advisories with no fix in the Train, so a partial target says what it leaves open
+    (story 23). With none cleared the advice is `no fix in Train T` (story 24).
+
+    The tool never picks another Train (story 26). NX-OS stays `not available` because
+    openVuln names no first-fixed release for it; #126 gives it one from `firstFixes`.
     """
     if not resolved.checked:
-        return NOT_AVAILABLE
+        return NOT_AVAILABLE, 0
     if not resolved.matches:
-        return "no Critical/High Advisories"
+        return "no Critical/High Advisories", 0
     if resolved.os_type is OsType.NX_OS:
-        return NOT_AVAILABLE
+        return NOT_AVAILABLE, 0
     fixes = [match.first_fixed for match in resolved.matches if match.first_fixed is not None]
+    not_cleared = len(resolved.matches) - len(fixes)
     if not fixes:
-        return f"no fix in Train {resolved.train}"
-    return max(fixes, key=release_key)
+        return f"no fix in Train {resolved.train}", not_cleared
+    return max(fixes, key=release_key), not_cleared
 
 
 def _latest(suggestions: CiscoAnswer[SuggestedReleases], device: VisitedDevice) -> tuple[str, str]:

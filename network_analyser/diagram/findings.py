@@ -89,6 +89,7 @@ class DeviceRow:
         release: its software release.
         upgrade_target: its Upgrade Target, `no fix in Train`, or `not available`.
         latest_release: its Latest Release, or `not available`.
+        not_cleared: how many Advisories its Upgrade Target leaves open (#124); 0 when none.
     """
 
     hostname: str
@@ -97,6 +98,7 @@ class DeviceRow:
     release: str
     upgrade_target: str
     latest_release: str
+    not_cleared: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -359,6 +361,7 @@ def _device_row(device: Mapping[str, Plain]) -> DeviceRow:
         release=_text(device.get("software_version")),
         upgrade_target=_upgrade_target(advice),
         latest_release=_latest_release(advice),
+        not_cleared=advice.not_cleared,
     )
 
 

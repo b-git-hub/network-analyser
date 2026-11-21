@@ -32,7 +32,7 @@ cli/run_topology.py -> run_output.write_scanned_json -> topology.json
 
 ## Format version
 
-`format_version` is the first key: one integer, now `2`. It is bumped only when an older `render` would misread the file. An optional field may be added without a bump, because `render` ignores fields it does not know; `render` refuses a newer version. It was bumped to `2` on 2026-11-20 for the reason given under `findings[]`.
+`format_version` is the first key: one integer, now `3`. It is bumped only when an older `render` would misread the file. An optional field may be added without a bump, because `render` ignores fields it does not know; `render` refuses a newer version. It was bumped to `3` on 2026-11-21 for the reason given under `devices[]` (#124), and to `2` on 2026-11-20 for the reason given under `findings[]`.
 
 ## Stable ids
 
@@ -52,7 +52,7 @@ Ids hold only letters, digits, `.`, `-` and `_`. Items point at devices by id.
 
 | Key | Holds |
 |---|---|
-| `format_version` | `2` |
+| `format_version` | `3` |
 | `devices` | Visited Devices |
 | `unvisited` | Unvisited Devices |
 | `links` | physical Links |
@@ -76,7 +76,8 @@ Ids hold only letters, digits, `.`, `-` and `_`. Items point at devices by id.
 
 `stack_members[]` is the member table of `show version`: `software_version` and `mode` (such as `INSTALL` or `BUNDLE`) are read per member for the consistency Checks (#99), and are `{"unknown": reason}` when the table does not report them. They are optional fields; a file from before #99 has neither, and no format-version bump was needed because an older `render` drops them.
 
-`advice` (#105, read by #107, #108 and #109): the per-device Analysis advice: `outcome` (its Advisory outcome: "N Advisories match", "no known Critical/High Advisories for release X" or "could not check: reason"), `upgrade_target` (the release to move to, null when no release in its Train is clear) and `latest_release` (newest overall; `latest_in_train` holds the newest in its Train). The optional `train` (for example `17.12`) lets the Findings report say "no fix in Train T" (#107); when it is not recorded the report says "no fix in this device's Train" rather than guessing the Train from the release. Optional, so a file from before #105, or a device Analysis did not advise, has none and the pages show "not available" rather than guessing (#89).
+`advice` (#105, written from #124, read by #107, #108 and #109): the per-device Analysis advice: `outcome` (its Advisory outcome as text: "N Advisories match", "no known Critical/High Advisories for release X" or "could not check: reason"), `upgrade_target` (the release to move to, or the fixed text "no fix in Train T" / "no Critical/High Advisories" / "not available"), `latest_release` (newest overall; `latest_in_train` holds the newest in its Train), `train` (for example `17.12`, so the pages can say "no fix in Train T") and `not_cleared` (`0` when the target clears every Advisory, otherwise how many Advisories have no fix in the Train, #124). Optional, so a file from before #105, or a device Analysis did not advise, has none and the pages show "not available" rather than guessing (#89). The same record also stays in `analysis.advice[]` (`advisory_outcome` in its structured form).
+
 
 `vlan_database` (#64): the VLANs in the device's VLAN database, active or not, as `[first, last]` ranges. Unknown when it was not collected or is incomplete. A trunk's effective VLANs are its `allowed_vlans` that are also here (#61's rule). A file written before #64 lacks the key, which reads as unknown.
 
@@ -132,13 +133,15 @@ A prefix in one VRF on exactly two devices is one adjacency of kind `shared subn
 
 `advice[]` and `checks[]`, both optional. `findings` keeps every Finding, v1's and Analysis's together.
 
-- `advice[]`: one per Visited Device, in device id order. `device`, `advisory_outcome`, `upgrade_target`, `latest_release_in_train`, `latest_release`, `upcoming_eox[]`. An Advisory outcome is `{"kind": "matches" | "none" | "could not check", "matched", "release", "reason"}`; `text` is built by the report from those fields. Upgrade Target and both Latest Releases are `not available` until Cisco's answers arrive (spec #92, Further Notes). `upcoming_eox[]` reuses the EoX item shape (`name`, the four dates, `replacement`).
+- `advice[]`: one per Visited Device, in device id order. `device`, `advisory_outcome`, `upgrade_target`, `latest_release_in_train`, `latest_release`, `train`, `not_cleared`, `upcoming_eox[]`. An Advisory outcome is `{"kind": "matches" | "none" | "could not check", "matched", "release", "reason"}`; `text` is built by the report from those fields. Upgrade Target and both Latest Releases are `not available` until Cisco's answers arrive (spec #92, Further Notes); `train` is the device's Train when worked out, and `not_cleared` is how many Advisories the target leaves open (#124). `upcoming_eox[]` reuses the EoX item shape (`name`, the four dates, `replacement`).
 - `checks[]`: every shipped Check, in Check id order: `{"check": {...}, "ran": true | false, "reason": null | "...", "skipped": [...]}`. A Check is skipped only when a source it needs was unavailable. `skipped[]` is one `{"device", "reason"}` per Visited Device the Check could not run for (#102), such as a Device Role that refused its command or show output the Run did not collect; `ran` is false only when every Visited Device is in that list. A Check that does not apply to a device raises nothing and is not skipped.
 - No Visited Device gets more than one advice record; Unvisited Devices get none (story 3).
 
 `kind` is `conflicting evidence`, `Bundle member mismatch`, or a VLAN Mismatch (#61, 2026-11-19): `VLAN on one end only`, `differing native VLAN`, `trunk facing access`, `differing access VLANs`. A VLAN Mismatch's `items` is the Link or the Bundle, never a member Link. Its `evidence[].source` is `VLAN` for switchport and VLAN-database commands, or `CDP` when the native VLAN was advertised by an Unvisited Device.
 
 **Format-version bump to 2 (2026-11-20, #93 follow-up).** The first Analysis Finding carries `kind: null`, and `cisco_detail` is now a discriminated union (`kind`). A pre-0.2.0 `render` reads a `kind: null` Finding as a v1 Finding and would misdraw it (its report code calls `item.kind.value`), so `format_version` is bumped to `2`. An older `render` refuses the newer file (story 113); a new `render` still reads version 1 files.
+
+**Format-version bump to 3 (2026-11-21, #124).** Each Visited Device now carries its advice record, including `not_cleared`, and the Upgrade Target is each Advisory's first fix above the running release rather than the newest fix in the Train. A `render` from 0.2.0 would draw a partial target as if it cleared every Advisory, so `format_version` is bumped to `3`; that `render` refuses the new file. A new `render` still reads versions 1 and 2, showing "not available" where an old file holds no per-device advice.
 
 ### `skipped[]` and `unknown_interface_names[]`
 
@@ -163,3 +166,4 @@ A prefix in one VRF on exactly two devices is one adjacency of kind `shared subn
 - **#109 (2026-11-20):** the Map's count badge and Upgrade Target tag read Findings and each device's `advice` through `diagram.map_markers(topology)`, which uses `diagram.device_advice(device)` as the one reading of the advice fields. The badge counts the Findings naming the device and takes the colour of the worst level; a device with none has no badge. The tag is `↑ <release>` for an Upgrade Target, `no fix in Train` for `no fix in Train T` or a recorded null target, and `? could not check` for a could-not-check outcome. A device whose `advice` is absent, whose `upgrade_target` is unknown or `not available`, or whose outcome says there are no Critical/High Advisories, gets no tag: the tool never guesses. No field is added, and no device position changes.
 - **#107 (Findings report, 2026-11-21):** `diagram.draw_findings_report(topology, redact, run_time=...)` draws `findings.html` from this file alone, one sheet per device worst first, with the Upgrade Target callout, the Advisories in one `<details>` and the other Findings in one table. `cli/findings_file.write_findings` reads the file and writes the page through the scanned writer at the end of every started Run and for `render`; the Run time comes from the Run folder's name. Every device field and Cisco field the page shows is already in this file; the page adds no key and needs no `format_version` bump.
 - **#106 (Lifecycle Checks, 2026-11-21):** three `Lifecycle` Checks read Cisco's EoX and Software Suggestion answers: `lifecycle-hardware-eox` (one Finding per device at its worst level, with every affected `show inventory` item in `cisco_detail`), `lifecycle-software-eox` (one Finding per device for its release) and `lifecycle-suggested-release` (a Low Finding, or a Low "could not check" when Cisco returned nothing for the PID). A source marked unavailable skips its Check with the reason. Dates still in the future are never Findings: they ride `analysis.advice[].upcoming_eox`, each item carrying only its future dates and Cisco's replacement PID. No key is added and no `format_version` bump is needed.
+- **#124 (Upgrade Target, 2026-11-21):** each Advisory's first fix is the lowest first-fixed release in the device's Train above the running release; the device's Upgrade Target is the highest of those, and `not_cleared` counts the Advisories with none. `topology/document.py` now writes each Visited Device's `advice` record (with `train` and `not_cleared`) beside `analysis.advice[]`. The Findings report callout adds "(does not clear N Advisories: no fix in Train T)", the Map tag adds "(no fix in Train)" with a legend line, the Advisory pane's device table adds "Not cleared", and the Run report's Visited Devices table shows the same advice. `format_version` is `3`; an older `render` refuses it.
