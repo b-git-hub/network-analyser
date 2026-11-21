@@ -16,6 +16,7 @@ from typing import Any, Final
 from network_analyser.records.cisco import (
     AdvisoriesAnswer,
     CiscoAdvisory,
+    CiscoPlatform,
     CompatibleAnswer,
     CompatibleRelease,
     CompatibleUnanswered,
@@ -205,6 +206,9 @@ def _advisory(entry: object) -> CiscoAdvisory | None:
     advisory_id = _optional_text(entry.get("advisoryId"))
     if advisory_id is None:
         return None
+    platforms = _platforms(entry.get("platforms"))
+    if platforms is None:
+        return None
     return CiscoAdvisory(
         advisory_id=advisory_id,
         title=_optional_text(entry.get("advisoryTitle")) or advisory_id,
@@ -214,7 +218,53 @@ def _advisory(entry: object) -> CiscoAdvisory | None:
         first_published=_optional_text(entry.get("firstPublished")) or "",
         last_updated=_optional_text(entry.get("lastUpdated")) or "",
         first_fixed=_texts(entry.get("firstFixed")),
+        platforms=platforms,
     )
+
+
+def _platforms(value: object) -> tuple[CiscoPlatform, ...] | None:
+    """The named `platforms[]` entries and their first fixes; None when the shape is odd.
+
+    NX-OS replies give first fixes per platform rather than per Advisory (#126). An entry with
+    no name is ignored, as Cisco's 2026 replies carry one (#120): it can never be a device's
+    series. A malformed entry makes the whole reply not understood, as everywhere else.
+    """
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        return None
+    platforms: list[CiscoPlatform] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            return None
+        raw_name = entry.get("name")
+        if raw_name is not None and not isinstance(raw_name, str):
+            return None
+        name = _optional_text(raw_name, limit=_ID_LIMIT)
+        if name is None:
+            continue
+        first_fixed = _platform_fixes(entry.get("firstFixes"))
+        if first_fixed is None:
+            return None
+        platforms.append(CiscoPlatform(name=name, first_fixed=first_fixed))
+    return tuple(platforms)
+
+
+def _platform_fixes(value: object) -> tuple[str, ...] | None:
+    """The releases in one platform's `firstFixes[]`; None when the shape is odd."""
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        return None
+    fixes: list[str] = []
+    for item in value:
+        if not isinstance(item, dict):
+            return None
+        name = _optional_text(item.get("name"), limit=_ID_LIMIT)
+        if name is None:
+            return None
+        fixes.append(name)
+    return tuple(fixes)
 
 
 def _eox_record(entry: dict[str, Any]) -> EoxRecord | None:

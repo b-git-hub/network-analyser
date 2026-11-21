@@ -33,6 +33,7 @@ from network_analyser.backup_store import CiscoKey
 from network_analyser.credentials import SecretScan
 from network_analyser.records.analysis import (
     AdvisoryAnswer,
+    AdvisoryPlatform,
     AnalysisInput,
     CiscoAnswers,
     CompatibleRelease,
@@ -224,11 +225,7 @@ def _release_answer(answer: AdvisoriesAnswer) -> ReleaseAdvisories:
 
 
 def _advisory(advisory: CiscoAdvisory, train: str | None, os_type: OsType) -> AdvisoryAnswer:
-    first_fixed = tuple(
-        FixedRelease(trains, release)
-        for release in advisory.first_fixed
-        if (trains := _train(release, os_type)) is not None
-    )
+    first_fixed = _fixed_releases(advisory.first_fixed, os_type)
     in_train = next(
         (
             release
@@ -251,6 +248,22 @@ def _advisory(advisory: CiscoAdvisory, train: str | None, os_type: OsType) -> Ad
             status=ADVISORY_STATUS,
         ),
         first_fixed=first_fixed,
+        platforms=tuple(
+            AdvisoryPlatform(
+                name=platform.name,
+                first_fixed=_fixed_releases(platform.first_fixed, os_type),
+            )
+            for platform in advisory.platforms
+        ),
+    )
+
+
+def _fixed_releases(releases: tuple[str, ...], os_type: OsType) -> tuple[FixedRelease, ...]:
+    """Each release with its Train; a release whose Train cannot be read is dropped."""
+    return tuple(
+        FixedRelease(trains, release)
+        for release in releases
+        if (trains := _train(release, os_type)) is not None
     )
 
 
