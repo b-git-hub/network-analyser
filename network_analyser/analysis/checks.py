@@ -11,12 +11,13 @@ New Checks are added to `CHECKS`; nothing else in `analysis` needs to change.
 """
 
 import re
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Sequence
 from ipaddress import IPv4Address
 from typing import Final
 
 from network_analyser.analysis import advisory
+from network_analyser.analysis.definition import CheckDefinition
+from network_analyser.analysis.hardening import HARDENING_CHECKS
 from network_analyser.analysis.ids import finding_id
 from network_analyser.records.analysis import AnalysisInput, SourceUnavailable
 from network_analyser.records.collected import StackMember, VpcState
@@ -96,23 +97,6 @@ _CATALYST_9000: Final = re.compile(r"C9[2-6]\d{2}")
 _TRAIN: Final = re.compile(r"^(\d{1,2})\.(\d{1,2})(?:[.(]|$)")
 _LEADING_ZERO: Final = re.compile(r"(?<!\d)0+(\d)")
 _BUNDLE: Final = "BUNDLE"
-
-
-@dataclass(frozen=True, slots=True)
-class CheckDefinition:
-    """One shipped Check and the function that raises its Findings.
-
-    Attributes:
-        check: its stable identity, shown on every Finding it raises.
-        run: returns every Finding it raises for the Run.
-        skip_reason: why this Run cannot run the Check, or None when it can. A Check whose
-            source is unavailable (story 10, story 118), or whose built-in classification
-            does not cover what it found, returns the reason here.
-    """
-
-    check: Check
-    run: Callable[[AnalysisInput], tuple[Finding, ...]]
-    skip_reason: Callable[[AnalysisInput], str | None] | None = None
 
 
 def model_drift(data: AnalysisInput) -> tuple[Finding, ...]:
@@ -460,6 +444,7 @@ def _name(device: VisitedDevice) -> str:
 
 CHECKS: tuple[CheckDefinition, ...] = (
     CheckDefinition(MODEL_DRIFT_CHECK, model_drift),
+    *HARDENING_CHECKS,
     CheckDefinition(STACK_MISMATCH_CHECK, stack_mismatch),
     CheckDefinition(VPC_MISMATCH_CHECK, vpc_mismatch),
     CheckDefinition(BUNDLE_MODE_CHECK, bundle_mode),

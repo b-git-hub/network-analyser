@@ -551,7 +551,7 @@ def test_a_source_unavailable_skips_the_advisory_checks_and_adds_no_findings() -
         )
     )
 
-    assert results.findings == ()
+    assert all(finding.check.type is not CheckType.ADVISORY for finding in results.findings)
     runs = {run.check.id: run for run in results.checks}
     assert runs["advisory-openvuln"].ran is False
     assert runs["advisory-openvuln"].reason == reason
@@ -577,6 +577,14 @@ def test_every_advisory_check_runs_when_the_source_answers() -> None:
         "consistency-stack-mismatch",
         "consistency-standard-support-train",
         "consistency-vpc-mismatch",
+        "hardening-enable-secret",
+        "hardening-http-server",
+        "hardening-insecure-mode",
+        "hardening-legacy-services",
+        "hardening-snmp-v1-v2c",
+        "hardening-snmp-v3-priv",
+        "hardening-telnet",
+        "hardening-weak-secret-types",
     ]
     runs = {run.check.id: run for run in results.checks}
     assert runs["advisory-openvuln"].ran is True

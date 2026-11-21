@@ -40,6 +40,16 @@ B = "192.0.2.2"
 C = "192.0.2.3"
 D = "192.0.2.4"
 MODEL = "C9300-48P"
+HARDENING_CHECKS = (
+    "hardening-enable-secret",
+    "hardening-http-server",
+    "hardening-insecure-mode",
+    "hardening-legacy-services",
+    "hardening-snmp-v1-v2c",
+    "hardening-snmp-v3-priv",
+    "hardening-telnet",
+    "hardening-weak-secret-types",
+)
 
 
 def _device(
@@ -162,6 +172,14 @@ def test_every_shipped_check_runs_and_one_advice_record_exists_per_visited_devic
         "consistency-stack-mismatch",
         "consistency-standard-support-train",
         "consistency-vpc-mismatch",
+        "hardening-enable-secret",
+        "hardening-http-server",
+        "hardening-insecure-mode",
+        "hardening-legacy-services",
+        "hardening-snmp-v1-v2c",
+        "hardening-snmp-v3-priv",
+        "hardening-telnet",
+        "hardening-weak-secret-types",
     ]
     assert all(run.ran for run in results.checks)
     assert all(run.reason is None for run in results.checks)
@@ -181,7 +199,10 @@ def test_a_source_unavailable_says_why_and_raises_no_per_device_findings() -> No
     assert advice.latest_release_in_train == "not available"
     assert advice.latest_release == "not available"
     assert advice.upcoming_eox == ()
-    assert results.findings == ()
+    # A Cisco outage raises no Advisory or Consistency Finding; the hardening Checks still
+    # run, and with no config facts each says it could not decide rather than passing.
+    assert all(finding.check.type is CheckType.CONFIGURATION for finding in results.findings)
+    assert all("Could not decide" in finding.what_was_found for finding in results.findings)
 
 
 def test_cisco_answers_are_either_an_answer_or_unavailable() -> None:
@@ -300,6 +321,14 @@ def test_the_results_fit_topology_json_as_optional_fields() -> None:
         "consistency-stack-mismatch",
         "consistency-standard-support-train",
         "consistency-vpc-mismatch",
+        "hardening-enable-secret",
+        "hardening-http-server",
+        "hardening-insecure-mode",
+        "hardening-legacy-services",
+        "hardening-snmp-v1-v2c",
+        "hardening-snmp-v3-priv",
+        "hardening-telnet",
+        "hardening-weak-secret-types",
     ]
     assert checks[3]["ran"] is True
     assert checks[5]["ran"] is False
