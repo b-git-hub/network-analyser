@@ -1,7 +1,8 @@
 """`ask_cisco`: the lookup questions in, Cisco's answers out (#95; story 18; ADR 0007).
 
 One request per distinct question. EoX takes 20 values per call and Software Suggestion 10;
-openVuln takes one release at a time. Every value is de-duplicated again here, and every value
+openVuln takes one release at a time, and the compatible list one chassis PID at a time, paged
+(#127). Every value is de-duplicated again here, and every value
 is checked against its pattern before a Session is made. A value out of pattern refuses the
 whole lookup with nothing sent: the questions are built from pattern-checked device data
 (ticket #104), so one that arrives here is a bug or an attack, and either way it must not
@@ -22,6 +23,8 @@ from network_analyser.advisories.patterns import (
 from network_analyser.advisories.proxy import ProxyConfig
 from network_analyser.advisories.replies import (
     advisories_answer,
+    compatible_answer,
+    compatible_last_page,
     eox_answer,
     eox_last_page,
     suggestion_answer,
@@ -35,6 +38,10 @@ from network_analyser.records.cisco import (
     CiscoCallTally,
     CiscoEndpoint,
     CiscoOsType,
+    CompatibleAnswer,
+    CompatibleAnswers,
+    CompatibleRelease,
+    CompatibleUnanswered,
     EndpointUse,
     EoxAnswer,
     EoxRecord,
@@ -57,6 +64,12 @@ SUGGESTION_BATCH_SIZE: Final = 10
 
 EOX_MAX_PAGES: Final = 20
 """The most pages one EoX batch may take: a reply naming more is refused, not chased."""
+
+COMPATIBLE_MAX_PAGES: Final = 20
+"""The most pages one chassis PID's compatible list may take; past it, `page cap` (#127)."""
+
+PAGE_CAP: Final = "page cap"
+"""Fixed text for a compatible list that ran past its page cap (#127)."""
 
 REFUSED: Final = "Cisco was not asked: a lookup value did not match its safe pattern"
 """Fixed text when an outbound value is refused (story 13)."""
@@ -101,6 +114,7 @@ def ask_cisco(  # noqa: PLR0913 (the one Run call, every dependency explicit)
         return _unavailable(distinct, reason, session.tally())
     return CiscoAnswers(
         advisories=tuple(_advisory(session, question) for question in distinct.releases),
+        compatible=_compatible(session, distinct.compatible_pids),
         hardware_eox=_eox(session, "EOXByProductID", distinct.hardware_pids),
         software_eox=_eox(session, "EOXBySWReleaseString", distinct.software_releases),
         suggestions=_suggestions(session, distinct.suggestion_pids),
@@ -167,6 +181,49 @@ def _eox(session: Session, kind: str, values: Sequence[str]) -> EoxAnswer | Sour
     return EoxAnswer(records=tuple(records), unanswered=tuple(unanswered))
 
 
+def _compatible(session: Session, values: Sequence[str]) -> CompatibleAnswers | SourceUnavailable:
+    """Ask one PID at a time, paged by `pageIndex` to the reply's `lastIndex` (#127).
+
+    A PID the reply refuses is `unanswered` for that PID alone. At the page cap the PID's
+    answer is `unanswered: page cap`, so a list that never ends cannot make a Run page forever.
+    """
+    if session.auth_rejected:
+        return SourceUnavailable(REJECTED)
+    answers: list[CompatibleAnswer] = []
+    unanswered: list[CompatibleUnanswered] = []
+    for pid in values:
+        page = 1
+        releases: list[CompatibleRelease] = []
+        while True:
+            path = (
+                f"/software/suggestion/v2/suggestions/compatible/productId/{pid}?pageIndex={page}"
+            )
+            call = session.get(
+                CiscoEndpoint.COMPATIBLE,
+                path,
+                values=1 if page == 1 else 0,
+                pages=1,
+            )
+            if call.outcome is not CallOutcome.OK or call.response is None:
+                return SourceUnavailable(call.reason or UNAVAILABLE)
+            answer = compatible_answer(pid, call.response.body)
+            if isinstance(answer, SourceUnavailable):
+                return answer
+            if isinstance(answer, CompatibleUnanswered):
+                unanswered.append(answer)
+                break
+            releases.extend(answer.releases)
+            last = compatible_last_page(call.response.body)
+            if page >= last:
+                answers.append(CompatibleAnswer(pid, tuple(releases)))
+                break
+            if page >= COMPATIBLE_MAX_PAGES:
+                unanswered.append(CompatibleUnanswered(product_id=pid, reason=PAGE_CAP))
+                break
+            page += 1
+    return CompatibleAnswers(answers=tuple(answers), unanswered=tuple(unanswered))
+
+
 def _suggestions(session: Session, values: Sequence[str]) -> SuggestionsAnswer | SourceUnavailable:
     if session.auth_rejected:
         return SourceUnavailable(REJECTED)
@@ -204,6 +261,7 @@ def _distinct(questions: LookupQuestions) -> LookupQuestions:
         hardware_pids=_distinct_values(questions.hardware_pids),
         software_releases=_distinct_values(questions.software_releases),
         suggestion_pids=_distinct_values(questions.suggestion_pids),
+        compatible_pids=_distinct_values(questions.compatible_pids),
     )
 
 
@@ -217,6 +275,7 @@ def _all_safe(questions: LookupQuestions) -> bool:
         and all(is_safe_pid(pid) for pid in questions.hardware_pids)
         and all(is_safe_release(release) for release in questions.software_releases)
         and all(is_safe_pid(pid) for pid in questions.suggestion_pids)
+        and all(is_safe_pid(pid) for pid in questions.compatible_pids)
     )
 
 
@@ -248,6 +307,7 @@ def _is_empty(questions: LookupQuestions) -> bool:
         or questions.hardware_pids
         or questions.software_releases
         or questions.suggestion_pids
+        or questions.compatible_pids
     )
 
 
@@ -258,6 +318,7 @@ def _nothing_asked() -> CiscoAnswers:
         hardware_eox=EoxAnswer(records=(), unanswered=()),
         software_eox=EoxAnswer(records=(), unanswered=()),
         suggestions=SuggestionsAnswer(answers=(), unanswered=()),
+        compatible=CompatibleAnswers(),
         tally=CiscoCallTally(
             token=TokenResult(TokenOutcome.NOT_REQUESTED),
             endpoints=tuple(
@@ -274,5 +335,6 @@ def _unavailable(questions: LookupQuestions, reason: str, tally: CiscoCallTally)
         hardware_eox=SourceUnavailable(reason),
         software_eox=SourceUnavailable(reason),
         suggestions=SourceUnavailable(reason),
+        compatible=SourceUnavailable(reason),
         tally=tally,
     )

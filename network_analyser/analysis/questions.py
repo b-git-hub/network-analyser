@@ -30,9 +30,11 @@ def lookup_questions(data: AnalysisInput) -> LookupQuestions:
     It reads only Visited Devices. Unvisited Devices are never asked about (story 3).
     """
     pids: set[str] = set()
+    compatible_pids: set[str] = set()
     releases: set[ReleaseQuestion] = set()
     for device in data.topology.devices:
         _add_device_pids(pids, device)
+        _add_chassis_pid(compatible_pids, device)
         question = _release_question(device)
         if question is not None:
             releases.add(question)
@@ -47,7 +49,14 @@ def lookup_questions(data: AnalysisInput) -> LookupQuestions:
                 key=lambda q: (q.os_type.value, q.release, q.hardware_family or ""),
             )
         ),
+        compatible_pids=tuple(sorted(compatible_pids)),
     )
+
+
+def _add_chassis_pid(pids: set[str], device: VisitedDevice) -> None:
+    """Add a device's chassis model only: never a line card, stack member or other part."""
+    if isinstance(device.model, str):
+        _add_pid(pids, HardwareItem(device.model, HardwareKind.CHASSIS))
 
 
 def _add_device_pids(pids: set[str], device: VisitedDevice) -> None:

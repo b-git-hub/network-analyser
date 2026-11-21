@@ -37,6 +37,7 @@ TOKEN = "CANARY-access-token-95"
 ADVISORY_PREFIX = "/security/advisories/v2/OSType/"
 EOX_PREFIX = "/supporttools/eox/rest/5/"
 SUGGESTION_PREFIX = "/software/suggestion/v2/suggestions/releases/productIds/"
+COMPATIBLE_PREFIX = "/software/suggestion/v2/suggestions/compatible/productId/"
 TOKEN_PATH = "/oauth2/default/v1/token"
 
 
@@ -66,6 +67,15 @@ class FakeCisco:
     suggestions: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     """Suggestion entries for a base PID."""
 
+    compatible: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    """Compatible-release entries for a chassis PID."""
+
+    compatible_pages: dict[tuple[str, int], list[dict[str, Any]]] = field(default_factory=dict)
+    """Compatible-release entries for one PID's page, when a test needs paging."""
+
+    compatible_last_page: dict[str, int] = field(default_factory=dict)
+    """The `paginationResponseRecord.lastIndex` one PID reports."""
+
     page_records: dict[tuple[str, int], list[dict[str, Any]]] = field(default_factory=dict)
     """Records for one EoX page, when a test needs paging instead of the maps above."""
 
@@ -87,12 +97,17 @@ class FakeCisco:
 
     requests: list[HttpRequest] = field(default_factory=list)
 
-    def __call__(self, request: HttpRequest) -> HttpResponse | TransportFailed:
+    def __call__(  # noqa: C901, PLR0911 (one branch per path or scripted reply)
+        self, request: HttpRequest
+    ) -> HttpResponse | TransportFailed:
         """Answer one request, proving the envelope held as it arrives."""
         if request.host not in FENCED_HOSTS or request.port != HTTPS_PORT:
             msg = f"left the fence: {request.host}:{request.port}"
             raise LeftTheFenceError(msg)
         self.requests.append(request)
+        if "currentRelease" in request.path:
+            msg = "a path carried currentRelease, which is never sent"
+            raise UnsafeValueSentError(msg)
         if self.on_request is not None:
             self.on_request(request)
         if self.outage:
@@ -110,6 +125,8 @@ class FakeCisco:
             return self._eox(request.path)
         if request.path.startswith(SUGGESTION_PREFIX):
             return self._suggestions(request.path)
+        if request.path.startswith(COMPATIBLE_PREFIX):
+            return self._compatible(request.path)
         msg = f"asked a path the fake does not serve: {request.path}"
         raise UnsafeValueSentError(msg)
 
@@ -220,6 +237,34 @@ class FakeCisco:
                     }
                 )
         return _json(200, {"suggestions": entries})
+
+    def _compatible(self, path: str) -> HttpResponse:
+        rest = path.removeprefix(COMPATIBLE_PREFIX)
+        product_id, _, query = rest.partition("?")
+        if not is_safe_pid(product_id):
+            msg = f"PID left without its pattern: {product_id!r}"
+            raise UnsafeValueSentError(msg)
+        page_text = _params(query).get("pageIndex", "1")
+        if not page_text.isdigit() or int(page_text) < 1:
+            msg = f"pageIndex was not a page number: {page_text!r}"
+            raise UnsafeValueSentError(msg)
+        page = int(page_text)
+        last = self.compatible_last_page.get(product_id, 1)
+        if (product_id, page) in self.compatible_pages:
+            entries = self.compatible_pages[(product_id, page)]
+        elif product_id in self.compatible:
+            entries = self.compatible[product_id]
+        elif page == 1:
+            return _json(200, {"errorDetailsResponse": {"errorCode": "S3_INV_BASEPID"}})
+        else:
+            entries = []
+        return _json(
+            200,
+            {
+                "suggestions": entries,
+                "paginationResponseRecord": {"pageIndex": page, "lastIndex": last},
+            },
+        )
 
 
 def _check_authorization(request: HttpRequest) -> None:

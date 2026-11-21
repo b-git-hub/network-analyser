@@ -36,8 +36,9 @@ def _add_device_advice(body: dict[str, Json], advice: tuple[DeviceAdvice, ...]) 
     """Give each Visited Device its own advice record (#124), beside the `analysis` list.
 
     The pages read a device's advice where it sits on the device, so the per-device record
-    carries the outcome as text, the Upgrade Target, both Latest Releases, its Train and how
-    many Advisories the target leaves open. The full `analysis.advice[]` record stays as it was.
+    carries the outcome as text, the Upgrade Target, both Latest Releases with their lifecycle
+    codes (#127), its Train and how many Advisories the target leaves open. The full
+    `analysis.advice[]` record stays as it was.
     """
     devices = body.get("devices")
     if not isinstance(devices, list):
@@ -61,6 +62,8 @@ def _device_advice(advice: DeviceAdvice) -> dict[str, Json]:
         "upgrade_target": advice.upgrade_target,
         "latest_release": advice.latest_release,
         "latest_in_train": advice.latest_release_in_train,
+        "latest_release_lifecycle": advice.latest_release_lifecycle,
+        "latest_in_train_lifecycle": advice.latest_in_train_lifecycle,
         "train": advice.train,
         "not_cleared": advice.not_cleared,
     }

@@ -36,6 +36,8 @@ from network_analyser.records.analysis import (
     AdvisoryPlatform,
     AnalysisInput,
     CiscoAnswers,
+    CompatibleRelease,
+    CompatibleReleases,
     ConfigFacts,
     DeviceCollected,
     EoxAnswers,
@@ -51,6 +53,7 @@ from network_analyser.records.cisco import (
     AdvisoriesAnswer,
     CiscoAdvisory,
     CiscoOsType,
+    CompatibleAnswers,
     EoxAnswer,
     EoxRecord,
     SuggestionsAnswer,
@@ -115,6 +118,7 @@ def lookup_questions(data: AnalysisInput) -> CiscoQuestions:
         hardware_pids=asked.pids,
         software_releases=tuple(question.release for question in asked.releases),
         suggestion_pids=asked.pids,
+        compatible_pids=asked.compatible_pids,
     )
 
 
@@ -192,6 +196,7 @@ def analysis_answers(replies: CiscoReplies, asked: CiscoQuestions) -> CiscoAnswe
         advisories=_advisories(replies.advisories),
         eox=_eox(replies.hardware_eox, replies.software_eox, asked),
         suggestions=_suggestions(replies.suggestions, asked),
+        compatible=_compatible(replies.compatible, asked),
     )
 
 
@@ -325,6 +330,27 @@ def _suggestions(
         if pid in by_pid
         else SuggestedReleases(pid)
         for pid in asked.suggestion_pids
+    )
+
+
+def _compatible(
+    source: CompatibleAnswers | CiscoSourceUnavailable, asked: CiscoQuestions
+) -> tuple[CompatibleReleases, ...] | SourceUnavailable:
+    """One per-PID answer for every chassis PID asked, with Cisco's lifecycle code (#127)."""
+    if isinstance(source, CiscoSourceUnavailable):
+        return SourceUnavailable(source.reason)
+    by_pid = {answer.product_id: answer for answer in source.answers}
+    unanswered = {item.product_id: item.reason for item in source.unanswered}
+    return tuple(
+        CompatibleReleases(
+            pid,
+            releases=tuple(
+                CompatibleRelease(item.release, item.lifecycle) for item in by_pid[pid].releases
+            ),
+        )
+        if pid in by_pid
+        else CompatibleReleases(pid, unanswered=unanswered.get(pid, "Cisco gave no answer"))
+        for pid in asked.compatible_pids
     )
 
 
