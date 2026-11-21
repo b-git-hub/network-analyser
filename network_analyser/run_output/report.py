@@ -23,12 +23,29 @@ from network_analyser.records.host_keys import HostKeyVerdict
 from network_analyser.records.platform import CredentialSetResult, Platform
 from network_analyser.records.run_summary import RunReport, RunReportFacts
 from network_analyser.records.sweep import SweepResult
-from network_analyser.records.topology import Finding, FindingKind, Topology, VisitedDevice
+from network_analyser.records.topology import (
+    Check,
+    Finding,
+    FindingKind,
+    FindingLevel,
+    Topology,
+    VisitedDevice,
+)
 from network_analyser.records.unknown import Unknown
 from network_analyser.run_output.folder import RunFolder
 from network_analyser.run_output.scanned_file import write_scanned_text
 
 RUN_REPORT_FILE: Final = "run-report.html"
+DEVICE_ROLE_CHECK_ID: Final = "config-device-role-out-of-date"
+"""The stable Check id of the Medium "Device Role out of date" Finding (#102, story 80).
+
+`analysis.catalogue.ROLE_CHECK` gives the Finding this id; `run_output` may not import
+`analysis`, so the id is repeated here and a test keeps the two equal.
+"""
+COULD_NOT_CHECK_CHECK_ID: Final = "advisory-could-not-check"
+"""The stable Check id of a Low "could not check" Advisory Finding (story 53)."""
+CRITICAL_AND_HIGH_ROWS: Final = 10
+"""How many of the worst Critical and High Checks the table shows (story 101)."""
 _POLICY: Final = (
     "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; "
     "img-src 'none'; connect-src 'none'; base-uri 'none'; form-action 'none'"
@@ -46,7 +63,6 @@ ATTENTION_REASONS: Final = frozenset(
     }
 )
 """Unvisited reasons marked `!!`, the same set as the console summary (#56)."""
-_NOISY: Final = frozenset({FindingKind.VLAN_ON_ONE_END})
 _STYLE: Final = (
     "body{font-family:sans-serif;margin:1.5rem;}"
     "table{border-collapse:collapse;}"
@@ -54,6 +70,10 @@ _STYLE: Final = (
     "dd{margin:0 0 0.4rem;}"
 )
 _NOT_REPORTED: Final = "not reported"
+_MEDIUM_AND_LOW_NOTE: Final = "Medium and Low Advisories are not listed."
+_NXOS_NOTE: Final = "openVuln covers NX-OS only from July 2019."
+_TLS_NOTE: Final = "Cisco's data was fetched over TLS and not signature-checked."
+"""Story 21: said once, and only when Cisco lookups ran."""
 
 
 def render_run_report(report: RunReport, scan: SecretScan) -> str:
@@ -72,7 +92,7 @@ def render_run_report(report: RunReport, scan: SecretScan) -> str:
         )
     )
     hits = max(report.facts.secret_scan_hits, scan.hits)
-    return _page(_summary(report, scan, hits) + _attention(report, scan, hits) + body)
+    return _page(_summary(report, scan, hits) + _attention(report, names, scan, hits) + body)
 
 
 def write_run_report(folder: RunFolder, report: RunReport, scan: SecretScan) -> int:
@@ -104,6 +124,7 @@ def _summary(report: RunReport, scan: SecretScan, hits: int) -> str:
     """Folder, times, version, account, how it ended, Scope, Seeds, flags and counts."""
     facts = report.facts
     taken = sum(1 for item in report.backups.backups if item.path is not None)
+    levels = Counter(finding.level for finding in report.topology.findings)
     pairs = (
         ("Folder", _text(facts.folder, scan)),
         ("Started", _utc(facts.started_at)),
@@ -115,6 +136,8 @@ def _summary(report: RunReport, scan: SecretScan, hits: int) -> str:
         ("How the Run ended", _text(_ending(facts), scan)),
         ("Visited", str(len(report.topology.devices))),
         ("Unvisited", str(len(report.topology.unvisited))),
+        ("Findings", str(len(report.topology.findings))),
+        *((level.value, str(levels.get(level, 0))) for level in FindingLevel),
         ("Backups locked", f"{taken} of {len(report.backups.backups)}"),
         ("Locking time", f"{report.backups.lock_seconds:.1f} s"),
         ("Secret-scan hits", str(hits)),
@@ -132,10 +155,11 @@ def _summary(report: RunReport, scan: SecretScan, hits: int) -> str:
     )
 
 
-def _attention(report: RunReport, scan: SecretScan, hits: int) -> str:
-    """Needs attention: notices, the summary's items, and a secret-scan hit."""
+def _attention(report: RunReport, names: dict[str, str], scan: SecretScan, hits: int) -> str:
+    """Needs attention: notices, the summary's items, Analysis's priorities and a scan hit."""
     items = [_text(notice, scan) for notice in report.facts.notices]
     items.extend(f"!! {_text(item, scan)}" for item in report.attention)
+    items.extend(_analysis_attention(report.topology, names, scan))
     if hits:
         pieces = "1 piece" if hits == 1 else f"{hits} pieces"
         items.append(
@@ -145,11 +169,40 @@ def _attention(report: RunReport, scan: SecretScan, hits: int) -> str:
                 scan,
             )
         )
-    if not items:
-        body = "<p>Nothing needs your attention.</p>"
-    else:
-        body = "<ul>" + "".join(f"<li>{item}</li>" for item in items) + "</ul>"
+    items.append("!! " + _text(_critical_line(report.topology), scan))
+    body = "<ul>" + "".join(f"<li>{item}</li>" for item in items) + "</ul>"
     return f'<section id="attention">\n<h2>Needs attention</h2>\n{body}\n</section>\n'
+
+
+def _analysis_attention(built: Topology, names: dict[str, str], scan: SecretScan) -> list[str]:
+    """One line per "could not check" and per Device Role out of date (story 100).
+
+    A Cisco source that is down already has one line from the Run's end, in
+    `RunReport.attention`; these are the per-device gaps Analysis found. A whole-source
+    outage skips both Checks, so it never turns into one line per device (story 118).
+    """
+    selected = sorted(
+        (
+            finding
+            for finding in built.findings
+            if finding.check.id in (COULD_NOT_CHECK_CHECK_ID, DEVICE_ROLE_CHECK_ID)
+        ),
+        key=lambda finding: finding.order,
+    )
+    return ["!! " + _finding_attention(finding, names, scan) for finding in selected]
+
+
+def _finding_attention(finding: Finding, names: dict[str, str], scan: SecretScan) -> str:
+    """`<device>: <what was found>` for one per-device Finding."""
+    who = ", ".join(names.get(device, device) for device in finding.devices)
+    return _text(f"{who or 'the whole network'}: {finding.what_was_found}", scan)
+
+
+def _critical_line(built: Topology) -> str:
+    """Story 100's one line: how much Critical work there is, and where to read it."""
+    critical = [finding for finding in built.findings if finding.level is FindingLevel.CRITICAL]
+    checks = len({finding.check.id for finding in critical})
+    return f"{len(critical)} Critical Findings from {checks} Checks \u2014 see the Findings report."
 
 
 def _host_keys(devices: tuple[DeviceRecord, ...], scan: SecretScan) -> str:
@@ -254,15 +307,89 @@ def _unvisited(built: Topology, names: dict[str, str], scan: SecretScan) -> str:
 
 
 def _findings(built: Topology, names: dict[str, str], scan: SecretScan) -> str:
-    """Mismatch kinds 2-4 and conflicts in full; noisy kinds as counts; the lists."""
-    full = [item for item in built.findings if item.kind not in _NOISY]
-    noisy = Counter(item.kind.value for item in built.findings if item.kind in _NOISY)
-    full_list = "".join(f"<li>{_finding(item, names, scan)}</li>" for item in full)
-    full_list = full_list or "<li>None.</li>"
-    noisy_list = "".join(
-        f"<li>{_text(f'{kind}: {count}', scan)}</li>" for kind, count in sorted(noisy.items())
+    """Finding and Check counts, the worst Checks, the Cisco notes and v1's diagnostics.
+
+    The per-Finding list is the Findings report's job, so it is not repeated here (story
+    101). The tables v1 added under this heading stay, because they are not in that report.
+    """
+    findings = built.findings
+    checks = {finding.check.id for finding in findings}
+    rows = _critical_and_high(findings)
+    body = (
+        f"<p>{_count(len(findings), 'Finding')} from {_count(len(checks), 'Check')}. "
+        f'The full list, with devices, is in <a href="findings.html">findings.html</a>.</p>\n'
+        + _hardest_checks(rows, scan)
+        + _cisco_notes(built, scan)
+        + _topology_details(built, names, scan)
     )
-    noisy_list = noisy_list or "<li>None.</li>"
+    return f'<section id="findings">\n<h2>Findings</h2>\n{body}\n</section>\n'
+
+
+def _critical_and_high(
+    findings: Sequence[Finding],
+) -> tuple[tuple[FindingLevel, Check, int], ...]:
+    """One row per Check at Critical and High, worst first, with its device count.
+
+    A Check whose Findings differ in level appears once under each level, as on the
+    Findings tab (story 88). Worst first is level, then the most devices hit.
+    """
+    groups: dict[tuple[FindingLevel, str], list[Finding]] = {}
+    for finding in findings:
+        if finding.level in (FindingLevel.CRITICAL, FindingLevel.HIGH):
+            groups.setdefault((finding.level, finding.check.id), []).append(finding)
+    rows = [
+        (
+            level,
+            group[0].check,
+            len({device for finding in group for device in finding.devices}),
+        )
+        for (level, _check_id), group in groups.items()
+    ]
+    return tuple(
+        sorted(
+            rows,
+            key=lambda row: (
+                row[0].rank,
+                -row[2],
+                row[1].soft,
+                row[1].name.casefold(),
+                row[1].id,
+            ),
+        )
+    )
+
+
+def _hardest_checks(rows: tuple[tuple[FindingLevel, Check, int], ...], scan: SecretScan) -> str:
+    """The capped Critical and High table, or a line saying there are none (story 101)."""
+    if not rows:
+        return "<p>No Critical or High Checks.</p>\n"
+    shown = rows[:CRITICAL_AND_HIGH_ROWS]
+    table = _table(
+        ("Level", "Check", "Devices"),
+        tuple(
+            (_text(level.value, scan), _text(check.name, scan), str(devices))
+            for level, check, devices in shown
+        ),
+    )
+    body = f"<p>The Checks that hit hardest:</p>\n{table}\n"
+    if len(rows) > len(shown):
+        body += (
+            f"<p>Showing the worst {len(shown)} of {_count(len(rows), 'Critical and High Check')}"
+            ".</p>\n"
+        )
+    return body
+
+
+def _cisco_notes(built: Topology, scan: SecretScan) -> str:
+    """Story 47's and 54's notes, plus story 21's when Cisco lookups ran."""
+    notes = [_MEDIUM_AND_LOW_NOTE, _NXOS_NOTE]
+    if built.cisco_lookups is not None and built.cisco_lookups.ran:
+        notes.append(_TLS_NOTE)
+    return f"<h3>About Cisco data</h3>\n<p>{_text(' '.join(notes), scan)}</p>\n"
+
+
+def _topology_details(built: Topology, names: dict[str, str], scan: SecretScan) -> str:
+    """v1's skipped checks, unrecognised names and unplaced next hops, kept unchanged."""
     checks = _table(
         ("Device", "Data", "Reason"),
         tuple(
@@ -298,25 +425,16 @@ def _findings(built: Topology, names: dict[str, str], scan: SecretScan) -> str:
         ),
     )
     body = (
-        "<h3>In full</h3>\n<ul>"
-        f"{full_list}</ul>\n<h3>Noisy kinds</h3>\n<ul>{noisy_list}</ul>\n"
         f"<h3>Unknown checks</h3>\n{checks}\n"
         f"<h3>Unrecognised interface names</h3>\n{names_table}\n"
         f"<h3>Next hops with no Link</h3>\n{hops}\n"
     )
-    return (
-        '<section id="findings">\n<h2>Topology findings</h2>\n'
-        f"{_details('Findings', body)}\n</section>\n"
-    )
+    return _details("Topology details", body)
 
 
-def _finding(item: Finding, names: dict[str, str], scan: SecretScan) -> str:
-    """One finding in full, linked by its stable id."""
-    who = ", ".join(
-        _link("device", device, names.get(device, device), scan) for device in item.devices
-    )
-    label = item.kind.value if item.kind is not None else item.check.name
-    return f"{_link('finding', item.id, label, scan)}: {_text(item.summary, scan)} ({who})"
+def _count(count: int, noun: str) -> str:
+    """`1 Check`, `0 Checks`: the counts in the Findings section and the table's cap."""
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
 
 def _sweep(sweep: SweepResult | None, scan: SecretScan) -> str:

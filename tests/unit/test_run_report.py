@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 
 from network_analyser import discovery, topology
+from network_analyser.analysis.advisory import COULD_NOT_CHECK_CHECK
+from network_analyser.analysis.catalogue import ROLE_CHECK
 from network_analyser.cli import ExitCode, summary
 from network_analyser.credentials import Secret, SecretScan
 from network_analyser.records.backup import BackupRecord, BackupResults
@@ -25,6 +27,7 @@ from network_analyser.records.sweep import ProbeFailure, ProbeResult, SweepResul
 from network_analyser.records.topology import (
     Check,
     CheckType,
+    CiscoLookups,
     Finding,
     FindingKind,
     FindingLevel,
@@ -87,9 +90,6 @@ def test_the_page_is_static_escaped_and_in_utc() -> None:
     assert "dev-S1" in page
     assert "&lt;script&gt;" in page
     assert 'href="diagram.html#device=dev-S1"' in page
-    assert 'href="diagram.html#finding=finding-0123456789ab"' in page
-    assert "differing native VLAN" in page
-    assert "VLAN on one end only: 1" in page
     assert "show vlan brief: denied" in page
     assert "GigabitEthernet9/9/9" in page
     assert "198.51.100.9" in page
@@ -199,6 +199,7 @@ def test_a_finding_without_a_v1_kind_is_named_by_its_check() -> None:
     analysis = dataclasses.replace(
         base.topology.findings[0],
         kind=None,
+        level=FindingLevel.HIGH,
         check=Check(
             "consistency-model-drift",
             "Same model on different releases",
@@ -211,7 +212,7 @@ def test_a_finding_without_a_v1_kind_is_named_by_its_check() -> None:
     page = report_page.render_run_report(dataclasses.replace(base, topology=built), SecretScan())
 
     assert "Same model on different releases" in page
-    assert "C9300-48P runs on two releases" in page
+    assert "C9300-48P runs on two releases" not in page
 
 
 def test_the_file_is_written_whole_through_the_scan(tmp_path: Path) -> None:
@@ -402,3 +403,242 @@ def _drawn(devices: tuple[DeviceRecord, ...]) -> Topology:
             ),
         ),
     )
+
+
+# -- Analysis in the Run report (#110, stories 21, 47, 54 and 99-102) ------------------------
+
+
+def _analysis_report(
+    *findings: Finding,
+    lookups: bool = False,
+    attention: tuple[str, ...] = (),
+) -> RunReport:
+    """A Run report with two ordinary devices and the given Analysis Findings."""
+    chosen = (visited("192.0.2.1", "S1", "sw-a"), visited("192.0.2.2", "S2", "sw-b"))
+    built = dataclasses.replace(
+        topology.build(chosen),
+        findings=findings,
+        cisco_lookups=CiscoLookups(ran=lookups, when="2026-11-19 11:06:00Z" if lookups else None),
+    )
+    return dataclasses.replace(_report(), devices=chosen, topology=built, attention=attention)
+
+
+def _check_finding(
+    check_id: str,
+    level: FindingLevel,
+    *,
+    name: str | None = None,
+    devices: tuple[str, ...] = ("dev-S1",),
+    what_was_found: str | None = None,
+) -> Finding:
+    return Finding(
+        id=f"finding-{check_id}",
+        devices=devices,
+        items=(),
+        evidence=(),
+        level=level,
+        check=Check(check_id, name or check_id, CheckType.CONFIGURATION),
+        what_was_found=what_was_found or f"{check_id} found",
+        what_to_do="Fix it.",
+        source="config",
+        summary=f"{check_id} summary",
+    )
+
+
+def _section(page: str, ident: str) -> str:
+    return page.split(f'<section id="{ident}">', 1)[1].split("</section>", 1)[0]
+
+
+def test_the_analysis_check_ids_match_the_ones_analysis_raises() -> None:
+    assert ROLE_CHECK.id == report_page.DEVICE_ROLE_CHECK_ID
+    assert COULD_NOT_CHECK_CHECK.id == report_page.COULD_NOT_CHECK_CHECK_ID
+
+
+def test_the_summary_gives_the_finding_total_and_each_level_count() -> None:
+    page = report_page.render_run_report(
+        _analysis_report(
+            _check_finding("check-critical", FindingLevel.CRITICAL),
+            _check_finding("check-high", FindingLevel.HIGH),
+            _check_finding("check-medium", FindingLevel.MEDIUM),
+            _check_finding("check-low-one", FindingLevel.LOW),
+            _check_finding("check-low-two", FindingLevel.LOW),
+        ),
+        SecretScan(),
+    )
+
+    summary = _section(page, "summary")
+    assert "<dt>Findings</dt><dd>5</dd>" in summary
+    assert "<dt>Critical</dt><dd>1</dd>" in summary
+    assert "<dt>High</dt><dd>1</dd>" in summary
+    assert "<dt>Medium</dt><dd>1</dd>" in summary
+    assert "<dt>Low</dt><dd>2</dd>" in summary
+
+
+def test_needs_attention_carries_outages_could_not_check_role_and_the_critical_line() -> None:
+    outage = "Cisco advisories (openVuln) did not run: Cisco could not be reached."
+    page = report_page.render_run_report(
+        _analysis_report(
+            _check_finding(
+                "advisory-cisco-sa-example",
+                FindingLevel.CRITICAL,
+                name="Example Advisory",
+            ),
+            _check_finding(
+                "advisory-could-not-check",
+                FindingLevel.LOW,
+                name="Advisory could not check",
+                what_was_found=(
+                    "Could not check the release's Advisories: the release is unreadable."
+                ),
+            ),
+            _check_finding(
+                "config-device-role-out-of-date",
+                FindingLevel.MEDIUM,
+                name="Device Role out of date",
+                what_was_found=(
+                    "Device Role is out of date: 2 Checks could not run "
+                    "(NTP not synchronised, SSH key under 2048 bits). "
+                    "Re-apply the Device Role printed by role-snippet."
+                ),
+            ),
+            attention=(outage,),
+        ),
+        SecretScan(),
+    )
+
+    attention = _section(page, "attention")
+    assert outage in attention
+    assert "sw-a: Could not check" in attention
+    assert "the release is unreadable." in attention
+    assert "sw-a: Device Role is out of date: 2 Checks could not run" in attention
+    assert "role-snippet" in attention
+    assert "!! 1 Critical Findings from 1 Checks \u2014 see the Findings report." in attention
+
+
+def test_the_findings_section_counts_checks_and_links_to_the_findings_report() -> None:
+    page = report_page.render_run_report(
+        _analysis_report(
+            _check_finding(
+                "critical-advisory",
+                FindingLevel.CRITICAL,
+                devices=("dev-S1", "dev-S2"),
+            ),
+            _check_finding("high-telnet", FindingLevel.HIGH),
+            _check_finding("medium-ntp", FindingLevel.MEDIUM),
+            _check_finding("low-bundle", FindingLevel.LOW),
+        ),
+        SecretScan(),
+    )
+
+    findings = _section(page, "findings")
+    assert "4 Findings from 4 Checks" in findings
+    assert '<a href="findings.html">findings.html</a>' in findings
+
+
+def test_the_critical_and_high_table_is_worst_first_capped_and_counts_devices() -> None:
+    page = report_page.render_run_report(
+        _analysis_report(
+            _check_finding(
+                "critical-big",
+                FindingLevel.CRITICAL,
+                name="Critical big",
+                devices=("dev-S1", "dev-S2"),
+            ),
+            _check_finding("critical-small", FindingLevel.CRITICAL, name="Critical small"),
+            *(
+                _check_finding(f"high-{number:02d}", FindingLevel.HIGH, name=f"High {number:02d}")
+                for number in range(1, 11)
+            ),
+        ),
+        SecretScan(),
+    )
+
+    findings = _section(page, "findings")
+    assert "<th>Level</th><th>Check</th><th>Devices</th>" in findings
+    assert "<tr><td>Critical</td><td>Critical big</td><td>2</td></tr>" in findings
+    assert "<tr><td>Critical</td><td>Critical small</td><td>1</td></tr>" in findings
+    assert findings.index("Critical big") < findings.index("Critical small")
+    assert findings.index("Critical small") < findings.index("High 01")
+    assert "High 08" in findings
+    assert "High 09" not in findings
+    assert "High 10" not in findings
+    assert "Showing the worst 10 of 12 Critical and High Checks." in findings
+
+
+def test_the_findings_section_lists_only_critical_and_high_checks() -> None:
+    page = report_page.render_run_report(
+        _analysis_report(
+            _check_finding("critical-advisory", FindingLevel.CRITICAL, name="Critical check"),
+            _check_finding(
+                "medium-ntp",
+                FindingLevel.MEDIUM,
+                name="NTP not synchronised",
+                what_was_found="NTP is not synchronised on sw-a",
+            ),
+            _check_finding(
+                "low-bundle",
+                FindingLevel.LOW,
+                name="VLAN on one end only",
+                what_was_found="VLAN 30 on one end only",
+            ),
+        ),
+        SecretScan(),
+    )
+
+    findings = _section(page, "findings")
+    assert "Critical check" in findings
+    assert "NTP not synchronised" not in findings
+    assert "NTP is not synchronised on sw-a" not in findings
+    assert "VLAN on one end only" not in findings
+    assert "VLAN 30 on one end only" not in findings
+
+
+def test_the_report_says_ciscos_data_was_fetched_over_tls_only_when_lookups_ran() -> None:
+    ran = report_page.render_run_report(_analysis_report(lookups=True), SecretScan())
+    not_ran = report_page.render_run_report(_analysis_report(lookups=False), SecretScan())
+
+    assert ran.count("was fetched over TLS and not signature-checked.") == 1
+    assert "Cisco&#x27;s data was fetched over TLS" in ran
+    assert "not signature-checked" not in not_ran
+
+
+def test_the_report_says_medium_and_low_are_not_listed_and_that_openvuln_covers_nxos() -> None:
+    page = report_page.render_run_report(_analysis_report(lookups=True), SecretScan())
+
+    assert page.count("Medium and Low Advisories are not listed.") == 1
+    assert page.count("openVuln covers NX-OS only from July 2019.") == 1
+
+
+def test_analysis_strings_are_escaped_in_the_table_and_needs_attention() -> None:
+    hostile = '<script>alert("x")</script>'
+    page = report_page.render_run_report(
+        _analysis_report(
+            _check_finding("critical-hostile", FindingLevel.CRITICAL, name=hostile),
+            _check_finding(
+                "advisory-could-not-check",
+                FindingLevel.LOW,
+                name="Advisory could not check",
+                what_was_found=f"Could not check the release's Advisories: {hostile}",
+            ),
+        ),
+        SecretScan(),
+    )
+
+    assert "&lt;script&gt;" in page
+    assert _SCRIPT.search(page) is None
+    assert _URL.search(page) is None
+
+
+def test_v1s_other_report_sections_are_unchanged() -> None:
+    page = report_page.render_run_report(_report(), SecretScan())
+
+    for heading in (
+        "Summary",
+        "Needs attention",
+        "New host keys",
+        "Visited Devices",
+        "Unvisited Devices",
+        "Sweep",
+        "Credential Sets",
+    ):
+        assert f"<h2>{heading}</h2>" in page
