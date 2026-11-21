@@ -151,7 +151,11 @@ def test_unvisited_devices_get_no_analysis() -> None:
 def test_every_shipped_check_runs_and_one_advice_record_exists_per_visited_device() -> None:
     results = _results(_device(A, "S1", "sw-a"), _device(B, "S2", "sw-b"))
 
-    assert [run.check.id for run in results.checks] == ["consistency-model-drift"]
+    assert [run.check.id for run in results.checks] == [
+        "advisory-could-not-check",
+        "advisory-openvuln",
+        "consistency-model-drift",
+    ]
     assert all(run.ran for run in results.checks)
     assert all(run.reason is None for run in results.checks)
     assert [advice.device for advice in results.advice] == ["dev-S1", "dev-S2"]
@@ -239,9 +243,9 @@ def test_the_lookup_questions_are_deduplicated_and_pattern_valid() -> None:
     assert "S1" not in questions.pids
 
 
-def test_a_release_that_is_not_pattern_valid_is_not_sent() -> None:
+def test_a_release_the_family_table_does_not_hold_is_not_sent() -> None:
     results_input = AnalysisInput(
-        topology=topology.build((_device(A, "S1", "sw-a", release="17.9.4a [build 1]"),))
+        topology=topology.build((_device(A, "S1", "sw-a", release="17.9.4a;drop tables"),))
     )
 
     assert analysis.lookup_questions(results_input).releases == ()
@@ -281,7 +285,11 @@ def test_the_results_fit_topology_json_as_optional_fields() -> None:
     assert advice[0]["upgrade_target"] == "not available"
     checks = analysis_record["checks"]
     assert isinstance(checks, list)
-    assert [item["check"]["id"] for item in checks] == ["consistency-model-drift"]
+    assert [item["check"]["id"] for item in checks] == [
+        "advisory-could-not-check",
+        "advisory-openvuln",
+        "consistency-model-drift",
+    ]
     assert checks[0]["ran"] is True
 
 

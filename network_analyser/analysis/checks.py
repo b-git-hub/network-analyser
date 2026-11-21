@@ -12,8 +12,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final
 
+from network_analyser.analysis import advisory
 from network_analyser.analysis.ids import finding_id
-from network_analyser.records.analysis import AnalysisInput
+from network_analyser.records.analysis import AnalysisInput, SourceUnavailable
 from network_analyser.records.topology import (
     Check,
     CheckType,
@@ -40,10 +41,13 @@ class CheckDefinition:
     Attributes:
         check: its stable identity, shown on every Finding it raises.
         run: returns every Finding it raises for the Run.
+        skip_reason: why the Check was skipped this Run, or None when it ran. A Check that
+            needs a Cisco source uses it, so an outage raises no per-device Findings (story 118).
     """
 
     check: Check
     run: Callable[[AnalysisInput], tuple[Finding, ...]]
+    skip_reason: Callable[[AnalysisInput], str | None] | None = None
 
 
 def model_drift(data: AnalysisInput) -> tuple[Finding, ...]:
@@ -95,10 +99,28 @@ def model_drift(data: AnalysisInput) -> tuple[Finding, ...]:
     return tuple(findings)
 
 
+def advisories_unavailable(data: AnalysisInput) -> str | None:
+    """Why the Advisory Checks could not run: openVuln's outage reason, or None (story 118)."""
+    source = data.answers.advisories
+    return source.reason if isinstance(source, SourceUnavailable) else None
+
+
 def _name(device: VisitedDevice) -> str:
     """What a Finding calls a device: its hostname, else its id."""
     return device.hostname if isinstance(device.hostname, str) else device.id
 
 
-CHECKS: tuple[CheckDefinition, ...] = (CheckDefinition(MODEL_DRIFT_CHECK, model_drift),)
+CHECKS: tuple[CheckDefinition, ...] = (
+    CheckDefinition(MODEL_DRIFT_CHECK, model_drift),
+    CheckDefinition(
+        advisory.ADVISORY_CHECK,
+        advisory.advisory_findings,
+        skip_reason=advisories_unavailable,
+    ),
+    CheckDefinition(
+        advisory.COULD_NOT_CHECK_CHECK,
+        advisory.could_not_check_findings,
+        skip_reason=advisories_unavailable,
+    ),
+)
 """Every shipped Check. Order does not matter: results are sorted by Check id."""

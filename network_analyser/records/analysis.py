@@ -178,12 +178,15 @@ class ReleaseAdvisories:
         release: the release asked about, normalised before lookup (story 45).
         advisories: every Advisory Cisco named for it; empty means it named none.
         hardware_family: the Nexus hardware family asked about on NX-OS; None otherwise.
+        unavailable: why Cisco gave no answer for this release, such as
+            `INVALID_IOS_VERSION`; None when it answered (story 53).
     """
 
     os_type: OsType
     release: str
     advisories: tuple[AdvisoryAnswer, ...] = ()
     hardware_family: str | None = None
+    unavailable: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,15 +269,19 @@ class CiscoAnswers:
 
 @dataclass(frozen=True, slots=True)
 class ReleaseQuestion:
-    """One OS type and release to ask Cisco about (stories 12-13, 43-45).
+    """One OS type and release to ask Cisco about (stories 12-13, 43-46).
 
     Attributes:
         os_type: the family the release belongs to.
         release: the release string, pattern-valid and normalised before sending (story 45).
+        hardware_family: the Nexus hardware family openVuln is asked about on NX-OS, such as
+            `NEXUS9000`; None for IOS and IOS-XE, and for an NX-OS device whose family could
+            not be worked out (story 46).
     """
 
     os_type: OsType
     release: str
+    hardware_family: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
