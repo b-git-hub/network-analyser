@@ -16,6 +16,7 @@ A dated, historical record kept by the coordinating (chief-of-staff) session and
 ## Decisions
 - [spec-37-implementation-calls](spec-37-implementation-calls.md): 2026-11-18 calls on CI, uv packaging, secret holders and config sinks while building spec #37; 2026-11-19 calls on `diagram.drawio` (#65) and `run-report.html` (#66).
 - [run-end-online-wiring-2026-11-21](run-end-online-wiring-2026-11-21.md): 2026-11-21 order, secret wipe, NX-OS question handling, outages and Audit event shape for #104.
+- [run-report-analysis-2026-11-21](run-report-analysis-2026-11-21.md): 2026-11-21 Run report summary, Needs attention, Critical/High table and Cisco notes for #110.
 - [operator-wants-cml-build](operator-wants-cml-build.md): 2026-11-18 standing instruction to finish a CML-testable Windows build unattended.
 - [delivery-one-draft-pr](delivery-one-draft-pr.md): spec #37 ships as one draft PR from the integration branch.
 

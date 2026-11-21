@@ -96,7 +96,11 @@ def test_analysis_runs_at_the_run_s_end_and_its_finding_reaches_every_output(
     (folder,) = data_folder().runs.iterdir()
     page = (Path(folder) / "diagram.html").read_text(encoding="utf-8")
     assert drift[0]["id"] in page
-    assert "Same model on different releases" in (Path(folder) / "run-report.html").read_text(
+    report = (Path(folder) / "run-report.html").read_text(encoding="utf-8")
+    assert f"<dt>Findings</dt><dd>{len(findings)}</dd>" in report
+    assert '<a href="findings.html">findings.html</a>' in report
+    assert "Same model on different releases" not in report  # #110: the report does not dump it
+    assert "Same model on different releases" in (Path(folder) / "findings.html").read_text(
         encoding="utf-8"
     )
 

@@ -303,11 +303,14 @@ def test_a_cisco_key_in_a_finding_never_reaches_the_run_outputs(tmp_path: Path) 
     scan.watch(Secret(fake_cisco.TOKEN))
     canaries = (fake_cisco.CLIENT_ID, fake_cisco.CLIENT_SECRET, fake_cisco.TOKEN)
     page_report = _report()
+    first = page_report.topology.findings[0]
     built = dataclasses.replace(
         page_report.topology,
         findings=(
             dataclasses.replace(
-                page_report.topology.findings[0],
+                first,
+                level=FindingLevel.HIGH,
+                check=dataclasses.replace(first.check, name=" ".join(canaries)),
                 summary=" ".join(canaries),
             ),
         ),
