@@ -1,0 +1,18 @@
+{
+ "format_version": 1,
+ "started_at": "2026-11-19T09:30:00Z",
+ "done": {
+  "C:\\Users\\bmcbride\\network-analyser\\wt\\ticket-138\\UsersbmcbrideAppDataLocalTemppt-138\\test_a_backup_that_does_not_ma0\\runs\\20261118T101530Z\\backups\\stray.cfg.age": {
+   "before": "5514e7dda528df11989b8da6f62585586e383c2dad537fead0604d1fca275ae0",
+   "after": "9f0215eca5c2954dbd143c2d4db6831173aca4d016ad375f64b5877aac42c9e0"
+  },
+  "C:\\Users\\bmcbride\\network-analyser\\wt\\ticket-138\\UsersbmcbrideAppDataLocalTemppt-138\\test_a_backup_that_does_not_ma0\\runs\\20261118T101530Z\\backups\\sw-a__TEST0001.cfg.age": {
+   "before": "56da81e681ea08041be9d50c46f8e2c9c23594ac8f5c7e1792533fec53bf4109",
+   "after": "bf53c85679d6463cf86b6afcf57ee03a618ca17098b64480f8dfea28304b80be"
+  },
+  "C:\\Users\\bmcbride\\network-analyser\\wt\\ticket-138\\UsersbmcbrideAppDataLocalTemppt-138\\test_a_backup_that_does_not_ma0\\runs\\20261118T101530Z\\backups\\manifest.age": {
+   "before": "31773cc3c59115b768c0f5e24b0647d91e9a8da82634ee207aea85655f1ce512",
+   "after": "cfedc2c6fe1f4269a5cef86cc5833952c0715131bdedf74ab7c05b4eb33da574"
+  }
+ }
+}

@@ -1,0 +1,14 @@
+{
+ "format_version": 1,
+ "started_at": "2026-11-19T09:30:00Z",
+ "done": {
+  "C:\\Users\\bmcbride\\network-analyser\\wt\\ticket-138\\UsersbmcbrideAppDataLocalTemppt-138\\test_each_relocked_run_folder_0\\runs\\20261118T101530Z\\backups\\sw-a__TEST0001.cfg.age": {
+   "before": "8051382965c23b2ca37a88ab45376fdc266ee20982af795bf0848993f83e8b32",
+   "after": "f242946e3c771fd05e370f6c3c232cb5a2ab5c82e867c54622a3ad0618a54dc4"
+  },
+  "C:\\Users\\bmcbride\\network-analyser\\wt\\ticket-138\\UsersbmcbrideAppDataLocalTemppt-138\\test_each_relocked_run_folder_0\\runs\\20261118T101530Z\\backups\\manifest.age": {
+   "before": "31773cc3c59115b768c0f5e24b0647d91e9a8da82634ee207aea85655f1ce512",
+   "after": "3bd38376cf33d31925a236ff2e33054784742aa93290b8073ef9b690a3281b68"
+  }
+ }
+}

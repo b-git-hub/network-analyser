@@ -467,8 +467,8 @@ def _latest(answers: CiscoAnswer[CompatibleReleases], device: VisitedDevice) -> 
     count, so a codename or free-text entry never wins (#138). A device running above a value
     reads `running release is newer than Cisco's list` instead of being shown an older release
     (story 7), but only when its own release is in the family table: an ACI-mode device is
-    never compared with a standalone list. An unanswered or rejected PID, an empty list, the page cap and an outage all
-    read `not available` (stories 9, 11-13).
+    never compared with a standalone list. An unanswered or rejected PID, an empty list, the
+    page cap and an outage all read `not available` (stories 9, 11-13).
     """
     missing = LatestRelease()
     if isinstance(answers, SourceUnavailable) or not isinstance(device.model, str):
