@@ -1,4 +1,5 @@
-"""`render RUN_FOLDER` redraws `diagram.html` in place from `topology.json` alone (#63, story 155).
+"""`render RUN_FOLDER` redraws `diagram.html` and `findings.html` in place from
+`topology.json` alone (#63, #107, story 155).
 
 No device is contacted (the suite refuses every connection), and the Run report is never
 touched.
@@ -15,6 +16,7 @@ from tests.support.topology_documents import device, document, link
 
 DIAGRAM = "diagram.html"
 DRAWIO = "diagram.drawio"
+FINDINGS = "findings.html"
 
 
 def _render(*argv: str) -> int:
@@ -43,8 +45,32 @@ def test_render_draws_diagram_html_beside_topology_json(
     assert "dev-S2" in page
     assert DIAGRAM in capsys.readouterr().out
     assert sorted(p.name for p in run_folder.iterdir()) == sorted(
-        [DIAGRAM, DRAWIO, "topology.json"]
+        [DIAGRAM, DRAWIO, FINDINGS, "topology.json"]
     )
+
+
+def test_render_draws_findings_html_from_topology_json(
+    run_folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = _render(str(run_folder))
+
+    assert code == ExitCode.CLEAN
+    page = (run_folder / FINDINGS).read_text(encoding="utf-8")
+    assert '<meta http-equiv="Content-Security-Policy"' in page
+    assert "Findings report" in page
+    assert "Run time 2026-11-18 10:15:30Z" in page  # the Run folder's name
+    assert "sw-a" in page
+    assert "sw-b" in page
+    assert FINDINGS in capsys.readouterr().out
+
+
+def test_render_redraws_findings_html_in_place(run_folder: Path) -> None:
+    (run_folder / FINDINGS).write_text("an older findings report", encoding="utf-8")
+
+    assert _render(str(run_folder)) == ExitCode.CLEAN
+
+    assert "an older findings report" not in (run_folder / FINDINGS).read_text(encoding="utf-8")
+    assert "sw-b" in (run_folder / FINDINGS).read_text(encoding="utf-8")
 
 
 def test_render_draws_diagram_drawio_beside_diagram_html(
@@ -128,6 +154,7 @@ def test_a_topology_from_a_newer_version_is_refused(
     assert "newer version" in capsys.readouterr().err
     assert not (run_folder / DIAGRAM).exists()
     assert not (run_folder / DRAWIO).exists()
+    assert not (run_folder / FINDINGS).exists()
 
 
 @pytest.mark.parametrize("text", ["not json", '{"format_version": 1, "devices": "x"}', "\udcff"])
@@ -142,6 +169,7 @@ def test_a_file_that_is_not_a_topology_is_refused(
     assert "refused" in capsys.readouterr().err
     assert not (run_folder / DIAGRAM).exists()
     assert not (run_folder / DRAWIO).exists()
+    assert not (run_folder / FINDINGS).exists()
 
 
 def test_a_folder_with_no_topology_is_refused(

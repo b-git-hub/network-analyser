@@ -17,6 +17,8 @@ import pytest
 from network_analyser import diagram
 from network_analyser.cli.findings_file import FINDINGS_FILE, write_findings
 from network_analyser.credentials import Secret, SecretScan
+from network_analyser.diagram.findings_report import DEVICE_ROLE_CHECK as REPORTED_ROLE_CHECK
+from network_analyser.platforms.collection import DEVICE_ROLE_CHECK as RAISED_ROLE_CHECK
 from network_analyser.run_output import RunFolder
 from tests.support import fake_age
 from tests.support.run_driver import (
@@ -38,9 +40,7 @@ from tests.support.topology_documents import (
 RUN_TIME = "2026-11-20 14:02:00Z"
 HOSTILE = "</script><img src=x onerror=alert(1)>\"'&\u2028"
 ADVISORY_ID = "cisco-sa-example-abc123"
-ADVISORY_HREF = (
-    "https://sec.cloudapps.cisco.com/security/center/content/CiscoSecurityAdvisory/"
-)
+ADVISORY_HREF = "https://sec.cloudapps.cisco.com/security/center/content/CiscoSecurityAdvisory/"
 FIXED = (
     "Matched on software release only. Cisco may limit this Advisory to devices that use a "
     "particular feature; see 'Vulnerable Products' on Cisco's page."
@@ -128,8 +128,8 @@ def _advised(  # noqa: PLR0913 (each part of the advice, by name)
     hostname: str,
     address: str,
     *,
-    release: str = "17.12.4",
-    outcome: str = "1 Advisory matches",
+    release: str | None = "17.12.4",
+    outcome: str | None = "1 Advisory matches",
     upgrade_target: str | None = "17.12.8",
     latest_release: str | None = "17.12.10",
     latest_in_train: str | None = "17.12.10",
@@ -224,11 +224,12 @@ def test_the_index_lists_devices_worst_first_with_counts_per_level() -> None:
     assert _order(index, "dev-S3", "dev-S1", "dev-S2") == sorted(
         _order(index, "dev-S3", "dev-S1", "dev-S2")
     )
-    rows = re.findall(r"<tr><td>(.*?)</tr>", index, re.DOTALL)
+    body = index[index.index("<tbody>") :]
+    rows = re.findall(r"<tr>(.*?)</tr>", body, re.DOTALL)
     assert [re.findall(r"<td>(.*?)</td>", row) for row in rows] == [
-        ["<a href=\"#dev-S3\">sw-c</a>", "1", "0", "0", "0", "1"],
-        ["<a href=\"#dev-S1\">sw-a</a>", "0", "1", "0", "0", "1"],
-        ["<a href=\"#dev-S2\">sw-b</a>", "0", "0", "0", "0", "0"],
+        ['<a href="#dev-S3">sw-c</a>', "1", "0", "0", "0", "1"],
+        ['<a href="#dev-S1">sw-a</a>', "0", "1", "0", "0", "1"],
+        ['<a href="#dev-S2">sw-b</a>', "0", "0", "0", "0", "0"],
     ]
 
 
@@ -266,6 +267,11 @@ def test_the_upgrade_target_callout_and_the_latest_release_lead_the_sheet() -> N
             "no fix in Train 17.12",
         ),
         (
+            [_advisory(ADVISORY_ID, "High", "dev-S1")],
+            {"upgrade_target": "no fix in Train 17.12"},
+            "no fix in Train 17.12",
+        ),
+        (
             [],
             {"outcome": "no known Critical/High Advisories for release 17.12.4"},
             "no Critical/High Advisories",
@@ -278,7 +284,7 @@ def test_the_upgrade_target_callout_and_the_latest_release_lead_the_sheet() -> N
     ],
 )
 def test_the_upgrade_callout_says_one_of_four_things(
-    findings: list[dict[str, object]], advice: dict[str, object], expected: str
+    findings: list[dict[str, object]], advice: dict[str, str | None], expected: str
 ) -> None:
     data = document([_advised("dev-S1", "sw-a", "192.0.2.1", **advice)], findings=findings)
 
@@ -505,7 +511,7 @@ def test_every_device_string_and_cisco_string_is_escaped() -> None:
     detail = _advisory_detail(title=HOSTILE)
     data = document(
         [
-            _advised("dev-S1", HOSTILE, "192.0.2.1", model=HOSTILE, software_version=HOSTILE),
+            _advised("dev-S1", HOSTILE, "192.0.2.1", release=HOSTILE, model=HOSTILE),
         ],
         findings=[
             _advisory(ADVISORY_ID, "High", "dev-S1", detail=detail),
@@ -617,4 +623,11 @@ def test_a_run_writes_the_findings_report_beside_its_other_outputs(run: Runner) 
     page = (folder / FINDINGS_FILE).read_text(encoding="utf-8")
     assert "Findings report" in page
     assert "Run time 20" in page
+    assert "sw-a" in page
+    assert "192.0.2.1" in page
     assert 'http-equiv="Content-Security-Policy"' in page
+    assert FINDINGS_FILE in got.out
+
+
+def test_the_device_role_check_name_is_the_one_platforms_raises() -> None:
+    assert REPORTED_ROLE_CHECK == RAISED_ROLE_CHECK

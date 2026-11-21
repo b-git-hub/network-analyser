@@ -267,7 +267,7 @@ def _add_render(commands: _Commands) -> None:
         commands,
         "render",
         "redraw the diagram of an earlier Run, in its Run folder",
-        "Redraw diagram.html and diagram.drawio from topology.json, in place. "
+        "Redraw diagram.html, diagram.drawio and findings.html from topology.json, in place. "
         "No device is contacted.",
     )
     render.add_argument("run_folder", metavar="RUN_FOLDER")

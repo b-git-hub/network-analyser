@@ -3,8 +3,9 @@
 A static scan of a generated `diagram.html` finds no `http(s)://`, no `<script src>` and no
 fetch calls, nor any other way for the page to load or send anything, even when device
 text is written to look like one (#63). The same scan of a generated `diagram.drawio` finds
-no URL and no namespace to fetch (#65). A generated `run-report.html` has no `http(s)://`,
-no `<script>` at all, and a Content-Security-Policy `<meta>` tag (#66).
+no URL and no namespace to fetch (#65). A generated `run-report.html` or `findings.html` has
+no `http(s)://`, no `<script>` at all, and a Content-Security-Policy `<meta>` tag (#66,
+#107).
 
 The tool itself has one egress module (#95, story 15): a static scan of the package finds an
 HTTP client, a socket or a TLS context only in `advisories`, and the conftest fixture that
@@ -111,6 +112,11 @@ def test_a_rendered_diagram_cannot_reach_the_network(tmp_path: Path) -> None:
             "kind": HOSTILE[7],
             "summary": HOSTILE[0],
             "devices": ["dev-S1"],
+            "level": "High",
+            "check": {"id": "check-0123456789ab", "name": HOSTILE[1], "type": "Configuration"},
+            "what_was_found": HOSTILE[0],
+            "what_to_do": HOSTILE[3],
+            "source": "config",
         }
     ]
     data["adjacencies"] = [adjacency("adj-0123456789ab", "dev-S1", "dev-S2", vrf=HOSTILE[2])]
@@ -129,6 +135,12 @@ def test_a_rendered_diagram_cannot_reach_the_network(tmp_path: Path) -> None:
     drawio = (tmp_path / "diagram.drawio").read_text(encoding="utf-8")
     assert drawio_offences(drawio) == []
     assert "dev-S2" in drawio
+
+    findings = (tmp_path / "findings.html").read_text(encoding="utf-8")
+    assert report_offences(findings) == []
+    assert 'http-equiv="Content-Security-Policy"' in findings
+    assert "script-src 'none'" in findings
+    assert "dev-S1" in findings
 
 
 # A draw.io shape that carries data is an `<object>`, so that tag is not a loaded resource here.

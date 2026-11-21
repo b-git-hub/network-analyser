@@ -32,18 +32,18 @@ import html
 import re
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from typing import Final
 
 from network_analyser.diagram.findings import FIXED_NOTE, advisory_href
 from network_analyser.diagram.topology_file import (
     NOT_RECORDED,
+    DeviceAdvice,
     Plain,
     TopologyFile,
     cisco_lookups,
+    device_advice,
 )
 
-FINDINGS_FILE: Final = "findings.html"
 LEVELS: Final = ("Critical", "High", "Medium", "Low")
 """Worst first. There is no Info level (spec #92, "Levels")."""
 DEVICE_ROLE_CHECK: Final = "Device Role out of date"
@@ -56,7 +56,7 @@ _POLICY: Final = (
     "img-src 'none'; connect-src 'none'; base-uri 'none'; form-action 'none'"
 )
 _SCHEME: Final = re.compile(r"://", re.IGNORECASE)
-_MATCHED: Final = re.compile(r"(\d+) Advisories? match", re.IGNORECASE)
+_MATCHED: Final = re.compile(r"(\d+) Advisor(?:y|ies) match", re.IGNORECASE)
 _NOT_SAFE: Final = "this topology.json does not record the Advisory answer"
 _NOT_LISTED: Final = "the Advisory Findings are not recorded in this topology.json"
 _STYLE: Final = (
@@ -85,9 +85,7 @@ def draw_findings_report(
     """
     content = topology.content
     devices = [
-        record
-        for record in _records(content.get("devices"))
-        if isinstance(record.get("id"), str)
+        record for record in _records(content.get("devices")) if isinstance(record.get("id"), str)
     ]
     findings = [finding for finding in _records(content.get("findings")) if _scaled(finding)]
     known = {_string(record.get("id")) for record in devices}
@@ -104,15 +102,12 @@ def draw_findings_report(
     sheets = sorted(devices, key=lambda record: _sheet_order(record, on_device))
     header = (
         f'<p class="run">Run time {_text(run_time, redact)} \u00b7 '
-        f'{_count(len(findings), "Finding")}</p>\n'
+        f"{_count(len(findings), 'Finding')}</p>\n"
     )
     body = (
         header
         + _top(topology, findings, sheets, on_device, redact)
-        + "".join(
-            _sheet(record, on_device.get(_string(record.get("id")), []), redact)
-            for record in sheets
-        )
+        + "".join(_sheet(record, on_device.get(_ident(record), []), redact) for record in sheets)
         + _orphans(orphans, redact)
     )
     return _page(body)
@@ -169,17 +164,16 @@ def _sheet_order(
     record: Mapping[str, Plain], on_device: Mapping[str, list[Mapping[str, Plain]]]
 ) -> tuple[int, int, str, str]:
     """Worst level first, then the device with more Findings, then its name and id."""
-    findings = on_device.get(_string(record.get("id")), [])
+    findings = on_device.get(_ident(record), [])
     worst = min((_rank(finding) for finding in findings), default=len(LEVELS))
-    return (worst, -len(findings), _device_name(record).casefold(), _string(record.get("id")))
+    return (worst, -len(findings), _device_name(record).casefold(), _ident(record))
 
 
 def _counts(
     record: Mapping[str, Plain], on_device: Mapping[str, list[Mapping[str, Plain]]]
 ) -> Counter[str]:
     return Counter(
-        _string(finding.get("level"))
-        for finding in on_device.get(_string(record.get("id")), [])
+        _string(finding.get("level")) or "" for finding in on_device.get(_ident(record), [])
     )
 
 
@@ -194,7 +188,7 @@ def _sheet(
     advisories = [finding for finding in findings if _advisory_detail(finding) is not None]
     others = [finding for finding in findings if _advisory_detail(finding) is None]
     return (
-        f'<section class="device" id="{_string(record.get("id"))}">\n'
+        f'<section class="device" id="{_ident(record)}">\n'
         f"<header><h2>{_device_name_text(record, redact)}</h2>\n"
         f"{_facts(record, redact)}</header>\n"
         f"{_callout(record, advisories, redact)}\n"
@@ -220,10 +214,8 @@ def _callout(
     redact: Callable[[str], str],
 ) -> str:
     """The Upgrade Target callout, with the Latest Release beside it (stories 55-57, 106)."""
-    advice = _record(record.get("advice"))
-    outcome = None if advice is None else _string(advice.get("outcome"), strict=True)
-    target = None if advice is None else _string(advice.get("upgrade_target"), strict=True)
-    kind, text = _callout_text(advice, outcome, target, advisories)
+    advice = device_advice(record)
+    kind, text = _callout_text(advice, advisories)
     latest = _latest(advice, redact)
     return (
         '<div class="upgrade">'
@@ -234,37 +226,59 @@ def _callout(
 
 
 def _callout_text(
-    advice: Mapping[str, Plain] | None,
-    outcome: str | None,
-    target: str | None,
+    advice: DeviceAdvice,
     advisories: Sequence[Mapping[str, Plain]],
 ) -> tuple[str, str]:
-    if outcome is not None and outcome.lower().startswith("could not check"):
-        return ("could-not-check", outcome)
-    if advice is None or outcome is None:
+    """One of the four callouts (story 106), decided from the recorded advice and Findings."""
+    if not advice.known or advice.outcome is None:
         return ("could-not-check", f"could not check: {_NOT_SAFE}")
-    matched = _MATCHED.search(outcome)
-    if matched is not None and int(matched.group(1)) and not advisories:
+    outcome = advice.outcome
+    lowered = outcome.lower()
+    if lowered.startswith("could not check"):
+        return ("could-not-check", outcome)
+    if lowered.startswith("no known"):
+        return ("none", "no Critical/High Advisories")
+    return _matched_callout(advice, outcome, advisories)
+
+
+def _matched_callout(
+    advice: DeviceAdvice,
+    outcome: str,
+    advisories: Sequence[Mapping[str, Plain]],
+) -> tuple[str, str]:
+    """The callout when the outcome says Advisories match this device's release."""
+    if _MATCHED.search(outcome) is None:
+        return ("could-not-check", f"could not check: {_NOT_SAFE}")
+    if not advisories:
         return ("could-not-check", f"could not check: {_NOT_LISTED}")
-    if advisories or target is not None:
-        if target is not None:
-            return ("upgrade", f"Upgrade to {target} or later")
-        train = _string(advice.get("train"), strict=True)
-        return (
-            "no-fix",
-            f"no fix in Train {train}" if train else "no fix in this device's Train",
-        )
-    return ("none", "no Critical/High Advisories")
+    if not advice.target_recorded:
+        return ("could-not-check", f"could not check: {_NOT_SAFE}")
+    return _target_callout(advice)
 
 
-def _latest(advice: Mapping[str, Plain] | None, redact: Callable[[str], str]) -> str:
-    release = NOT_AVAILABLE if advice is None else _shown(advice.get("latest_release"))
-    in_train = None if advice is None else _string(advice.get("latest_in_train"), strict=True)
-    train = None if advice is None else _string(advice.get("train"), strict=True)
+def _target_callout(advice: DeviceAdvice) -> tuple[str, str]:
+    """The callout for a recorded Upgrade Target: a release, or its fixed "no fix" text."""
+    target = advice.upgrade_target
+    if target is None:
+        return ("no-fix", _no_fix(advice))
+    lowered = target.lower()
+    if lowered.startswith("no fix"):
+        return ("no-fix", target)
+    if lowered.startswith("no critical"):
+        return ("none", "no Critical/High Advisories")
+    return ("upgrade", f"Upgrade to {target} or later")
+
+
+def _no_fix(advice: DeviceAdvice) -> str:
+    return f"no fix in Train {advice.train}" if advice.train else "no fix in this device's Train"
+
+
+def _latest(advice: DeviceAdvice, redact: Callable[[str], str]) -> str:
+    release = NOT_AVAILABLE if advice.latest_release is None else advice.latest_release
     line = f"Latest Release {_text(release, redact)}"
-    if in_train is not None:
-        where = f"latest in Train {train}: " if train else "latest in its Train: "
-        line += f' <span class="muted">({_text(where + in_train, redact)})</span>'
+    if advice.latest_in_train is not None:
+        where = f"latest in Train {advice.train}: " if advice.train else "latest in its Train: "
+        line += f' <span class="muted">({_text(where + advice.latest_in_train, redact)})</span>'
     return line
 
 
@@ -275,13 +289,11 @@ def _advisories(
     if not advisories:
         return ""
     counts = Counter(_string(finding.get("level")) for finding in advisories)
-    summary = f"{_count(len(advisories), 'Advisory')} \u2014 " + ", ".join(
+    summary = f"{_count(len(advisories), 'Advisory', 'Advisories')} \u2014 " + ", ".join(
         f"{counts[level]} {level}" for level in LEVELS if counts.get(level)
     )
-    rows = tuple(
-        _advisory_row(finding, train, redact)
-        for finding in sorted(advisories, key=lambda finding: (_rank(finding), _string(finding.get("id"))))
-    )
+    ordered = sorted(advisories, key=lambda finding: (_rank(finding), _string(finding.get("id"))))
+    rows = tuple(_advisory_row(finding, train, redact) for finding in ordered)
     table = _table(("Level", "Advisory", "Title", "CVSS", "CVEs", "First fixed"), rows)
     return (
         f"<details><summary>{_text(summary, redact)}</summary>\n"
@@ -316,9 +328,7 @@ def _advisory_link(detail: Mapping[str, Plain], redact: Callable[[str], str]) ->
     return f'<a href="{href}" rel="noopener noreferrer">{shown}</a>'
 
 
-def _others(
-    others: Sequence[Mapping[str, Plain]], redact: Callable[[str], str]
-) -> str:
+def _others(others: Sequence[Mapping[str, Plain]], redact: Callable[[str], str]) -> str:
     """The device's other Findings in one table, "Device Role out of date" first (story 108)."""
     if not others:
         return "<p>No Findings recorded for this device.</p>"
@@ -338,13 +348,13 @@ def _others(
 
 
 def _other_order(finding: Mapping[str, Plain]) -> tuple[int, int, str, str, str]:
-    name = _string(_check(finding).get("name"))
+    name = _string(_check(finding).get("name")) or ""
     return (
         0 if name == DEVICE_ROLE_CHECK else 1,
         _rank(finding),
         name,
-        _string(finding.get("what_was_found")),
-        _string(finding.get("id")),
+        _string(finding.get("what_was_found")) or "",
+        _string(finding.get("id")) or "",
     )
 
 
@@ -413,7 +423,13 @@ def _level(finding: Mapping[str, Plain], redact: Callable[[str], str]) -> str:
 
 
 def _device_link(record: Mapping[str, Plain], redact: Callable[[str], str]) -> str:
-    return f'<a href="#{_string(record.get("id"))}">{_device_name_text(record, redact)}</a>'
+    return f'<a href="#{_ident(record)}">{_device_name_text(record, redact)}</a>'
+
+
+def _ident(record: Mapping[str, Plain]) -> str:
+    """A device record's id. The page keeps only records whose id is already text."""
+    value = record.get("id")
+    return value if isinstance(value, str) else ""
 
 
 def _device_name(record: Mapping[str, Plain]) -> str:
@@ -422,7 +438,7 @@ def _device_name(record: Mapping[str, Plain]) -> str:
         value = _string(record.get(field), strict=True)
         if value is not None:
             return value
-    return _string(record.get("id"))
+    return _ident(record)
 
 
 def _device_name_text(record: Mapping[str, Plain], redact: Callable[[str], str]) -> str:
@@ -430,8 +446,7 @@ def _device_name_text(record: Mapping[str, Plain], redact: Callable[[str], str])
 
 
 def _train(record: Mapping[str, Plain]) -> str | None:
-    advice = _record(record.get("advice"))
-    return None if advice is None else _string(advice.get("train"), strict=True)
+    return device_advice(record).train
 
 
 def _check(finding: Mapping[str, Plain]) -> Mapping[str, Plain]:
@@ -458,12 +473,17 @@ def _scaled(finding: Mapping[str, Plain]) -> bool:
     return (
         _string(finding.get("level")) in LEVELS
         and check is not None
-        and all(_string(check.get(field), strict=True) is not None for field in ("id", "name", "type"))
+        and all(
+            _string(check.get(field), strict=True) is not None for field in ("id", "name", "type")
+        )
     )
 
 
-def _count(number: int, noun: str) -> str:
-    return f"{number} {noun}{'' if number == 1 else 's'}"
+def _count(number: int, noun: str, plural: str | None = None) -> str:
+    """`1 Finding` or `3 Findings`; `plural` for a word like Advisory."""
+    if number == 1:
+        return f"1 {noun}"
+    return f"{number} {plural if plural is not None else f'{noun}s'}"
 
 
 def _shown(value: object) -> str:
@@ -477,8 +497,12 @@ def _shown(value: object) -> str:
 
 
 def _text(value: object, redact: Callable[[str], str]) -> str:
-    """Scan `value`, HTML-escape it, and break any `://` so device text holds no URL."""
-    escaped = html.escape(redact(_shown(value)), quote=True)
+    """Scan `value`, HTML-escape it, and break any `://` so device text holds no URL.
+
+    Escaping is for text between tags, never an attribute: every id that reaches one was
+    checked as a plain id. So `'` and `"` stay as the operator reads them.
+    """
+    escaped = html.escape(redact(_shown(value)), quote=False)
     return _SCHEME.sub(":&#47;&#47;", escaped).replace("\n", "<br>\n")
 
 

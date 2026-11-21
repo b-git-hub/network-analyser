@@ -2,7 +2,7 @@
 
 A canary Credential Set password and Backup Passphrase never appear in `repr`/`str`, the
 console output, `audit.log`, `topology.json` (#52), `diagram.html` (#63), `diagram.drawio`
-(#65) or `run-report.html` (#66), and nothing from
+(#65), `run-report.html` (#66) or `findings.html` (#107), and nothing from
 the `netmiko`/`paramiko` loggers reaches any file or the console. Plain pytest, no device.
 Every Finding's text is scanned too, as a backstop for a Check that leaks a secret (#93).
 """
@@ -22,6 +22,7 @@ from network_analyser import backup_store, run_output, topology
 from network_analyser.cli import main
 from network_analyser.cli.console import ScannedStream
 from network_analyser.cli.diagram_file import write_diagram
+from network_analyser.cli.findings_file import write_findings
 from network_analyser.cli.parser import build_parser
 from network_analyser.cli.run_topology import save_topology
 from network_analyser.credentials import CredentialSet, CredentialSets, Secret, SecretScan
@@ -91,8 +92,11 @@ def test_a_whole_run_shows_no_secret_on_the_console_or_in_any_file(
     assert (folder / "diagram.html").is_file()
     assert (folder / "diagram.drawio").is_file()
     assert (folder / "run-report.html").is_file()
+    assert (folder / "findings.html").is_file()
     report_text = (folder / "run-report.html").read_text(encoding="utf-8")
     assert "<script" not in report_text.lower()
+    findings_text = (folder / "findings.html").read_text(encoding="utf-8")
+    assert "<script" not in findings_text.lower()
     written = [p for p in data_folder().root.rglob("*") if p.is_file()]
     for canary in CANARIES:
         assert [p for p in written if canary.encode() in p.read_bytes()] == []
@@ -207,9 +211,16 @@ def test_a_secret_that_slips_into_a_finding_never_reaches_disk(tmp_path: Path) -
 
     run_output.write_scanned_json(folder, "topology.json", topology.to_document(built), scan)
     write_diagram(folder, scan)
+    write_findings(folder, scan)
     write_run_report(folder, dataclasses.replace(_report(), topology=built), scan)
 
-    for name in ("topology.json", "diagram.html", "diagram.drawio", "run-report.html"):
+    for name in (
+        "topology.json",
+        "diagram.html",
+        "diagram.drawio",
+        "findings.html",
+        "run-report.html",
+    ):
         text = (tmp_path / name).read_text(encoding="utf-8")
         for canary in (*CANARIES, quoted, "CANARY-pw"):
             assert canary not in text, name
