@@ -155,6 +155,8 @@ def test_every_shipped_check_runs_and_one_advice_record_exists_per_visited_devic
     )
 
     assert [run.check.id for run in results.checks] == [
+        "advisory-could-not-check",
+        "advisory-openvuln",
         "consistency-bundle-mode",
         "consistency-model-drift",
         "consistency-stack-mismatch",
@@ -248,9 +250,9 @@ def test_the_lookup_questions_are_deduplicated_and_pattern_valid() -> None:
     assert "S1" not in questions.pids
 
 
-def test_a_release_that_is_not_pattern_valid_is_not_sent() -> None:
+def test_a_release_the_family_table_does_not_hold_is_not_sent() -> None:
     results_input = AnalysisInput(
-        topology=topology.build((_device(A, "S1", "sw-a", release="17.9.4a [build 1]"),))
+        topology=topology.build((_device(A, "S1", "sw-a", release="17.9.4a;drop tables"),))
     )
 
     assert analysis.lookup_questions(results_input).releases == ()
@@ -291,15 +293,17 @@ def test_the_results_fit_topology_json_as_optional_fields() -> None:
     checks = analysis_record["checks"]
     assert isinstance(checks, list)
     assert [item["check"]["id"] for item in checks] == [
+        "advisory-could-not-check",
+        "advisory-openvuln",
         "consistency-bundle-mode",
         "consistency-model-drift",
         "consistency-stack-mismatch",
         "consistency-standard-support-train",
         "consistency-vpc-mismatch",
     ]
-    assert checks[1]["ran"] is True
-    assert checks[3]["ran"] is False
-    assert "17.9" in checks[3]["reason"]
+    assert checks[3]["ran"] is True
+    assert checks[5]["ran"] is False
+    assert "17.9" in checks[5]["reason"]
 
 
 def test_the_advice_shape_accepts_an_advisory_answer() -> None:

@@ -16,8 +16,9 @@ from dataclasses import dataclass
 from ipaddress import IPv4Address
 from typing import Final
 
+from network_analyser.analysis import advisory
 from network_analyser.analysis.ids import finding_id
-from network_analyser.records.analysis import AnalysisInput
+from network_analyser.records.analysis import AnalysisInput, SourceUnavailable
 from network_analyser.records.collected import StackMember, VpcState
 from network_analyser.records.platform import Platform
 from network_analyser.records.topology import (
@@ -105,8 +106,8 @@ class CheckDefinition:
         check: its stable identity, shown on every Finding it raises.
         run: returns every Finding it raises for the Run.
         skip_reason: why this Run cannot run the Check, or None when it can. A Check whose
-            source is unavailable (story 10), or whose built-in classification does not cover
-            what it found, returns the reason here.
+            source is unavailable (story 10, story 118), or whose built-in classification
+            does not cover what it found, returns the reason here.
     """
 
     check: Check
@@ -446,6 +447,12 @@ def _pair(first: str, second: str) -> tuple[str, str]:
     return (first, second) if first < second else (second, first)
 
 
+def advisories_unavailable(data: AnalysisInput) -> str | None:
+    """Why the Advisory Checks could not run: openVuln's outage reason, or None (story 118)."""
+    source = data.answers.advisories
+    return source.reason if isinstance(source, SourceUnavailable) else None
+
+
 def _name(device: VisitedDevice) -> str:
     """What a Finding calls a device: its hostname, else its id."""
     return device.hostname if isinstance(device.hostname, str) else device.id
@@ -457,5 +464,15 @@ CHECKS: tuple[CheckDefinition, ...] = (
     CheckDefinition(VPC_MISMATCH_CHECK, vpc_mismatch),
     CheckDefinition(BUNDLE_MODE_CHECK, bundle_mode),
     CheckDefinition(TRAIN_SUPPORT_CHECK, train_support, train_support_skip_reason),
+    CheckDefinition(
+        advisory.ADVISORY_CHECK,
+        advisory.advisory_findings,
+        skip_reason=advisories_unavailable,
+    ),
+    CheckDefinition(
+        advisory.COULD_NOT_CHECK_CHECK,
+        advisory.could_not_check_findings,
+        skip_reason=advisories_unavailable,
+    ),
 )
 """Every shipped Check. Order does not matter: results are sorted by Check id."""
