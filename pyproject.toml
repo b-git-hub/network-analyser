@@ -2,7 +2,7 @@
 name = "network-analyser"
 # SemVer 0.y.z (decision #32). The release workflow checks this against the tag;
 # network_analyser/_version.py must say the same, and tests/arch/test_project.py checks it.
-version = "0.1.0"
+version = "0.2.0"
 description = "Read-only discovery, encrypted config backup and topology diagrams for Cisco IOS/IOS-XE and NX-OS over SSH."
 # python.org CPython 3.14; the exact patch is pinned in .python-version (ticket #38, #32).
 requires-python = ">=3.14,<3.15"
