@@ -51,7 +51,8 @@ def advisories_answer(
         return SourceUnavailable(NOT_JSON)
     entries = document.get("advisories")
     if not isinstance(entries, list):
-        return SourceUnavailable(NOT_UNDERSTOOD)
+        code = _reply_error(document)
+        return SourceUnavailable(NOT_UNDERSTOOD) if code is None else _coded_answer(question, code)
     advisories = tuple(_advisory(entry) for entry in entries)
     if any(advisory is None for advisory in advisories):
         return SourceUnavailable(NOT_UNDERSTOOD)
@@ -59,6 +60,29 @@ def advisories_answer(
         question=question,
         advisories=tuple(advisory for advisory in advisories if advisory is not None),
     )
+
+
+NO_DATA_FOUND: Final = "NO_DATA_FOUND"
+"""openVuln's code for a release that has no Advisories: an answer, not a failure (#131)."""
+
+
+def advisories_error_answer(
+    question: ReleaseQuestion, status: int, body: bytes
+) -> AdvisoriesAnswer:
+    """Return the answer for a release whose one call failed with HTTP `status` (#131).
+
+    Cisco's `errorCode` is kept when the reply has one, `NO_DATA_FOUND` meaning an empty
+    answer; otherwise the reason is the fixed text `HTTP <status>`.
+    """
+    document = _document(body)
+    code = None if document is None else _reply_error(document)
+    return _coded_answer(question, code or f"HTTP {status}")
+
+
+def _coded_answer(question: ReleaseQuestion, code: str) -> AdvisoriesAnswer:
+    if code == NO_DATA_FOUND:
+        return AdvisoriesAnswer(question=question, advisories=())
+    return AdvisoriesAnswer(question=question, advisories=(), unavailable=code)
 
 
 def eox_answer(body: bytes) -> EoxAnswer | SourceUnavailable:
@@ -154,6 +178,16 @@ def compatible_answer(  # noqa: PLR0911 (one return per reply shape, each named)
             return SourceUnavailable(NOT_UNDERSTOOD)
         releases.append(release)
     return CompatibleAnswer(product_id=product_id, releases=tuple(releases))
+
+
+def compatible_error_answer(product_id: str, status: int, body: bytes) -> CompatibleUnanswered:
+    """Return the `unanswered` record for a PID whose one call failed with HTTP `status` (#131).
+
+    Cisco's `errorCode` is kept when the reply has one; otherwise the reason is `HTTP <status>`.
+    """
+    document = _document(body)
+    code = None if document is None else _reply_error(document)
+    return CompatibleUnanswered(product_id=product_id, reason=code or f"HTTP {status}")
 
 
 def compatible_last_page(body: bytes) -> int:
