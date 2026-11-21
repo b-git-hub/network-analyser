@@ -93,6 +93,7 @@ def test_a_network_or_removable_location_is_accepted_with_a_one_line_notice(
     assert "\n" not in check.location_notice
     assert place in check.location_notice
     assert "plaintext" in check.location_notice
+    assert "Findings report" in check.location_notice
     assert "old passphrase" in check.location_notice
     assert check.notices == (check.location_notice,)
 
@@ -105,6 +106,7 @@ def test_a_folder_inside_a_sync_root_gets_the_cloud_synced_notice(tmp_path: Path
 
     assert check.location_notice is not None
     assert "cloud-synced folder" in check.location_notice
+    assert "Findings report" in check.location_notice
 
 
 def test_a_folder_beside_a_sync_root_gets_no_notice(tmp_path: Path) -> None:

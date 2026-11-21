@@ -322,7 +322,7 @@ def _advisory_pane(
         return None
     return AdvisoryPane(
         id=ident,
-        href=_advisory_href(ident),
+        href=advisory_href(ident),
         title=title,
         sir=sir,
         cves=_strings(detail.get("cves")),
@@ -334,7 +334,12 @@ def _advisory_pane(
     )
 
 
-def _advisory_href(ident: str) -> str | None:
+def advisory_href(ident: str) -> str | None:
+    """Cisco's page for `ident`, or None when it did not pass the `cisco-sa-` pattern.
+
+    The one place a Cisco link is built, for the Findings tab and the Findings report
+    (story 51): a reply can never plant a hostile link.
+    """
     return f"{_ADVISORY_HREF}{ident}" if _ADVISORY_ID.fullmatch(ident) else None
 
 

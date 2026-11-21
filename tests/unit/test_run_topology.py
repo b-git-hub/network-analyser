@@ -1,5 +1,5 @@
 """A Run writes `topology.json` at its end, including after Ctrl+C (#52), and draws
-`diagram.html` (#63) and `diagram.drawio` (#65) from it.
+`diagram.html` (#63), `diagram.drawio` (#65) and `findings.html` (#107) from it.
 
 Driven through `main(argv)` with what the operator types; the Seeds are fake devices.
 """
@@ -138,6 +138,7 @@ def test_a_run_stopped_by_ctrl_c_still_writes_topology_json(
     (folder,) = data_folder().runs.iterdir()
     assert (Path(folder) / "diagram.html").is_file()
     assert (Path(folder) / "diagram.drawio").is_file()
+    assert (Path(folder) / "findings.html").is_file()
 
 
 def test_a_topology_that_cannot_be_written_needs_attention(

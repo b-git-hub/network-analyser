@@ -88,21 +88,21 @@ def cisco_lookups(topology: TopologyFile) -> CiscoLookups:
 
 @dataclass(frozen=True, slots=True)
 class DeviceAdvice:
-    """One device's Analysis advice (#105), read here for the Findings pane and the Map (#109).
+    """One device's Analysis advice (#105), read here for every surface that shows it.
 
     The field is optional, so a file from before #105, or a device Analysis did not advise,
     has no record and reads as not known rather than as empty.
 
     Attributes:
         known: True only when the file holds an advice record for this device.
-        outcome: its Advisory outcome, as fixed text; None when the file records none.
-        upgrade_target: the release to move to, or fixed text such as `no fix in Train T`;
-            None when the file records null or none.
-        target_recorded: True when the file records an `upgrade_target` key whose value is
-            text or null. False when it is unknown or missing, so a null is never confused
-            with a value this topology.json does not hold.
+        outcome: its Advisory outcome; None when the file records none.
+        upgrade_target: the release to move to; None when the file records null or none.
+        target_recorded: True when the file records the Upgrade Target as either a release
+            or null. False when it is unknown or missing, so a null is never confused with
+            a value this topology.json does not hold.
         latest_release: the newest release; None when the file records none.
         latest_in_train: the newest release in its Train; None when the file records none.
+        train: the Train it is on, used by "no fix in Train T" (#107); None when not recorded.
     """
 
     known: bool
@@ -111,14 +111,15 @@ class DeviceAdvice:
     target_recorded: bool
     latest_release: str | None
     latest_in_train: str | None
+    train: str | None
 
 
 def device_advice(device: Mapping[str, Plain]) -> DeviceAdvice:
-    """Return the one reading of a device's `advice` record (#105, #109).
+    """Return the one reading of a device's `advice` record (#105, #107, #109).
 
-    Every surface that shows a device's Advisory outcome, Upgrade Target or Latest Release
-    goes through here, so a change to the field's shape is a change in one place. Absent or
-    unreadable advice reads as not known, never as an empty answer.
+    Every surface that shows a device's Advisory outcome, Upgrade Target, Latest Release or
+    Train goes through here, so a change to the field's shape is a change in one place.
+    Absent or unreadable advice reads as not known, never as an empty answer.
     """
     recorded = device.get("advice")
     if not isinstance(recorded, Mapping) or _is_unknown(recorded):
@@ -129,6 +130,7 @@ def device_advice(device: Mapping[str, Plain]) -> DeviceAdvice:
             target_recorded=False,
             latest_release=None,
             latest_in_train=None,
+            train=None,
         )
     target = recorded.get("upgrade_target")
     return DeviceAdvice(
@@ -139,6 +141,7 @@ def device_advice(device: Mapping[str, Plain]) -> DeviceAdvice:
         and (target is None or isinstance(target, str)),
         latest_release=_text_field(recorded, "latest_release"),
         latest_in_train=_text_field(recorded, "latest_in_train"),
+        train=_text_field(recorded, "train"),
     )
 
 
@@ -188,9 +191,11 @@ _ADVICE: dict[str, _Schema] = {
     "upgrade_target": LEAF,
     "latest_release": LEAF,
     "latest_in_train": LEAF,
+    "train": LEAF,
 }
 """Per-device Analysis advice (#105): its Advisory outcome, Upgrade Target and Latest
-Release. Optional, so a file from before #105 reads it as unknown."""
+Release, plus the optional Train it is on, so the Findings report can say "no fix in Train T"
+(#107). Optional, so a file from before #105 reads it as unknown."""
 _DEVICE: dict[str, _Schema] = {
     "id": ID,
     "outcome": LEAF,
