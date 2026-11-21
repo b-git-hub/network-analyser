@@ -163,7 +163,7 @@ def test_effective_vlans_are_allowed_and_present_and_both_kinds_are_reported() -
     assert any(VLAN_BRIEF in e.command for e in one_end.evidence)
     assert any(SWITCHPORT in e.command for e in native.evidence)
     document = json.loads(json.dumps(topology.to_document(built)))
-    assert document["format_version"] == 2
+    assert document["format_version"] == 3
     assert {item["kind"] for item in document["findings"]} >= {
         "VLAN on one end only",
         "differing native VLAN",

@@ -11,6 +11,7 @@ from dataclasses import replace
 import pytest
 
 from network_analyser import analysis, topology
+from network_analyser.analysis.releases import release_key
 from network_analyser.records.analysis import (
     AdvisoryAnswer,
     AnalysisInput,
@@ -37,6 +38,8 @@ MODEL = "C9300-48P"
 CLASSIC_MODEL = "WS-C2960X-48FPD-L"
 NEXUS_MODEL = "N9K-C93180YC-FX"
 ADVISORY = "cisco-sa-order-0001"
+LOWER = "cisco-sa-order-0002"
+HIGHER = "cisco-sa-order-0003"
 
 
 def _device(  # noqa: PLR0913 (every device field the Check reads, by name)
@@ -54,11 +57,11 @@ def _device(  # noqa: PLR0913 (every device field the Check reads, by name)
     return replace(record, version=replace(version, model=model, software_version=release))
 
 
-def _advisory(*releases: str, train: str) -> AdvisoryAnswer:
+def _advisory(*releases: str, train: str, ident: str = ADVISORY) -> AdvisoryAnswer:
     return AdvisoryAnswer(
         detail=AdvisoryDetail(
             kind=CiscoDetailKind.ADVISORY,
-            id=ADVISORY,
+            id=ident,
             title="Example Advisory",
             sir=FindingLevel.HIGH,
             cvss="8.1",
@@ -74,14 +77,13 @@ def _advisory(*releases: str, train: str) -> AdvisoryAnswer:
 def _answer(
     os_type: OsType,
     release: str,
-    advisory: AdvisoryAnswer,
-    *,
+    *advisories: AdvisoryAnswer,
     hardware_family: str | None = None,
 ) -> ReleaseAdvisories:
     return ReleaseAdvisories(
         os_type=os_type,
         release=release,
-        advisories=(advisory,),
+        advisories=advisories,
         hardware_family=hardware_family,
     )
 
@@ -95,9 +97,9 @@ def _results(*records: DeviceRecord, answers: tuple[ReleaseAdvisories, ...]) -> 
     )
 
 
-def _advisory_finding(results: AnalysisResults) -> Finding:
+def _advisory_finding(results: AnalysisResults, ident: str = ADVISORY) -> Finding:
     (finding,) = [
-        finding for finding in results.findings if finding.check.id == f"advisory-{ADVISORY}"
+        finding for finding in results.findings if finding.check.id == f"advisory-{ident}"
     ]
     return finding
 
@@ -129,17 +131,20 @@ def test_ios_xe_releases_order_a_suffix_after_its_plain_release(lower: str, high
             _answer(
                 OsType.IOS_XE,
                 running,
-                _advisory(lower, higher, train=train),
+                _advisory(lower, train=train, ident=LOWER),
+                _advisory(higher, train=train, ident=HIGHER),
             ),
         ),
     )
 
     (advice,) = results.advice
-    finding = _advisory_finding(results)
-    assert advice.upgrade_target == higher
-    assert isinstance(finding.cisco_detail, AdvisoryDetail)
-    assert finding.cisco_detail.first_fixed == higher
-    assert f"First fixed in Train {train}: {higher}." in finding.what_was_found
+    assert advice.upgrade_target == higher  # the highest of the two per-Advisory fixes
+    assert advice.not_cleared == 0
+    for ident, fix in ((LOWER, lower), (HIGHER, higher)):
+        finding = _advisory_finding(results, ident)
+        assert isinstance(finding.cisco_detail, AdvisoryDetail)
+        assert finding.cisco_detail.first_fixed == fix
+        assert f"First fixed in Train {train}: {fix}." in finding.what_was_found
 
 
 @pytest.mark.parametrize(
@@ -163,16 +168,18 @@ def test_nx_os_releases_order_a_lettered_build_after_its_plain_release(
             _answer(
                 OsType.NX_OS,
                 running,
-                _advisory(lower, higher, train="10.6"),
+                _advisory(lower, train="10.6", ident=LOWER),
+                _advisory(higher, train="10.6", ident=HIGHER),
                 hardware_family="NEXUS9000",
             ),
         ),
     )
 
-    finding = _advisory_finding(results)
-    assert isinstance(finding.cisco_detail, AdvisoryDetail)
-    assert finding.cisco_detail.first_fixed == higher
-    assert f"First fixed in Train 10.6: {higher}." in finding.what_was_found
+    for ident, fix in ((LOWER, lower), (HIGHER, higher)):
+        finding = _advisory_finding(results, ident)
+        assert isinstance(finding.cisco_detail, AdvisoryDetail)
+        assert finding.cisco_detail.first_fixed == fix
+        assert f"First fixed in Train 10.6: {fix}." in finding.what_was_found
 
 
 @pytest.mark.parametrize(
@@ -192,19 +199,22 @@ def test_classic_ios_order_is_unchanged(lower: str, higher: str) -> None:
             _answer(
                 OsType.IOS,
                 running,
-                _advisory(lower, higher, train=train),
+                _advisory(lower, train=train, ident=LOWER),
+                _advisory(higher, train=train, ident=HIGHER),
             ),
         ),
     )
 
     (advice,) = results.advice
-    finding = _advisory_finding(results)
     assert advice.upgrade_target == higher
-    assert isinstance(finding.cisco_detail, AdvisoryDetail)
-    assert finding.cisco_detail.first_fixed == higher
+    expected_lower = lower if release_key(lower) > release_key(running) else None
+    for ident, fix in ((LOWER, expected_lower), (HIGHER, higher)):
+        finding = _advisory_finding(results, ident)
+        assert isinstance(finding.cisco_detail, AdvisoryDetail)
+        assert finding.cisco_detail.first_fixed == fix
 
 
-def test_an_ios_xe_device_fixed_in_17_12_7a_and_17_12_8_targets_17_12_8() -> None:
+def test_an_ios_xe_device_fixed_in_17_12_7a_and_17_12_8_targets_17_12_7a() -> None:
     results = _results(
         _device(A, "S1", "sw-a", release="17.12.4"),
         answers=(
@@ -217,10 +227,10 @@ def test_an_ios_xe_device_fixed_in_17_12_7a_and_17_12_8_targets_17_12_8() -> Non
     )
 
     (advice,) = results.advice
-    assert advice.upgrade_target == "17.12.8"
+    assert advice.upgrade_target == "17.12.7a"  # the first fix, not the newest
     finding = _advisory_finding(results)
     assert isinstance(finding.cisco_detail, AdvisoryDetail)
-    assert finding.cisco_detail.first_fixed == "17.12.8"
+    assert finding.cisco_detail.first_fixed == "17.12.7a"
 
 
 @pytest.mark.parametrize(

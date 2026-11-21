@@ -40,7 +40,7 @@ def test_a_run_writes_topology_json_at_its_end(run: Runner) -> None:
 
     assert got.code == ExitCode.CLEAN
     document = _topology()
-    assert document["format_version"] == 2
+    assert document["format_version"] == 3
     devices = document["devices"]
     assert isinstance(devices, list)
     assert [d["management_ip"] for d in devices] == ["192.0.2.1"]
@@ -236,4 +236,4 @@ def test_a_diagram_that_cannot_be_drawn_needs_attention(
 
     assert got.code == ExitCode.NEEDS_ATTENTION
     assert "diagram.html or diagram.drawio could not be drawn" in got.err
-    assert _topology()["format_version"] == 2  # topology.json was still written
+    assert _topology()["format_version"] == 3  # topology.json was still written
