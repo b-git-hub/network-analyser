@@ -14,8 +14,14 @@ from typing import Final
 
 from network_analyser.records import Platform
 from network_analyser.records.config_facts import (
+    AAA_ACCOUNTING,
+    AAA_AUTHORIZATION,
+    AAA_CENTRAL_LOGIN,
+    AAA_LOGIN_FALLBACK_NONE,
+    AAA_NEW_MODEL,
     ENABLE_PASSWORD,
     ENABLE_SECRET,
+    EXEC_TIMEOUT_DISABLED_LINES,
     FHRP_GROUPS,
     FHRP_GROUPS_WITHOUT_AUTHENTICATION,
     HTTP_SERVER,
@@ -48,14 +54,23 @@ from network_analyser.records.config_facts import (
     SNMP_V3_GROUPS_WITHOUT_PRIV,
     SNMP_V3_USERS,
     SNMP_V3_USERS_WITHOUT_PRIV,
+    SSH_VERSION,
     TELNET_LINES,
+    TYPE_6_ENABLED,
+    VTY_ACCESS_CLASS_MISSING_LINES,
     ConfigFact,
     FactValue,
 )
 from network_analyser.records.unknown import Unknown
 
-_VTY_HEADER: Final = re.compile(r"line\s+vty\b", re.IGNORECASE)
+_LINE_HEADER: Final = re.compile(r"line\s+(con(?:sole)?|vty|aux|tty)\b", re.IGNORECASE)
 _TRANSPORT_INPUT: Final = re.compile(r"transport\s+input\s+(.+)", re.IGNORECASE)
+_ACCESS_CLASS_IN: Final = re.compile(r"^access-class\s+\S+\s+in(?:\s|$)", re.IGNORECASE)
+_EXEC_TIMEOUT: Final = re.compile(r"^exec-timeout\s+(\S+)", re.IGNORECASE)
+_SSH_VERSION: Final = re.compile(r"^ip\s+ssh\s+version\s+([12])\s*$", re.IGNORECASE)
+_AAA_LOGIN: Final = re.compile(r"^aaa\s+authentication\s+login\s+\S+\s+(.*)$", re.IGNORECASE)
+_AAA_AUTHORIZATION: Final = re.compile(r"^aaa\s+authorization\b", re.IGNORECASE)
+_AAA_ACCOUNTING: Final = re.compile(r"^aaa\s+accounting\b", re.IGNORECASE)
 _SECRET_LINE: Final = re.compile(r"(?<![\w-])(?:password|secret)\s+([0-9])(?=\s|$)", re.IGNORECASE)
 _ENABLE_SECRET: Final = re.compile(r"^enable\s+secret(?:\s|$)", re.IGNORECASE)
 _ENABLE_PASSWORD: Final = re.compile(r"^enable\s+password(?:\s|$)", re.IGNORECASE)
@@ -73,6 +88,9 @@ _SECRET_TYPES: Final = (
     (9, SECRET_TYPE_9),
 )
 _NO_VTY: Final = "no line vty block in the running config"
+_NXOS_TYPE_6_UNKNOWN: Final = (
+    "the NX-OS command that enables AES type 6 encryption is not confirmed"
+)
 _LEGACY_PREFIXES: Final = (
     ("service pad", "PAD"),
     ("service finger", "finger"),
@@ -143,6 +161,9 @@ def read_config_facts(platform: Platform, text: str) -> tuple[ConfigFact, ...]:
         LEGACY_SERVICES: _legacy_services(lines),
         HTTP_SERVER: _http_server(lines),
         TELNET_LINES: _telnet_lines(platform, lines),
+        VTY_ACCESS_CLASS_MISSING_LINES: _vty_access_class_missing(lines),
+        EXEC_TIMEOUT_DISABLED_LINES: _exec_timeout_disabled(lines),
+        **_aaa_facts(lines),
         **_snmp_facts(lines),
         **_service_facts(platform, lines),
     }
@@ -153,6 +174,11 @@ def read_config_facts(platform: Platform, text: str) -> tuple[ConfigFact, ...]:
         facts[LOGIN_BLOCK_FOR] = any(
             line.strip().lower().startswith("login block-for") for line in lines
         )
+        facts[SSH_VERSION] = _ssh_version(lines)
+        facts[AAA_NEW_MODEL] = any(line.strip().lower() == "aaa new-model" for line in lines)
+        facts[TYPE_6_ENABLED] = any(
+            line.strip().lower() == "password encryption aes" for line in lines
+        )
     else:
         facts[SNMP_GLOBAL_ENFORCE_PRIV] = any(
             line.strip().lower() == "snmp-server globalenforcepriv" for line in lines
@@ -160,6 +186,7 @@ def read_config_facts(platform: Platform, text: str) -> tuple[ConfigFact, ...]:
         facts[PASSWORD_STRENGTH_CHECK] = not any(
             line.strip().lower() == "no password strength-check" for line in lines
         )
+        facts[TYPE_6_ENABLED] = Unknown(_NXOS_TYPE_6_UNKNOWN)
     return tuple(ConfigFact(name, value) for name, value in sorted(facts.items()))
 
 
@@ -220,8 +247,14 @@ def _telnet_lines(platform: Platform, lines: list[str]) -> tuple[str, ...] | Unk
 
 def _vty_blocks(lines: list[str]) -> list[tuple[str, list[str]]]:
     """Every top-level `line vty` block with its indented settings, in config order."""
-    blocks: list[tuple[str, list[str]]] = []
+    return [(header, settings) for kind, header, settings in _line_blocks(lines) if kind == "vty"]
+
+
+def _line_blocks(lines: list[str]) -> list[tuple[str, str, list[str]]]:
+    """Every top-level `line` block as (kind, header, settings), in config order."""
+    blocks: list[tuple[str, str, list[str]]] = []
     header: str | None = None
+    kind = ""
     settings: list[str] = []
     for raw in lines:
         if not raw.strip() or raw.lstrip().startswith("!"):
@@ -229,27 +262,99 @@ def _vty_blocks(lines: list[str]) -> list[tuple[str, list[str]]]:
         text = raw.strip()
         if not raw[:1].isspace():
             if header is not None:
-                blocks.append((header, settings))
-                header, settings = None, []
-            if _VTY_HEADER.match(text):
-                header = _vty_header(text)
+                blocks.append((kind, header, settings))
+                header, kind, settings = None, "", []
+            match = _LINE_HEADER.match(text)
+            if match is not None:
+                word = match.group(1).lower()
+                kind = "con" if word.startswith("con") else word
+                header = _line_header(word, text)
             continue
         if header is not None:
             settings.append(text)
     if header is not None:
-        blocks.append((header, settings))
+        blocks.append((kind, header, settings))
     return blocks
+
+
+def _line_header(kind: str, text: str) -> str:
+    """`line vty 0 4` or `line console` rebuilt from its numbers, so no raw text is kept."""
+    numbers = [part for part in text.split()[2:] if part.isdigit()]
+    return f"line {kind}" + (f" {' '.join(numbers)}" if numbers else "")
 
 
 def _vty_header(text: str) -> str:
     """`line vty 0 4` rebuilt from its line numbers, so no raw config text is kept."""
-    numbers = [part for part in text.split()[2:] if part.isdigit()]
-    return "line vty" + (f" {' '.join(numbers)}" if numbers else "")
+    return _line_header("vty", text)
 
 
 def _setting(settings: list[str], command: str) -> str | None:
     """The first setting that starts with `command`, or None."""
     return next((item for item in settings if item.lower().startswith(command)), None)
+
+
+def _vty_access_class_missing(lines: list[str]) -> tuple[str, ...] | Unknown:
+    """The vty blocks with no inbound `access-class`; `Unknown` when no vty block is shown."""
+    blocks = _vty_blocks(lines)
+    if not blocks:
+        return Unknown(_NO_VTY)
+    return tuple(
+        header
+        for header, settings in blocks
+        if not any(_ACCESS_CLASS_IN.match(setting) for setting in settings)
+    )
+
+
+def _exec_timeout_disabled(lines: list[str]) -> tuple[str, ...]:
+    """The console and vty blocks that explicitly disable the idle timeout (`exec-timeout 0`).
+
+    An absent line is the vendor default (10 minutes on IOS/IOS-XE), not a hit; an AUX line's
+    `exec-timeout 0 1` is a hardening recommendation (research #76, X12), not a hit.
+    """
+    disabled: list[str] = []
+    for kind, header, settings in _line_blocks(lines):
+        if kind not in {"con", "vty"}:
+            continue
+        setting = _setting(settings, "exec-timeout")
+        match = None if setting is None else _EXEC_TIMEOUT.match(setting)
+        if match is not None and match.group(1) == "0":
+            disabled.append(header)
+    return tuple(disabled)
+
+
+def _ssh_version(lines: list[str]) -> int:
+    """`ip ssh version`'s value; 0 when the line is absent (the release's default then applies)."""
+    version = 0
+    for line in lines:
+        match = _SSH_VERSION.match(line.strip())
+        if match is not None:
+            version = int(match.group(1))
+    return version
+
+
+def _aaa_facts(lines: list[str]) -> dict[str, FactValue]:
+    """Read AAA from the config: no method-list name, server group or key is kept."""
+    fallback_none = 0
+    central_login = False
+    authorization = False
+    accounting = False
+    for line in lines:
+        text = line.strip()
+        login = _AAA_LOGIN.match(text)
+        if login is not None:
+            methods = {token.lower() for token in login.group(1).split()}
+            fallback_none += int("none" in methods)
+            central_login = central_login or "group" in methods
+        elif _AAA_AUTHORIZATION.match(text):
+            authorization = True
+        elif _AAA_ACCOUNTING.match(text):
+            accounting = True
+    return {
+        AAA_LOGIN_FALLBACK_NONE: fallback_none,
+        AAA_CENTRAL_LOGIN: central_login,
+        AAA_AUTHORIZATION: authorization,
+        AAA_ACCOUNTING: accounting,
+    }
 
 
 def _transport_permits_telnet(setting: str | None) -> bool:

@@ -15,7 +15,7 @@ from network_analyser import device_gateway, run_output
 from network_analyser.cli import ExitCode, main
 from network_analyser.records.device import DeviceRecord
 from network_analyser.records.identity import Alias
-from tests.support import device_text, fake_age, fake_device
+from tests.support import device_text, fake_age, fake_device, ios_xe_text
 from tests.support.run_driver import FLAGS, Runner, data_folder, first_run
 
 
@@ -132,6 +132,51 @@ def _second_show_version() -> str:
         .replace("17.9.4a", "17.9.5")
         .replace("sw-a", "sw-b")
     )
+
+
+def test_a_show_output_check_runs_at_the_run_s_end_and_reaches_topology_json(
+    run: Runner,
+) -> None:
+    run.seed.replies.update(ios_xe_text.REPLIES)  # sw-a answers every 0.2.0 command
+
+    got = run(*FLAGS, typed=first_run())
+
+    assert got.code == ExitCode.CLEAN
+    document = _topology()
+    findings = document["findings"]
+    assert isinstance(findings, list)
+    snmp = [item for item in findings if item["check"]["id"] == "config-snmpv3-user-crypto"]
+    assert len(snmp) == 1
+    assert snmp[0]["level"] == "High"
+    assert snmp[0]["check"]["name"] == "SNMPv3 users on MD5/DES/3DES"
+    checks = document["analysis"]["checks"]  # type: ignore[index]  # JSON data
+    assert isinstance(checks, list)
+    ran = next(item for item in checks if item["check"]["id"] == "config-snmpv3-user-crypto")
+    assert ran["ran"] is True
+    assert ran["skipped"] == []
+    assert not [
+        item for item in findings if item["check"]["id"] == "config-device-role-out-of-date"
+    ]
+
+
+def test_a_run_whose_role_refuses_the_new_commands_gets_one_role_finding(
+    run: Runner,
+) -> None:
+    got = run(*FLAGS, typed=first_run())  # the fake's role knows no 0.2.0 command
+
+    assert got.code == ExitCode.CLEAN
+    findings = _topology()["findings"]
+    assert isinstance(findings, list)
+    roles = [item for item in findings if item["check"]["id"] == "config-device-role-out-of-date"]
+    assert len(roles) == 1
+    assert roles[0]["level"] == "Medium"
+    assert "Device Role is out of date" in roles[0]["what_was_found"]
+    assert "role-snippet" in roles[0]["what_was_found"]
+    checks = _topology()["analysis"]["checks"]  # type: ignore[index]  # JSON data
+    assert isinstance(checks, list)
+    snmp = next(item for item in checks if item["check"]["id"] == "config-snmpv3-user-crypto")
+    assert snmp["ran"] is False
+    assert snmp["skipped"][0]["reason"] == "show snmp user: denied"
 
 
 def test_a_run_stopped_by_ctrl_c_still_writes_topology_json(
