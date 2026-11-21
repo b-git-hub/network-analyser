@@ -13,6 +13,8 @@ from ipaddress import IPv4Address
 import pytest
 
 from network_analyser import platforms
+from network_analyser.analysis.catalogue import PENDING_CHECK_NAMES
+from network_analyser.analysis.checks import CHECKS
 from network_analyser.platforms import Collection
 from network_analyser.platforms.collection import DeviceRoleOutOfDate
 from network_analyser.platforms.nxos import outdated
@@ -98,6 +100,14 @@ def test_the_allow_list_never_asks_for_snmpv3_users() -> None:
 
     assert not [command for command in commands if "snmp" in command.casefold()], (
         "SNMPv3 users come from the running config, not a new command (story 78)"
+    )
+
+
+def test_every_mapped_check_id_is_a_shipped_or_pending_check() -> None:
+    known = {definition.check.id for definition in CHECKS} | set(PENDING_CHECK_NAMES)
+
+    assert {check for checks in outdated.CHECK_IDS_BY_COMMAND.values() for check in checks} <= (
+        known
     )
 
 
@@ -359,20 +369,15 @@ def test_a_role_that_refuses_the_new_commands_raises_one_out_of_date_record() ->
     assert out_of_date == DeviceRoleOutOfDate(
         (INVENTORY, NTP, COPP, SSH, GUESTSHELL),
         (
-            "Hardware EoX",
-            "NTP not synchronised",
-            "CoPP not applied",
-            "SSH key under 2048 bits",
-            "Guest Shell present",
+            "lifecycle-hardware-eox",
+            "config-ntp-synchronised",
+            "config-copp-applied",
+            "config-ssh-key-size",
+            "config-guest-shell",
         ),
     )
     assert out_of_date is not None
     assert out_of_date.count == 5
-    assert out_of_date.summary == (
-        "Device Role is out of date: 5 Checks could not run (Hardware EoX, NTP not"
-        " synchronised, CoPP not applied, SSH key under 2048 bits, Guest Shell present)."
-        " Re-apply the Device Role printed by role-snippet."
-    )
 
 
 def test_one_out_of_date_record_names_a_check_once_when_both_commands_are_refused() -> None:
@@ -380,11 +385,9 @@ def test_one_out_of_date_record_names_a_check_once_when_both_commands_are_refuse
         {GUESTSHELL: nxos_json.DENIED, VIRTUAL_SERVICE_LIST: nxos_json.DENIED}
     )
 
-    assert out_of_date == DeviceRoleOutOfDate((GUESTSHELL,), ("Guest Shell present",))
+    assert out_of_date == DeviceRoleOutOfDate((GUESTSHELL,), ("config-guest-shell",))
     assert out_of_date is not None
-    assert out_of_date.summary.startswith(
-        "Device Role is out of date: 1 Check could not run (Guest Shell present)."
-    )
+    assert out_of_date.count == 1
 
 
 def test_a_command_the_device_does_not_have_is_not_a_device_role_problem() -> None:

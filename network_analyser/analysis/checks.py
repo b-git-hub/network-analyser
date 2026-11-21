@@ -1,49 +1,58 @@
-"""The shipped Checks, and the machinery that always runs every one of them (#94).
+"""The shipped Checks, and the machinery that always runs every one of them (#94, #102).
 
-A Check is a stable `Check` record and a function from the Run's plain records to its
-Findings. Every shipped Check runs on every Run (story 4). A Check whose feature is not in
-use returns nothing for that device (story 5); it is not skipped. A Check is skipped only
-when a source it needs was unavailable (story 10), and then the reason is recorded.
+A Check is a stable `Check` record and two functions over the Run's plain records: one for its
+Findings and one for the Visited Devices it could not run for. Every shipped Check runs on
+every Run (story 4). A Check whose feature is not in use returns nothing for that device
+(story 5); it is not skipped. A Check is skipped for a device only when the show output it
+needs was refused (a Device Role out of date, story 80) or was never collected, and then the
+reason is recorded (`CheckRun.skipped`), never passed (story 6).
 
-New Checks are added to `CHECKS`; nothing else in `analysis` needs to change.
+New Checks are added to `CHECKS`; nothing else in `analysis` needs to change. The one
+exception is Cisco's insecure-configuration list: its Check needs every other Check's Findings
+to mark a match, so `analysis.cisco_list.apply` runs after the loop in `core.analyse`.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final
 
+from network_analyser.analysis import cisco_list, hardening, role
+from network_analyser.analysis.catalogue import CISCO_LIST_CHECK, MODEL_DRIFT_CHECK
 from network_analyser.analysis.ids import finding_id
 from network_analyser.records.analysis import AnalysisInput
 from network_analyser.records.topology import (
     Check,
-    CheckType,
+    CheckSkip,
     Finding,
     FindingLevel,
     VisitedDevice,
 )
 
+__all__ = ["CHECKS", "CheckDefinition", "model_drift"]
+
 MINIMUM_DRIFT_RELEASES: Final = 2
 """Two releases of one model is drift; one is not (story 70)."""
 
-MODEL_DRIFT_CHECK: Check = Check(
-    "consistency-model-drift",
-    "Same model on different releases",
-    CheckType.CONSISTENCY,
-)
-"""Story 70: one network-wide Low Finding per model running more than one release."""
+
+def _no_skips(_data: AnalysisInput) -> tuple[CheckSkip, ...]:
+    """A Check that runs for every Visited Device, such as the network-wide drift Check."""
+    return ()
 
 
 @dataclass(frozen=True, slots=True)
 class CheckDefinition:
-    """One shipped Check and the function that raises its Findings.
+    """One shipped Check and the functions that raise its Findings and record its skips.
 
     Attributes:
         check: its stable identity, shown on every Finding it raises.
         run: returns every Finding it raises for the Run.
+        skipped: returns one `CheckSkip` per Visited Device it could not run for; empty when
+            it ran for every device, or the Run had none.
     """
 
     check: Check
     run: Callable[[AnalysisInput], tuple[Finding, ...]]
+    skipped: Callable[[AnalysisInput], tuple[CheckSkip, ...]] = _no_skips
 
 
 def model_drift(data: AnalysisInput) -> tuple[Finding, ...]:
@@ -100,5 +109,35 @@ def _name(device: VisitedDevice) -> str:
     return device.hostname if isinstance(device.hostname, str) else device.id
 
 
-CHECKS: tuple[CheckDefinition, ...] = (CheckDefinition(MODEL_DRIFT_CHECK, model_drift),)
-"""Every shipped Check. Order does not matter: results are sorted by Check id."""
+CHECKS: tuple[CheckDefinition, ...] = (
+    CheckDefinition(MODEL_DRIFT_CHECK, model_drift),
+    CheckDefinition(
+        hardening.SNMP_CHECK,
+        hardening.snmp_user_crypto,
+        hardening.snmp_skipped,
+    ),
+    CheckDefinition(
+        hardening.NTP_CHECK,
+        hardening.ntp_synchronised,
+        hardening.ntp_skipped,
+    ),
+    CheckDefinition(
+        hardening.COPP_CHECK,
+        hardening.copp,
+        hardening.copp_skipped,
+    ),
+    CheckDefinition(
+        hardening.SSH_CHECK,
+        hardening.ssh_key_size,
+        hardening.ssh_skipped,
+    ),
+    CheckDefinition(
+        hardening.GUEST_SHELL_CHECK,
+        hardening.guest_shell,
+        hardening.guest_shell_skipped,
+    ),
+    CheckDefinition(CISCO_LIST_CHECK, cisco_list.cisco_list, cisco_list.cisco_skipped),
+    CheckDefinition(role.ROLE_CHECK, role.role_out_of_date, role.role_skipped),
+)
+"""Every shipped Check. Results are sorted by Check id, so order only matters for the
+Cisco-list pass, which `core.analyse` runs after every other Check."""

@@ -14,6 +14,8 @@ from ipaddress import IPv4Address
 import pytest
 
 from network_analyser import platforms
+from network_analyser.analysis.catalogue import PENDING_CHECK_NAMES
+from network_analyser.analysis.checks import CHECKS
 from network_analyser.platforms import Collection
 from network_analyser.platforms.ios_xe import commands as c
 from network_analyser.platforms.ios_xe import identify as ios_xe_identify
@@ -95,6 +97,14 @@ def test_every_new_command_is_on_the_compiled_in_allow_list() -> None:
     assert [
         command for command in NEW_COMMANDS if not platforms.permits(Platform.IOS_XE, command)
     ] == []
+
+
+def test_every_mapped_check_id_is_a_shipped_or_pending_check() -> None:
+    known = {definition.check.id for definition in CHECKS} | set(PENDING_CHECK_NAMES)
+
+    assert {check for checks in outdated.CHECK_IDS_BY_COMMAND.values() for check in checks} <= (
+        known
+    )
 
 
 def test_the_new_collection_commands_are_sent_once() -> None:
@@ -331,13 +341,8 @@ def test_two_denied_new_commands_raise_one_medium_role_finding_naming_their_chec
     assert found is not None
     assert outdated.DEVICE_ROLE_LEVEL == "Medium"
     assert found.commands == (c.SHOW_SNMP_USER, c.SHOW_POLICY_MAP_CONTROL_PLANE)
-    assert found.checks == ("SNMPv3 users on MD5/DES/3DES", "CoPP not applied")
+    assert found.checks == ("config-snmpv3-user-crypto", "config-copp-applied")
     assert found.count == 2
-    assert found.summary == (
-        "Device Role is out of date: 2 Checks could not run "
-        "(SNMPv3 users on MD5/DES/3DES, CoPP not applied). "
-        "Re-apply the Device Role printed by role-snippet."
-    )
 
 
 def test_one_denied_new_command_names_one_check_in_the_singular() -> None:
@@ -347,10 +352,8 @@ def test_one_denied_new_command_names_one_check_in_the_singular() -> None:
     found = outdated.role_out_of_date(collect(Device(replies)).collected)
 
     assert found is not None
-    assert found.summary == (
-        "Device Role is out of date: 1 Check could not run (SSH key under 2048 bits). "
-        "Re-apply the Device Role printed by role-snippet."
-    )
+    assert found.checks == ("config-ssh-key-size",)
+    assert found.count == 1
 
 
 def test_the_refused_commands_result_is_unknown_never_a_pass() -> None:
@@ -371,12 +374,12 @@ def test_every_new_command_that_is_denied_is_named() -> None:
 
     assert found is not None
     assert found.checks == (
-        "Hardware EoX",
-        "SNMPv3 users on MD5/DES/3DES",
-        "NTP not synchronised",
-        "CoPP not applied",
-        "SSH key under 2048 bits",
-        "Cisco insecure-list items",
+        "lifecycle-hardware-eox",
+        "config-snmpv3-user-crypto",
+        "config-ntp-synchronised",
+        "config-copp-applied",
+        "config-ssh-key-size",
+        "config-cisco-insecure-list",
     )
 
 

@@ -131,7 +131,7 @@ A prefix in one VRF on exactly two devices is one adjacency of kind `shared subn
 `advice[]` and `checks[]`, both optional. `findings` keeps every Finding, v1's and Analysis's together.
 
 - `advice[]`: one per Visited Device, in device id order. `device`, `advisory_outcome`, `upgrade_target`, `latest_release_in_train`, `latest_release`, `upcoming_eox[]`. An Advisory outcome is `{"kind": "matches" | "none" | "could not check", "matched", "release", "reason"}`; `text` is built by the report from those fields. Upgrade Target and both Latest Releases are `not available` until Cisco's answers arrive (spec #92, Further Notes). `upcoming_eox[]` reuses the EoX item shape (`name`, the four dates, `replacement`).
-- `checks[]`: every shipped Check, in Check id order: `{"check": {...}, "ran": true | false, "reason": null | "..."}`. A Check is skipped only when a source it needs was unavailable.
+- `checks[]`: every shipped Check, in Check id order: `{"check": {...}, "ran": true | false, "reason": null | "...", "skipped": [...]}`. A Check is skipped only when a source it needs was unavailable. `skipped[]` is one `{"device", "reason"}` per Visited Device the Check could not run for (#102), such as a Device Role that refused its command or show output the Run did not collect; `ran` is false only when every Visited Device is in that list. A Check that does not apply to a device raises nothing and is not skipped.
 - No Visited Device gets more than one advice record; Unvisited Devices get none (story 3).
 
 `kind` is `conflicting evidence`, `Bundle member mismatch`, or a VLAN Mismatch (#61, 2026-11-19): `VLAN on one end only`, `differing native VLAN`, `trunk facing access`, `differing access VLANs`. A VLAN Mismatch's `items` is the Link or the Bundle, never a member Link. Its `evidence[].source` is `VLAN` for switchport and VLAN-database commands, or `CDP` when the native VLAN was advertised by an Unvisited Device.
@@ -140,7 +140,7 @@ A prefix in one VRF on exactly two devices is one adjacency of kind `shared subn
 
 ### `skipped[]` and `unknown_interface_names[]`
 
-`skipped[]`: `device`, `data`, `reason`. `data` is a `records/collected.py` field (`cdp`, `lldp`, `interfaces`, `vlans`, `port_channels`, `vpc`, `vrfs`, `arp`, `mac`, `routing_neighbours`, `static_routes`, `fhrp`, `stack_members`) when that part was not collected. #61 also writes `vlan_mismatch` when a VLAN check on a Link or Bundle could not run; the reason names the gap and the link or bundle id. That is not a mismatch.
+`skipped[]`: `device`, `data`, `reason`. `data` is a `records/collected.py` field (`cdp`, `lldp`, `interfaces`, `vlans`, `port_channels`, `vpc`, `vrfs`, `arp`, `mac`, `routing_neighbours`, `static_routes`, `fhrp`, `stack_members`, and from #97/#98/#102 `inventory`, `snmp_users`, `ntp_associations`, `control_plane`, `ssh`, `insecure_configuration`, `guest_shell`) when that part was not collected. #61 also writes `vlan_mismatch` when a VLAN check on a Link or Bundle could not run; the reason names the gap and the link or bundle id. That is not a mismatch. A denied 0.2.0 command (`<command>: denied`) is what the Device Role out-of-date Check reads (#102).
 
 `unknown_interface_names[]`: `device`, `reported`.
 

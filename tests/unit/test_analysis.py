@@ -151,9 +151,24 @@ def test_unvisited_devices_get_no_analysis() -> None:
 def test_every_shipped_check_runs_and_one_advice_record_exists_per_visited_device() -> None:
     results = _results(_device(A, "S1", "sw-a"), _device(B, "S2", "sw-b"))
 
-    assert [run.check.id for run in results.checks] == ["consistency-model-drift"]
-    assert all(run.ran for run in results.checks)
-    assert all(run.reason is None for run in results.checks)
+    assert [run.check.id for run in results.checks] == [
+        "config-cisco-insecure-list",
+        "config-copp-applied",
+        "config-device-role-out-of-date",
+        "config-guest-shell",
+        "config-ntp-synchronised",
+        "config-snmpv3-user-crypto",
+        "config-ssh-key-size",
+        "consistency-model-drift",
+    ]
+    assert all(run.reason is None for run in results.checks if run.ran)
+    assert {run.check.id for run in results.checks if not run.ran} == {
+        "config-cisco-insecure-list",
+        "config-copp-applied",
+        "config-ntp-synchronised",
+        "config-snmpv3-user-crypto",
+        "config-ssh-key-size",
+    }
     assert [advice.device for advice in results.advice] == ["dev-S1", "dev-S2"]
 
 
@@ -281,8 +296,18 @@ def test_the_results_fit_topology_json_as_optional_fields() -> None:
     assert advice[0]["upgrade_target"] == "not available"
     checks = analysis_record["checks"]
     assert isinstance(checks, list)
-    assert [item["check"]["id"] for item in checks] == ["consistency-model-drift"]
-    assert checks[0]["ran"] is True
+    assert [item["check"]["id"] for item in checks] == [
+        "config-cisco-insecure-list",
+        "config-copp-applied",
+        "config-device-role-out-of-date",
+        "config-guest-shell",
+        "config-ntp-synchronised",
+        "config-snmpv3-user-crypto",
+        "config-ssh-key-size",
+        "consistency-model-drift",
+    ]
+    drift = next(item for item in checks if item["check"]["id"] == "consistency-model-drift")
+    assert drift["ran"] is True
 
 
 def test_the_advice_shape_accepts_an_advisory_answer() -> None:
