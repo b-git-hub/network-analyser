@@ -8,9 +8,10 @@ outcome, so silence never reads as safe (stories 52-53).
 
 Advice is attached to the device, never a Finding (story 58): the Advisory outcome, the Upgrade
 Target (the highest of each Advisory's first fix above the running release in its Train, with
-how many Advisories it leaves open, stories 20-24) and the Latest Release (story 57). The Latest
-Release and the NX-OS Upgrade Target stay `not available` until #127 and #126 give them their
-sources; Analysis never guesses them.
+how many Advisories it leaves open, stories 20-24) and the Latest Release (story 57). NX-OS
+takes its fixes from the `platforms[]` entry for the device's Nexus series (#126); without
+exactly one such entry the target is `not available`, never a guess. The Latest Release stays
+`not available` until #127 gives it its source.
 """
 
 import re
@@ -23,13 +24,16 @@ from network_analyser.analysis.releases import (
     family_reason,
     hardware_family,
     normalise_release,
+    platform_name,
     release_key,
     train_of,
 )
 from network_analyser.records.analysis import (
     AdvisoryAnswer,
+    AdvisoryPlatform,
     AnalysisInput,
     CiscoAnswer,
+    FixedRelease,
     OsType,
     ReleaseAdvisories,
     SourceUnavailable,
@@ -98,6 +102,8 @@ class DeviceAdvisory:
         matches: its Critical or High Advisories, in Cisco's order.
         hardware_family_not_confirmed: True when an NX-OS match rests on release alone.
         train: the device's Train, when one was worked out.
+        platform_unresolved: True when an NX-OS Advisory's `platforms[]` did not hold exactly
+            one entry for the device's series, so the target is `not available` (#126).
     """
 
     device: VisitedDevice
@@ -107,6 +113,7 @@ class DeviceAdvisory:
     matches: tuple[Match, ...] = ()
     hardware_family_not_confirmed: bool = False
     train: str | None = None
+    platform_unresolved: bool = False
 
     @property
     def checked(self) -> bool:
@@ -204,7 +211,10 @@ def _resolve_release(data: AnalysisInput, device: VisitedDevice, release: str) -
             f"Cisco openVuln does not know release {normalised} ({answer.unavailable})",
         )
     train = train_of(normalised, os_type)
-    matches = tuple(_match(advisory, train, normalised) for advisory in _flagged(answer.advisories))
+    series = platform_name(family)
+    matches, unresolved = _matches(
+        _flagged(answer.advisories), os_type=os_type, series=series, train=train, running=normalised
+    )
     kind = AdvisoryOutcomeKind.MATCHES if matches else AdvisoryOutcomeKind.NONE
     return DeviceAdvisory(
         device=device,
@@ -214,6 +224,7 @@ def _resolve_release(data: AnalysisInput, device: VisitedDevice, release: str) -
         matches=matches,
         hardware_family_not_confirmed=os_type is OsType.NX_OS and family is None,
         train=train,
+        platform_unresolved=unresolved,
     )
 
 
@@ -248,7 +259,56 @@ def _flagged(advisories: tuple[AdvisoryAnswer, ...]) -> tuple[AdvisoryAnswer, ..
     return tuple(kept)
 
 
-def _match(answer: AdvisoryAnswer, train: str, running: str) -> Match:
+def _matches(
+    advisories: tuple[AdvisoryAnswer, ...],
+    *,
+    os_type: OsType,
+    series: str | None,
+    train: str,
+    running: str,
+) -> tuple[tuple[Match, ...], bool]:
+    """Match each Advisory using the fixes its Platform or NX-OS series names.
+
+    The second value is True when an NX-OS Advisory's `platforms[]` did not hold exactly one
+    entry for the device's series, so the device's target must read `not available` (#126).
+    """
+    matches: list[Match] = []
+    unresolved = False
+    for advisory in advisories:
+        fixes = advisory.first_fixed
+        if os_type is OsType.NX_OS:
+            selected = _platform_fixes(advisory.platforms, series)
+            if selected is None:
+                unresolved = True
+                fixes = ()
+            else:
+                fixes = selected
+        matches.append(_match(advisory, fixes, train, running))
+    return tuple(matches), unresolved
+
+
+def _platform_fixes(
+    platforms: tuple[AdvisoryPlatform, ...], series: str | None
+) -> tuple[FixedRelease, ...] | None:
+    """The one `platforms[]` entry's fixes for the device's series; None unless exactly one.
+
+    An entry with no name never matches a series (#126). Zero or several matching entries leave
+    the device's series undecided, so the target is `not available`, never a guess.
+    """
+    if series is None:
+        return None
+    entries = [entry for entry in platforms if entry.name == series]
+    if len(entries) != 1:
+        return None
+    return entries[0].first_fixed
+
+
+def _match(
+    answer: AdvisoryAnswer,
+    fixes: tuple[FixedRelease, ...],
+    train: str,
+    running: str,
+) -> Match:
     """Keep the Advisory and its lowest first fix in `train` above the running release.
 
     A fix at or below the running release does not clear the Advisory (story 22): it is
@@ -256,7 +316,7 @@ def _match(answer: AdvisoryAnswer, train: str, running: str) -> Match:
     """
     above = [
         entry.release
-        for entry in answer.first_fixed
+        for entry in fixes
         if entry.release is not None
         and entry.train.casefold() == train.casefold()
         and release_key(entry.release) > release_key(running)
@@ -321,8 +381,6 @@ def _what_was_found(
 def _what_to_do(resolved: DeviceAdvisory, first_fixed: str | None) -> str:
     if first_fixed is not None:
         return f"Upgrade to {first_fixed} or later."
-    if resolved.os_type is OsType.NX_OS:
-        return "See Cisco's page for the first fixed release: openVuln names none for NX-OS."
     return (
         f"No fix in Train {resolved.train}: move to a newer Train after checking that your "
         "hardware supports it."
@@ -353,14 +411,17 @@ def _upgrade_target(resolved: DeviceAdvisory) -> tuple[str, int]:
     the Advisories with no fix in the Train, so a partial target says what it leaves open
     (story 23). With none cleared the advice is `no fix in Train T` (story 24).
 
-    The tool never picks another Train (story 26). NX-OS stays `not available` because
-    openVuln names no first-fixed release for it; #126 gives it one from `firstFixes`.
+    The tool never picks another Train (story 26). An NX-OS device takes its fixes from the
+    one `platforms[]` entry for its series (#126); with no series, or no single entry, the
+    target is `not available` rather than a guess.
     """
     if not resolved.checked:
         return NOT_AVAILABLE, 0
     if not resolved.matches:
         return "no Critical/High Advisories", 0
-    if resolved.os_type is OsType.NX_OS:
+    if resolved.os_type is OsType.NX_OS and (
+        resolved.hardware_family_not_confirmed or resolved.platform_unresolved
+    ):
         return NOT_AVAILABLE, 0
     fixes = [match.first_fixed for match in resolved.matches if match.first_fixed is not None]
     not_cleared = len(resolved.matches) - len(fixes)

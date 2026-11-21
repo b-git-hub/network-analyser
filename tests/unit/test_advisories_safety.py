@@ -32,6 +32,14 @@ def advisory_text() -> dict[str, object]:
         "firstPublished": "2026-01-01",
         "lastUpdated": "2026-02-01",
         "firstFixed": ["17.9.5"],
+        "platforms": [
+            {
+                "id": "1",
+                "name": "Cisco Nexus 9000 Series\r\nSwitches\x1b",
+                "vulnerabilityState": "vulnerable",
+                "firstFixes": [{"id": "2", "name": "10.4(5)\x00\x07"}],
+            }
+        ],
     }
 
 
@@ -125,11 +133,14 @@ def test_ciscos_text_is_flattened_and_bounded_before_it_crosses_the_boundary() -
     first = answers.advisories[0]
     assert isinstance(first, AdvisoriesAnswer)
     advisory = first.advisories[0]
+    (platform,) = advisory.platforms
     for text in (
         advisory.advisory_id,
         advisory.title,
         advisory.sir,
         *advisory.first_fixed,
+        platform.name,
+        *platform.first_fixed,
     ):
         assert "\x1b" not in text
         assert "\x00" not in text

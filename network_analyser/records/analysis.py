@@ -31,6 +31,7 @@ __all__ = [
     "SHOW_OUTPUT_NOT_SUPPLIED",
     "SNMP_V3_USER_CRYPTO",
     "AdvisoryAnswer",
+    "AdvisoryPlatform",
     "AnalysisInput",
     "CiscoAnswer",
     "CiscoAnswers",
@@ -183,16 +184,32 @@ class FixedRelease:
 
 
 @dataclass(frozen=True, slots=True)
+class AdvisoryPlatform:
+    """One `platforms[]` entry of an NX-OS Advisory, with each fix in its Train (#126).
+
+    Attributes:
+        name: Cisco's platform name, such as `Cisco Nexus 9000 Series Switches`; None when
+            the entry named none, so it can never match a device's series.
+        first_fixed: the platform's first-fixed releases, each with its Train.
+    """
+
+    name: str | None
+    first_fixed: tuple[FixedRelease, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class AdvisoryAnswer:
     """Cisco's answer for one Advisory (stories 47-50; #105).
 
     Attributes:
         detail: Cisco's detail, in the same shape a Finding carries (#93).
         first_fixed: every first-fixed release Cisco names, one per Train.
+        platforms: the per-platform first fixes an NX-OS reply names; empty otherwise (#126).
     """
 
     detail: AdvisoryDetail
     first_fixed: tuple[FixedRelease, ...] = ()
+    platforms: tuple[AdvisoryPlatform, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

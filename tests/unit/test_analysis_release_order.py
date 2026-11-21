@@ -14,6 +14,7 @@ from network_analyser import analysis, topology
 from network_analyser.analysis.releases import release_key
 from network_analyser.records.analysis import (
     AdvisoryAnswer,
+    AdvisoryPlatform,
     AnalysisInput,
     CiscoAnswers,
     FixedRelease,
@@ -37,6 +38,7 @@ C = "192.0.2.3"
 MODEL = "C9300-48P"
 CLASSIC_MODEL = "WS-C2960X-48FPD-L"
 NEXUS_MODEL = "N9K-C93180YC-FX"
+NEXUS_PLATFORM = "Cisco Nexus 9000 Series Switches"
 ADVISORY = "cisco-sa-order-0001"
 LOWER = "cisco-sa-order-0002"
 HIGHER = "cisco-sa-order-0003"
@@ -57,7 +59,10 @@ def _device(  # noqa: PLR0913 (every device field the Check reads, by name)
     return replace(record, version=replace(version, model=model, software_version=release))
 
 
-def _advisory(*releases: str, train: str, ident: str = ADVISORY) -> AdvisoryAnswer:
+def _advisory(
+    *releases: str, train: str, ident: str = ADVISORY, series: str | None = None
+) -> AdvisoryAnswer:
+    fixes = tuple(FixedRelease(train, release) for release in releases)
     return AdvisoryAnswer(
         detail=AdvisoryDetail(
             kind=CiscoDetailKind.ADVISORY,
@@ -70,7 +75,8 @@ def _advisory(*releases: str, train: str, ident: str = ADVISORY) -> AdvisoryAnsw
             updated="2026-11-02",
             first_fixed=None,
         ),
-        first_fixed=tuple(FixedRelease(train, release) for release in releases),
+        first_fixed=fixes,
+        platforms=(AdvisoryPlatform(series, fixes),) if series is not None else (),
     )
 
 
@@ -168,8 +174,8 @@ def test_nx_os_releases_order_a_lettered_build_after_its_plain_release(
             _answer(
                 OsType.NX_OS,
                 running,
-                _advisory(lower, train="10.6", ident=LOWER),
-                _advisory(higher, train="10.6", ident=HIGHER),
+                _advisory(lower, train="10.6", ident=LOWER, series=NEXUS_PLATFORM),
+                _advisory(higher, train="10.6", ident=HIGHER, series=NEXUS_PLATFORM),
                 hardware_family="NEXUS9000",
             ),
         ),
@@ -276,7 +282,11 @@ def test_each_release_gets_the_train_cisco_names(
             _answer(
                 os_type,
                 release,
-                _advisory(fix, train=fix_train),
+                _advisory(
+                    fix,
+                    train=fix_train,
+                    series=NEXUS_PLATFORM if platform is Platform.NX_OS else None,
+                ),
                 hardware_family="NEXUS9000" if platform is Platform.NX_OS else None,
             ),
         ),

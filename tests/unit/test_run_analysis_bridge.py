@@ -6,6 +6,7 @@ from network_analyser import topology
 from network_analyser.cli import run_analysis
 from network_analyser.records import Platform
 from network_analyser.records.analysis import (
+    AdvisoryPlatform,
     AnalysisInput,
     FixedRelease,
     OsType,
@@ -18,6 +19,7 @@ from network_analyser.records.cisco import (
     CiscoCallTally,
     CiscoEndpoint,
     CiscoOsType,
+    CiscoPlatform,
     EndpointUse,
     EoxAnswer,
     EoxRecord,
@@ -223,7 +225,13 @@ def test_an_nxos_i_series_release_keeps_its_own_train() -> None:
         cves=("CVE-2026-0001",),
         first_published="2026-01-01T00:00:00",
         last_updated="2026-02-01T00:00:00",
-        first_fixed=("7.0(3)I7(10)",),
+        first_fixed=(),
+        platforms=(
+            CiscoPlatform(
+                name="Cisco Nexus 9000 Series Switches",
+                first_fixed=("7.0(3)I7(10)",),
+            ),
+        ),
     )
     asked = LookupQuestions(
         releases=(question,),
@@ -237,4 +245,10 @@ def test_an_nxos_i_series_release_keeps_its_own_train() -> None:
 
     assert isinstance(answers.advisories, tuple)
     (release,) = answers.advisories
-    assert release.advisories[0].first_fixed == (FixedRelease("7.0(3)I7", "7.0(3)I7(10)"),)
+    assert release.advisories[0].first_fixed == ()
+    assert release.advisories[0].platforms == (
+        AdvisoryPlatform(
+            name="Cisco Nexus 9000 Series Switches",
+            first_fixed=(FixedRelease("7.0(3)I7", "7.0(3)I7(10)"),),
+        ),
+    )
