@@ -186,10 +186,9 @@ class FakeCisco:
         page_text, _, values_text = tail.partition("/")
         page = int(page_text)
         values = values_text.split(",")
+        if kind == "EOXByProductID":
+            values = [_pid_from_wire(value) for value in values]
         for value in values:
-            if kind == "EOXByProductID" and not is_safe_pid(value):
-                msg = f"PID left without its pattern: {value!r}"
-                raise UnsafeValueSentError(msg)
             if kind == "EOXBySWReleaseString" and not is_safe_release(value):
                 msg = f"release left without its pattern: {value!r}"
                 raise UnsafeValueSentError(msg)
@@ -216,12 +215,11 @@ class FakeCisco:
         )
 
     def _suggestions(self, path: str) -> HttpResponse:
-        values = path.removeprefix(SUGGESTION_PREFIX).split(",")
+        values = [
+            _pid_from_wire(value) for value in path.removeprefix(SUGGESTION_PREFIX).split(",")
+        ]
         entries: list[dict[str, Any]] = []
         for value in values:
-            if not is_safe_pid(value):
-                msg = f"PID left without its pattern: {value!r}"
-                raise UnsafeValueSentError(msg)
             if value in self.suggestions:
                 entries.append(
                     {
@@ -240,10 +238,8 @@ class FakeCisco:
 
     def _compatible(self, path: str) -> HttpResponse:
         rest = path.removeprefix(COMPATIBLE_PREFIX)
-        product_id, _, query = rest.partition("?")
-        if not is_safe_pid(product_id):
-            msg = f"PID left without its pattern: {product_id!r}"
-            raise UnsafeValueSentError(msg)
+        wire_id, _, query = rest.partition("?")
+        product_id = _pid_from_wire(wire_id)
         page_text = _params(query).get("pageIndex", "1")
         if not page_text.isdigit() or int(page_text) < 1:
             msg = f"pageIndex was not a page number: {page_text!r}"
@@ -275,6 +271,22 @@ def _check_authorization(request: HttpRequest) -> None:
     if CLIENT_ID in request.path or CLIENT_SECRET in request.path:
         msg = "the client ID or secret reached an API path"
         raise UnsafeValueSentError(msg)
+
+
+def _pid_from_wire(wire: str) -> str:
+    """Return the PID a path segment names, proving it left the PC in its safe wire form.
+
+    A licence suffix's `/` may only arrive as `%2F`: a raw `/` would change the path, and any
+    other `%` is not a PID character at all.
+    """
+    if "/" in wire:
+        msg = f"a PID reached the path with a raw slash: {wire!r}"
+        raise UnsafeValueSentError(msg)
+    pid = wire.replace("%2F", "/")
+    if not is_safe_pid(pid):
+        msg = f"PID left without its pattern: {wire!r}"
+        raise UnsafeValueSentError(msg)
+    return pid
 
 
 def _params(query: str) -> dict[str, str]:
