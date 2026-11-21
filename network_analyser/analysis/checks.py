@@ -27,7 +27,8 @@ from network_analyser.analysis.catalogue import MODEL_DRIFT_CHECK
 from network_analyser.analysis.definition import CheckDefinition
 from network_analyser.analysis.hardening import HARDENING_CHECKS
 from network_analyser.analysis.ids import finding_id
-from network_analyser.records.analysis import AnalysisInput, SourceUnavailable
+from network_analyser.analysis.releases import normalise_release, release_key, train_of
+from network_analyser.records.analysis import AnalysisInput, OsType, SourceUnavailable
 from network_analyser.records.collected import StackMember, VpcState
 from network_analyser.records.platform import Platform
 from network_analyser.records.topology import (
@@ -98,7 +99,6 @@ support table, so they are outside this Check rather than an unclassified Train.
 
 _CATALYST_9000: Final = re.compile(r"C9[2-6]\d{2}")
 _TRAIN: Final = re.compile(r"^(\d{1,2})\.(\d{1,2})(?:[.(]|$)")
-_LEADING_ZERO: Final = re.compile(r"(?<!\d)0+(\d)")
 _BUNDLE: Final = "BUNDLE"
 
 
@@ -121,7 +121,7 @@ def model_drift(data: AnalysisInput) -> tuple[Finding, ...]:
 
     findings: list[Finding] = []
     for model, devices in sorted(by_model.items()):
-        releases = sorted({release for _, release, _ in devices})
+        releases = sorted({release for _, release, _ in devices}, key=release_key)
         if len(releases) < MINIMUM_DRIFT_RELEASES:
             continue
         names: dict[str, list[str]] = {release: [] for release in releases}
@@ -165,7 +165,7 @@ def stack_mismatch(data: AnalysisInput) -> tuple[Finding, ...]:
         if isinstance(members, Unknown) or len(members) < MINIMUM_DRIFT_RELEASES:
             continue
         releases = {
-            _release_key(member.software_version)
+            release_key(member.software_version)
             for member in members
             if isinstance(member.software_version, str)
         }
@@ -211,7 +211,7 @@ def vpc_mismatch(data: AnalysisInput) -> tuple[Finding, ...]:
         other_release = other.software_version
         if not isinstance(release, str) or not isinstance(other_release, str):
             continue
-        if _release_key(release) == _release_key(other_release):
+        if release_key(release) == release_key(other_release):
             continue
         what = (
             f"vPC peers {_name(peer)} and {_name(other)} run different releases: "
@@ -347,22 +347,18 @@ def _member_text(member: StackMember) -> str:
     return f"member {member.number} runs {shown_release} in {shown_mode}"
 
 
-def _release_key(release: str) -> str:
-    """A release with IOS-XE's leading zeros stripped, for comparing two members.
-
-    `17.09.04a` and `17.9.4a` are one release; the Finding still shows each as reported.
-    """
-    return _LEADING_ZERO.sub(r"\1", release)
-
-
 def _train(release: str | Unknown) -> str | None:
-    """The Train a release belongs to, such as `17.13`; None when it cannot be read."""
+    """The Train a release belongs to, such as `17.13`; None when it cannot be read.
+
+    The Train comes from the same rule as every other Check's: the first two numbers for
+    IOS-XE, which is the only family this Check covers. Leading zeros are stripped first.
+    """
     if not isinstance(release, str):
         return None
-    match = _TRAIN.match(_release_key(release))
-    if match is None:
+    normalised = normalise_release(release)
+    if _TRAIN.match(normalised) is None:
         return None
-    return f"{int(match.group(1))}.{int(match.group(2))}"
+    return train_of(normalised, OsType.IOS_XE)
 
 
 def _is_catalyst_9000(model: object) -> bool:

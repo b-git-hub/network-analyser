@@ -23,6 +23,9 @@ HOSTILE = "</script><img src=x onerror=alert(1)>\"'&\u2028"
 DATA_OPEN = '<script type="application/json" id="topology-data">'
 BADGE_LEGEND = "Badge = number of Findings on the device, coloured by its worst level"
 TARGET_LEGEND = "\u2191 17.12.8 = the Upgrade Target to move to"
+TARGET_PARTIAL_LEGEND = (
+    "\u2191 17.12.8 (no fix in Train) = the target still does not clear every Advisory"
+)
 NO_FIX_LEGEND = "no fix in Train = no release in its Train clears its Advisories"
 COULD_NOT_CHECK_LEGEND = "? could not check = its Advisories could not be checked"
 
@@ -150,6 +153,15 @@ def test_a_finding_from_before_the_scale_does_not_count_towards_a_badge() -> Non
             "target",
         ),
         (
+            {
+                "outcome": "3 Advisories match",
+                "upgrade_target": "17.12.8",
+                "not_cleared": 1,
+            },
+            "\u2191 17.12.8 (no fix in Train)",
+            "target",
+        ),
+        (
             {"outcome": "2 Advisories match", "upgrade_target": None},
             "no fix in Train",
             "no-fix",
@@ -232,6 +244,7 @@ def test_the_legend_explains_the_badge_and_every_tag() -> None:
     assert legend["badge"] == BADGE_LEGEND
     assert legend["levels"] == ["Critical", "High", "Medium", "Low"]
     assert legend["target"] == TARGET_LEGEND
+    assert legend["target_partial"] == TARGET_PARTIAL_LEGEND
     assert legend["no_fix"] == NO_FIX_LEGEND
     assert legend["could_not_check"] == COULD_NOT_CHECK_LEGEND
     assert "markerLegend" in _script(_page(_switches()))

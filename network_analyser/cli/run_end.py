@@ -60,7 +60,9 @@ _SOURCES: Final = (
     ("advisories", "Cisco advisories (openVuln)"),
     ("eox", "Cisco EoX"),
     ("suggestions", "Cisco Software Suggestion"),
+    ("compatible", "Cisco Software Suggestion"),
 )
+"""One Needs-attention line per source; the two Software Suggestion calls share one name."""
 _REJECTED: Final = REJECTED
 _KEY_STEP: Final = f'Run "{PROG} cisco-key set" to store a working key.'
 
@@ -190,7 +192,11 @@ def _ask(
 
 def _has_questions(asked: LookupQuestions) -> bool:
     return bool(
-        asked.releases or asked.hardware_pids or asked.software_releases or asked.suggestion_pids
+        asked.releases
+        or asked.hardware_pids
+        or asked.software_releases
+        or asked.suggestion_pids
+        or asked.compatible_pids
     )
 
 
@@ -218,7 +224,8 @@ def _attention(
             line = f"{shown} did not run: {source.reason}."
             if source.reason == _REJECTED:
                 line = f"{line} {_KEY_STEP}"
-            lines.append(line)
+            if line not in lines:
+                lines.append(line)
     return tuple(lines)
 
 
@@ -251,6 +258,7 @@ def analysis_event(
         endpoints=()
         if tally is None
         else tuple(
-            (use.endpoint.value, use.calls, use.values, use.retries) for use in tally.endpoints
+            (use.endpoint.value, use.calls, use.values, use.retries, use.pages)
+            for use in tally.endpoints
         ),
     )

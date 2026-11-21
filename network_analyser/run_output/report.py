@@ -25,6 +25,7 @@ from network_analyser.records.run_summary import RunReport, RunReportFacts
 from network_analyser.records.sweep import SweepResult
 from network_analyser.records.topology import (
     Check,
+    DeviceAdvice,
     Finding,
     FindingKind,
     FindingLevel,
@@ -81,10 +82,11 @@ def render_run_report(report: RunReport, scan: SecretScan) -> str:
     names = _names(report.topology)
     by_ip = _records_by_ip(report.devices)
     locked = {item.ip: item for item in report.backups.backups}
+    advice = _advice_by_device(report.topology)
     body = "".join(
         (
             _host_keys(report.devices, scan),
-            _visited(report.topology, by_ip, locked, scan),
+            _visited(report.topology, by_ip, locked, advice, scan),
             _unvisited(report.topology, names, scan),
             _findings(report.topology, names, scan),
             _sweep(report.sweep, scan),
@@ -232,11 +234,12 @@ def _visited(
     built: Topology,
     by_ip: dict[IPv4Address, DeviceRecord],
     locked: dict[IPv4Address, BackupRecord],
+    advice: dict[str, DeviceAdvice],
     scan: SecretScan,
 ) -> str:
     """Visited Devices, with the login and the Backup beside each one."""
     rows = [
-        _visited_row(device, by_ip.get(device.management_ip), locked, scan)
+        _visited_row(device, by_ip.get(device.management_ip), locked, advice, scan)
         for device in built.devices
     ]
     body = _details("Visited Devices", _table(_VISITED_HEAD, rows)) if rows else "<p>None.</p>"
@@ -253,13 +256,22 @@ _VISITED_HEAD: Final = (
     "Path",
     "Ciphertext SHA-256",
     "Scrypt level",
+    "Upgrade Target",
 )
+
+
+def _advice_by_device(built: Topology) -> dict[str, DeviceAdvice]:
+    """Each Visited Device's advice record, when Analysis ran (#124)."""
+    if built.analysis is None:
+        return {}
+    return {record.device: record for record in built.analysis.advice}
 
 
 def _visited_row(
     device: VisitedDevice,
     record: DeviceRecord | None,
     locked: dict[IPv4Address, BackupRecord],
+    advice: dict[str, DeviceAdvice],
     scan: SecretScan,
 ) -> tuple[str, ...]:
     """One Visited Device's cells. The name links into the diagram."""
@@ -277,7 +289,25 @@ def _visited_row(
         _text(None if backup is None else backup.path, scan),
         _text(None if backup is None else backup.ciphertext_sha256, scan),
         _text(_scrypt(None if backup is None else backup.scrypt_level), scan),
+        _text(_upgrade_target(advice.get(device.id)), scan),
     )
+
+
+def _upgrade_target(advice: DeviceAdvice | None) -> str:
+    """The device's advice, in the same words the Findings report uses (#124, story 29)."""
+    if advice is None or not advice.upgrade_target:
+        return "not available"
+    target = advice.upgrade_target
+    lowered = target.lower()
+    if lowered == "not available" or lowered.startswith(("no fix", "no critical")):
+        return target
+    if advice.not_cleared > 0:
+        train = f"Train {advice.train}" if advice.train else "this device's Train"
+        return (
+            f"Upgrade to {target} or later "
+            f"(does not clear {advice.not_cleared} Advisories: no fix in {train})"
+        )
+    return f"Upgrade to {target} or later"
 
 
 def _unvisited(built: Topology, names: dict[str, str], scan: SecretScan) -> str:

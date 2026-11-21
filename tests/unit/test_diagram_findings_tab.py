@@ -344,6 +344,7 @@ def test_an_advisory_pane_has_cisco_detail_the_fixed_line_and_affected_devices()
             "release": "17.12.4",
             "upgrade_target": "17.12.8",
             "latest_release": "17.12.10",
+            "not_cleared": 0,
         },
         {
             "hostname": "sw-b",
@@ -352,6 +353,7 @@ def test_an_advisory_pane_has_cisco_detail_the_fixed_line_and_affected_devices()
             "release": "17.12.4",
             "upgrade_target": "17.12.8",
             "latest_release": "17.12.10",
+            "not_cleared": 0,
         },
     ]
 

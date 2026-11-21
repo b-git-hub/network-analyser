@@ -6,6 +6,7 @@ from network_analyser import topology
 from network_analyser.cli import run_analysis
 from network_analyser.records import Platform
 from network_analyser.records.analysis import (
+    AdvisoryPlatform,
     AnalysisInput,
     FixedRelease,
     OsType,
@@ -18,6 +19,9 @@ from network_analyser.records.cisco import (
     CiscoCallTally,
     CiscoEndpoint,
     CiscoOsType,
+    CiscoPlatform,
+    CompatibleAnswer,
+    CompatibleAnswers,
     EndpointUse,
     EoxAnswer,
     EoxRecord,
@@ -28,6 +32,9 @@ from network_analyser.records.cisco import (
     SuggestionsAnswer,
     TokenOutcome,
     TokenResult,
+)
+from network_analyser.records.cisco import (
+    CompatibleRelease as CiscoCompatibleRelease,
 )
 from network_analyser.records.cisco import (
     SourceUnavailable as CiscoUnavailable,
@@ -98,6 +105,22 @@ def _replies() -> CiscoAnswers:
             ),
             unanswered=(),
         ),
+        compatible=CompatibleAnswers(
+            answers=(
+                CompatibleAnswer(
+                    "C9300-48P",
+                    (
+                        CiscoCompatibleRelease(
+                            "17.12.8", suggested=False, train="17.12", lifecycle="MD"
+                        ),
+                        CiscoCompatibleRelease(
+                            "26.2.1", suggested=False, train="26.2", lifecycle="ED"
+                        ),
+                    ),
+                ),
+            ),
+            unanswered=(),
+        ),
         tally=CiscoCallTally(
             token=TokenResult(TokenOutcome.OK),
             endpoints=tuple(
@@ -115,6 +138,7 @@ def test_the_questions_are_only_de_duplicated_pids_and_releases() -> None:
     assert asked.hardware_pids == ("C9300-48P",)
     assert asked.software_releases == ("17.9.4",)
     assert asked.suggestion_pids == ("C9300-48P",)
+    assert asked.compatible_pids == ("C9300-48P",)
 
 
 def test_advisories_become_analysis_answers_with_cisco_s_detail() -> None:
@@ -163,6 +187,19 @@ def test_suggestions_keep_only_the_releases_cisco_suggests() -> None:
     assert suggested.releases == ("17.9.5",)
 
 
+def test_compatible_releases_carry_each_lifecycle_code() -> None:
+    answers = run_analysis.analysis_answers(_replies(), _asked())
+
+    assert isinstance(answers.compatible, tuple)
+    (compatible,) = answers.compatible
+    assert compatible.pid == "C9300-48P"
+    assert [(item.release, item.lifecycle) for item in compatible.releases] == [
+        ("17.12.8", "MD"),
+        ("26.2.1", "ED"),
+    ]
+    assert compatible.unanswered is None
+
+
 def test_a_source_unavailable_stays_unavailable_and_has_no_answers() -> None:
     asked = _asked()
     missing = CiscoUnavailable("Cisco could not be reached")
@@ -171,6 +208,7 @@ def test_a_source_unavailable_stays_unavailable_and_has_no_answers() -> None:
         hardware_eox=missing,
         software_eox=missing,
         suggestions=missing,
+        compatible=missing,
         tally=_replies().tally,
     )
 
@@ -179,6 +217,7 @@ def test_a_source_unavailable_stays_unavailable_and_has_no_answers() -> None:
     assert isinstance(answers.advisories, SourceUnavailable)
     assert isinstance(answers.eox, SourceUnavailable)
     assert isinstance(answers.suggestions, SourceUnavailable)
+    assert isinstance(answers.compatible, SourceUnavailable)
 
 
 def test_an_nxos_release_is_not_sent_without_its_hardware_family() -> None:
@@ -211,3 +250,42 @@ def test_an_nxos_release_is_sent_with_the_hardware_family_it_was_matched_on() ->
     )
     assert isinstance(answers.advisories, tuple)
     assert answers.advisories[0].hardware_family == "NEXUS9000"
+
+
+def test_an_nxos_i_series_release_keeps_its_own_train() -> None:
+    question = ReleaseQuestion(CiscoOsType.NX_OS, "7.0(3)I7(9)", "NEXUS9000")
+    advisory = CiscoAdvisory(
+        advisory_id="cisco-sa-test-123",
+        title="Synthetic advisory",
+        sir="High",
+        cvss_base_score=8.6,
+        cves=("CVE-2026-0001",),
+        first_published="2026-01-01T00:00:00",
+        last_updated="2026-02-01T00:00:00",
+        first_fixed=(),
+        platforms=(
+            CiscoPlatform(
+                name="Cisco Nexus 9000 Series Switches",
+                first_fixed=("7.0(3)I7(10)",),
+            ),
+        ),
+    )
+    asked = LookupQuestions(
+        releases=(question,),
+        hardware_pids=(),
+        software_releases=(),
+        suggestion_pids=(),
+    )
+    replies = replace(_replies(), advisories=(AdvisoriesAnswer(question, (advisory,)),))
+
+    answers = run_analysis.analysis_answers(replies, asked)
+
+    assert isinstance(answers.advisories, tuple)
+    (release,) = answers.advisories
+    assert release.advisories[0].first_fixed == ()
+    assert release.advisories[0].platforms == (
+        AdvisoryPlatform(
+            name="Cisco Nexus 9000 Series Switches",
+            first_fixed=(FixedRelease("7.0(3)I7", "7.0(3)I7(10)"),),
+        ),
+    )

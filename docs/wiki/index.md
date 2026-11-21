@@ -21,6 +21,7 @@ A dated, historical record kept by the coordinating (chief-of-staff) session and
 - [delivery-one-draft-pr](delivery-one-draft-pr.md): spec #37 ships as one draft PR from the integration branch.
 
 ## Releases
+- [release-0.3.0-2026-11-21](release-0.3.0-2026-11-21.md): release 0.3.0 (2026-11-21): version, changelog, glossary and ADR amendments, and the gates it passed.
 - [release-0.2.0-2026-11-21](release-0.2.0-2026-11-21.md): release 0.2.0 (2026-11-21): version, changelog, lab Device Role and checklist, and the gates it passed.
 
 ## Reference snapshots

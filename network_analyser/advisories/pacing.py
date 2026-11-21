@@ -25,6 +25,7 @@ INTERVAL_S: Final[dict[CiscoEndpoint, float]] = {
     CiscoEndpoint.OPENVULN: OPENVULN_INTERVAL_S,
     CiscoEndpoint.EOX: OTHER_INTERVAL_S,
     CiscoEndpoint.SUGGESTION: OTHER_INTERVAL_S,
+    CiscoEndpoint.COMPATIBLE: OTHER_INTERVAL_S,
 }
 
 DEFAULT_RETRY_WAIT_S: Final = 2.0

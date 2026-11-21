@@ -25,9 +25,13 @@ from network_analyser.records.platform import CredentialSetResult, CredentialSet
 from network_analyser.records.run_summary import RunReport, RunReportFacts
 from network_analyser.records.sweep import ProbeFailure, ProbeResult, SweepResult
 from network_analyser.records.topology import (
+    AdvisoryOutcome,
+    AdvisoryOutcomeKind,
+    AnalysisSummary,
     Check,
     CheckType,
     CiscoLookups,
+    DeviceAdvice,
     Finding,
     FindingKind,
     FindingLevel,
@@ -627,6 +631,39 @@ def test_analysis_strings_are_escaped_in_the_table_and_needs_attention() -> None
     assert "&lt;script&gt;" in page
     assert _SCRIPT.search(page) is None
     assert _URL.search(page) is None
+
+
+def test_each_devices_upgrade_target_comes_from_the_advice_record() -> None:
+    base = _analysis_report()
+    advice = (
+        _advice("dev-S1", "17.12.8", not_cleared=1),
+        _advice("dev-S2", "17.12.9", not_cleared=0),
+    )
+    built = dataclasses.replace(base.topology, analysis=AnalysisSummary(advice=advice, checks=()))
+
+    page = report_page.render_run_report(dataclasses.replace(base, topology=built), SecretScan())
+
+    assert (
+        "Upgrade to 17.12.8 or later (does not clear 1 Advisories: no fix in Train 17.12)" in page
+    )
+    assert "Upgrade to 17.12.9 or later" in page
+    assert "Upgrade to 17.12.9 or later (does not clear" not in page
+
+
+def _advice(device: str, target: str, *, not_cleared: int) -> DeviceAdvice:
+    return DeviceAdvice(
+        device=device,
+        advisory_outcome=AdvisoryOutcome(
+            AdvisoryOutcomeKind.MATCHES,
+            matched=2,
+            release="17.12.4",
+        ),
+        upgrade_target=target,
+        latest_release_in_train="17.12.10",
+        latest_release="17.12.10",
+        train="17.12",
+        not_cleared=not_cleared,
+    )
 
 
 def test_v1s_other_report_sections_are_unchanged() -> None:
