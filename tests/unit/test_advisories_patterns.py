@@ -11,7 +11,19 @@ from network_analyser.advisories import is_safe_pid, is_safe_platform_alias, is_
 
 @pytest.mark.parametrize(
     "value",
-    ["C9300-48P", "N9K-C93180YC-FX", "WS-C2960X-48FPS-L", "C9300-NM-8X", "C9300-24T"],
+    [
+        "C9300-48P",
+        "N9K-C93180YC-FX",
+        "WS-C2960X-48FPS-L",
+        "C9300-NM-8X",
+        "C9300-24T",
+        "ISR4451-X/K9",
+        "CISCO2911/K9",
+        "C9300v",
+        "N9K-C9300v",
+        "c9300-48p",
+        "C" + "9" * 40,
+    ],
 )
 def test_a_cisco_pid_is_accepted(value: str) -> None:
     assert is_safe_pid(value)
@@ -21,13 +33,24 @@ def test_a_cisco_pid_is_accepted(value: str) -> None:
     "value",
     [
         "",
-        "c9300-48p",
         "C9300 48P",
         "C9300-48P;DROP",
         "C9300-48P\r\n",
         "=C9300-48P",
-        "C9300/48P",
-        "C" + "9" * 40,
+        "C9300/K9/K9",
+        "ISR4451-X/",
+        "/K9",
+        "ISR4451-X/K9/",
+        "ISR4451-X%2FK9",
+        "C9300%2e48P",
+        "../C9300-48P",
+        "C9300-48P?x=1",
+        "C9300-48P#x",
+        "C9300-\u096a\u096eP",
+        "C9300-48P\u00e9",
+        "AB",
+        "CATALYST",
+        "C" + "9" * 70,
     ],
 )
 def test_anything_else_is_refused_as_a_pid(value: str) -> None:
