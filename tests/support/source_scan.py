@@ -14,7 +14,7 @@ PACKAGE = "network_analyser"
 PACKAGE_ROOT = REPO_ROOT / PACKAGE
 
 # The eleven modules of spec #37 ("Modules and their interfaces"), ADR 0003, plus the 0.2.0
-# `advisories` module of spec #92 (#95).
+# `advisories` (#95) and `analysis` (#94) modules of spec #92.
 MODULES = frozenset(
     {
         "cli",
@@ -29,6 +29,7 @@ MODULES = frozenset(
         "diagram",
         "run_output",
         "advisories",
+        "analysis",
     }
 )
 # Leaf modules that import nothing from the package (CODING_STANDARDS.md, "Layout").

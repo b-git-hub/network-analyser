@@ -1,4 +1,4 @@
-# `topology.json` (format version 1)
+# `topology.json` (format version 2)
 
 Written 2026-11-19 for [#52](https://github.com/b-git-hub/network-analyser/issues/52) (spec [#37](https://github.com/b-git-hub/network-analyser/issues/37), "`topology.json` contract"; decided on [#11](https://github.com/b-git-hub/network-analyser/issues/11)).
 
@@ -32,7 +32,7 @@ cli/run_topology.py -> run_output.write_scanned_json -> topology.json
 
 ## Format version
 
-`format_version` is the first key: one integer, now `1`. It is bumped only when an older `render` would misread the file. An optional field may be added without a bump, because `render` ignores fields it does not know; `render` refuses a newer version.
+`format_version` is the first key: one integer, now `2`. It is bumped only when an older `render` would misread the file. An optional field may be added without a bump, because `render` ignores fields it does not know; `render` refuses a newer version. It was bumped to `2` on 2026-11-20 for the reason given under `findings[]`.
 
 ## Stable ids
 
@@ -52,7 +52,7 @@ Ids hold only letters, digits, `.`, `-` and `_`. Items point at devices by id.
 
 | Key | Holds |
 |---|---|
-| `format_version` | `1` |
+| `format_version` | `2` |
 | `devices` | Visited Devices |
 | `unvisited` | Unvisited Devices |
 | `links` | physical Links |
@@ -64,6 +64,7 @@ Ids hold only letters, digits, `.`, `-` and `_`. Items point at devices by id.
 | `skipped` | data not collected, per device, so its checks were skipped (story 126) |
 | `unknown_interface_names` | interface names the table did not know (story 127) |
 | `cisco_lookups` | optional (#104, read by #108): whether Cisco was asked during the Run and when |
+| `analysis` | Analysis's advice and per-Check list (#94), or `null` before Analysis has run |
 
 ### `cisco_lookups` (#104, optional)
 
@@ -119,14 +120,23 @@ A prefix in one VRF on exactly two devices is one adjacency of kind `shared subn
 
 - `level` is `Critical`, `High`, `Medium` or `Low`. There is no Info level.
 - `check` is the Check that raised it: `id` (stable in every Run), `name`, `type` (`Advisory`, `Configuration`, `Lifecycle`, `Consistency`, `Topology`) and `soft` (true for a Check shown fainter and listed last within its level, such as `VLAN on one end only`).
-- `what_was_found` is fixed text plus names, keywords, type numbers and counts; `what_to_do` is the fix; `source` is `Cisco openVuln`, `config`, `device reports` or `tool policy, not a Cisco rule`.
+- `what_was_found` is fixed text plus names, keywords, type numbers and counts; `what_to_do` is the fix; `source` is `Cisco openVuln`, `config`, `device reports` or `tool policy, not a Cisco rule`. `what_to_do` is required on every Finding: for an Advisory it is the upgrade advice, and for an EoX Finding the replacement plan.
 - `summary` is one line saying what is wrong, kept so the v1 pages still draw a Topology Finding. `kind` is v1's kind, `null` for an Analysis Finding. A file from before #93 has neither the new keys nor the new shape; its findings still draw.
-- `cisco_detail` is one of two shapes, or `null`: an Advisory's `id`, `title`, `sir`, `cvss`, `cves[]`, `published`, `updated`, `first_fixed` (`null` for no fix in the device's Train) and `hardware_family_not_confirmed`; or an EoX `items[]` of `name`, `last_date_of_support`, `end_of_security_support`, `end_of_sw_maintenance`, `end_of_sale` and `replacement`. Dates are fixed ISO 8601 text.
+- `cisco_detail` is one of two shapes, or `null`, told apart by its `kind` discriminator (`Advisory` or `EoX`), never by which fields happen to be present. An Advisory carries `kind`, `id`, `title`, `sir` (one of the four levels, equal to the Finding's `level`), `cvss`, `cves[]`, `published`, `updated`, `first_fixed` (`null` for no fix in the device's Train), `status` (the fixed `Affected release`), `fixed_line` (the fixed "version-only match" line, story 49) and `hardware_family_not_confirmed`. An EoX carries `kind` and `items[]` of `kind` (`hardware` or `software`, stories 74-75), `name`, `last_date_of_support`, `end_of_security_support`, `end_of_sw_maintenance`, `end_of_sale` and `replacement`. Dates are fixed ISO 8601 text.
+- In the Findings tab an Advisory row is keyed by `cisco_detail.id`, not by the generic Check id, so one Advisory hitting 30 devices is one row; any other row is keyed by its Check id (stories 87, 89).
 - `also_flagged_by_cisco` is `true` when Cisco's own insecure-configuration list flags the same thing.
 
-`kind` is `conflicting evidence`, `Bundle member mismatch`, or a VLAN Mismatch (#61, 2026-11-19): `VLAN on one end only`, `differing native VLAN`, `trunk facing access`, `differing access VLANs`. A VLAN Mismatch's `items` is the Link or the Bundle, never a member Link. Its `evidence[].source` is `VLAN` for switchport and VLAN-database commands, or `CDP` when the native VLAN was advertised by an Unvisited Device. `format_version` stays `1`: `kind` and `source` are plain strings an older `render` already keeps.
+### `analysis` (#94, 2026-11-20)
 
-**No format-version bump for #93 (2026-11-20).** The new Finding fields are optional: an older `render` drops the keys it does not know and still draws the v1 `kind` and `summary` it reads, so it would not misread the file. A new `render` reads a file from before #93 with the new fields unknown. The bump rule in *Format version* is unchanged, and a newer file is still refused.
+`advice[]` and `checks[]`, both optional. `findings` keeps every Finding, v1's and Analysis's together.
+
+- `advice[]`: one per Visited Device, in device id order. `device`, `advisory_outcome`, `upgrade_target`, `latest_release_in_train`, `latest_release`, `upcoming_eox[]`. An Advisory outcome is `{"kind": "matches" | "none" | "could not check", "matched", "release", "reason"}`; `text` is built by the report from those fields. Upgrade Target and both Latest Releases are `not available` until Cisco's answers arrive (spec #92, Further Notes). `upcoming_eox[]` reuses the EoX item shape (`name`, the four dates, `replacement`).
+- `checks[]`: every shipped Check, in Check id order: `{"check": {...}, "ran": true | false, "reason": null | "..."}`. A Check is skipped only when a source it needs was unavailable.
+- No Visited Device gets more than one advice record; Unvisited Devices get none (story 3).
+
+`kind` is `conflicting evidence`, `Bundle member mismatch`, or a VLAN Mismatch (#61, 2026-11-19): `VLAN on one end only`, `differing native VLAN`, `trunk facing access`, `differing access VLANs`. A VLAN Mismatch's `items` is the Link or the Bundle, never a member Link. Its `evidence[].source` is `VLAN` for switchport and VLAN-database commands, or `CDP` when the native VLAN was advertised by an Unvisited Device.
+
+**Format-version bump to 2 (2026-11-20, #93 follow-up).** The first Analysis Finding carries `kind: null`, and `cisco_detail` is now a discriminated union (`kind`). A pre-0.2.0 `render` reads a `kind: null` Finding as a v1 Finding and would misdraw it (its report code calls `item.kind.value`), so `format_version` is bumped to `2`. An older `render` refuses the newer file (story 113); a new `render` still reads version 1 files.
 
 ### `skipped[]` and `unknown_interface_names[]`
 
@@ -146,6 +156,6 @@ A prefix in one VRF on exactly two devices is one adjacency of kind `shared subn
   - #62 (2026-11-19) added `adjacencies` and `subnets` to this file.
   - Built by #64 (2026-11-19): the diagram schema now reads `adjacencies`, `subnets`, `skipped` and devices' `vlan_database`; `place(...).subnets` positions Subnet nodes. `diagram.html` has the Map tab (Physical, Routing (L3), VLAN views, with Mismatch markers) and the Findings tab, which `#finding=<id>` opens. `diagram.drawio`'s Routing page draws Adjacencies and Subnets. Calls: [spec-37-implementation-calls](wiki/spec-37-implementation-calls.md), item 16.
 - **#66 (Run report):** list `skipped`, `unknown_interface_names` and `findings`; link with the ids above.
-- **#93 (Finding scale, 2026-11-20):** every Finding now carries `level`, `check` (stable id, name, type, `soft`), `what_was_found`, `what_to_do` and `source`, with optional `cisco_detail` and `also_flagged_by_cisco` (records in `records/topology.py`). v1's kinds are mapped in `topology/scale.py`: conflicting evidence and `VLAN on one end only` are Low (the latter `soft`); Bundle member mismatch, differing native VLAN, trunk facing access and differing access VLANs are Medium. New Analysis Findings carry no v1 `kind`, but they do carry a v1 `summary`. `format_version` stays `1` for the reason given under `findings[]`. A later Check ticket builds its own `Check(id, name, type)` and a `Finding` through the record, sorts with `Finding.order` (worst first, a soft Check last in its level) and writes it into `topology.json` as an optional field.
+- **#93 (Finding scale, 2026-11-20):** every Finding now carries `level`, `check` (stable id, name, type, `soft`), `what_was_found`, `what_to_do` and `source`, with optional `cisco_detail` and `also_flagged_by_cisco` (records in `records/topology.py`). v1's kinds are mapped in `topology/scale.py`: conflicting evidence and `VLAN on one end only` are Low (the latter `soft`); Bundle member mismatch, differing native VLAN, trunk facing access and differing access VLANs are Medium. New Analysis Findings carry no v1 `kind`, but they do carry a v1 `summary`. `format_version` is `2` (bumped by a follow-up; see under `findings[]`). A later Check ticket builds its own `Check(id, name, type)` and a `Finding` through the record, sorts with `Finding.order` (worst first, a soft Check last in its level) and writes it into `topology.json` as an optional field.
 - **#104, #105:** write the optional `cisco_lookups` top-level record and each device's `advice` record described above. #108 reads them through `diagram.cisco_lookups(topology)` and the Advisory pane, and shows "Cisco lookups did not run" or "not available" when they are absent. Neither field needs a `format_version` bump.
 - **#109 (2026-11-20):** the Map's count badge and Upgrade Target tag read Findings and each device's `advice` through `diagram.map_markers(topology)`, which uses `diagram.device_advice(device)` as the one reading of the advice fields. A device whose `advice` is absent, or whose `upgrade_target` is unknown rather than null, gets no tag; no field is added.

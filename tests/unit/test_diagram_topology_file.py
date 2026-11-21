@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from network_analyser import diagram, topology
+from network_analyser.diagram import topology_file
 from network_analyser.records.collected import SwitchportMode
 from network_analyser.records.device import UnvisitedReason
 from tests.support.topology_records import neighbour, port, unvisited, visited
@@ -44,7 +45,7 @@ def _content(document: object) -> Any:  # noqa: ANN401 (read-only JSON data, rea
 def test_a_run_s_topology_json_is_read() -> None:
     read = diagram.read_topology(_text(_document()))
 
-    assert read.format_version == 1
+    assert read.format_version == 2
     content: Any = read.content
     devices = content["devices"]
     assert isinstance(devices, tuple)
@@ -52,9 +53,31 @@ def test_a_run_s_topology_json_is_read() -> None:
     assert content["links"][0]["status"] == "confirmed"
 
 
+def test_a_format_version_1_file_from_an_older_run_is_still_read() -> None:
+    document = _document()
+    document["format_version"] = 1
+
+    read = diagram.read_topology(_text(document))
+
+    assert read.format_version == 1
+    content: Any = read.content
+    assert [d["id"] for d in content["devices"]] == ["dev-S1", "dev-S2"]
+
+
 def test_a_newer_format_version_is_refused() -> None:
     document = _document()
-    document["format_version"] = 2
+    document["format_version"] = 3
+
+    with pytest.raises(diagram.NewerFormatError):
+        diagram.read_topology(_text(document))
+
+
+def test_a_pre_0_2_0_reader_refuses_a_format_version_2_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Story 113: an older `render` (which knew only version 1) refuses a newer file."""
+    monkeypatch.setattr(topology_file, "KNOWN_FORMAT_VERSION", 1)
+    document = _document()
 
     with pytest.raises(diagram.NewerFormatError):
         diagram.read_topology(_text(document))
@@ -214,6 +237,61 @@ def test_a_finding_s_level_and_check_are_read_for_drawing() -> None:
     assert finding["check"]["soft"] is True
     assert finding["what_was_found"] == "VLAN 30 on sw-a Gi1/0/1 only"
     assert finding["also_flagged_by_cisco"] is False
+
+
+def test_an_advisory_cisco_detail_reads_its_discriminator() -> None:
+    document = _document()
+    document["findings"] = [
+        {
+            "id": "finding-0123456789ab",
+            "cisco_detail": {
+                "kind": "Advisory",
+                "id": "cisco-sa-example-abc123",
+                "title": "Example Advisory",
+                "sir": "High",
+                "cvss": "8.6",
+                "cves": ["CVE-2099-0001"],
+                "published": "2026-01-02T16:00:00",
+                "updated": "2026-02-03T16:00:00",
+                "first_fixed": "17.9.10",
+                "status": "Affected release",
+                "fixed_line": "Matched on software release only.",
+                "hardware_family_not_confirmed": False,
+            },
+        }
+    ]
+
+    (finding,) = _content(document)["findings"]
+    detail = finding["cisco_detail"]
+
+    assert detail["kind"] == "Advisory"
+    assert detail["id"] == "cisco-sa-example-abc123"
+    assert detail["sir"] == "High"
+    assert detail["status"] == "Affected release"
+    assert set(detail["items"]) == {"unknown"}  # no EoX items on an Advisory
+
+
+def test_an_eox_cisco_detail_reads_its_discriminator_and_item_kinds() -> None:
+    document = _document()
+    document["findings"] = [
+        {
+            "id": "finding-0123456789ab",
+            "cisco_detail": {
+                "kind": "EoX",
+                "items": [
+                    {"kind": "hardware", "name": "C9300-48P", "replacement": "C9300-48P"},
+                    {"kind": "software", "name": "17.9.4"},
+                ],
+            },
+        }
+    ]
+
+    (finding,) = _content(document)["findings"]
+    detail = finding["cisco_detail"]
+
+    assert detail["kind"] == "EoX"
+    assert [item["kind"] for item in detail["items"]] == ["hardware", "software"]
+    assert set(detail["id"]) == {"unknown"}  # no Advisory id on an EoX detail
 
 
 def test_what_is_read_cannot_be_changed() -> None:
