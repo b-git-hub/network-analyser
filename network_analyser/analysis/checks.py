@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from ipaddress import IPv4Address
 from typing import Final
 
-from network_analyser.analysis import advisory
+from network_analyser.analysis import advisory, lifecycle
 from network_analyser.analysis.definition import CheckDefinition
 from network_analyser.analysis.hardening import HARDENING_CHECKS
 from network_analyser.analysis.ids import finding_id
@@ -458,6 +458,21 @@ CHECKS: tuple[CheckDefinition, ...] = (
         advisory.COULD_NOT_CHECK_CHECK,
         advisory.could_not_check_findings,
         skip_reason=advisories_unavailable,
+    ),
+    CheckDefinition(
+        lifecycle.HARDWARE_EOX_CHECK,
+        lifecycle.hardware_eox,
+        skip_reason=lifecycle.eox_skip_reason,
+    ),
+    CheckDefinition(
+        lifecycle.SOFTWARE_EOX_CHECK,
+        lifecycle.software_eox,
+        skip_reason=lifecycle.eox_skip_reason,
+    ),
+    CheckDefinition(
+        lifecycle.SUGGESTED_RELEASE_CHECK,
+        lifecycle.suggested_release,
+        skip_reason=lifecycle.suggestions_skip_reason,
     ),
 )
 """Every shipped Check. Order does not matter: results are sorted by Check id."""

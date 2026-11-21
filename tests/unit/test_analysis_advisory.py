@@ -585,6 +585,9 @@ def test_every_advisory_check_runs_when_the_source_answers() -> None:
         "hardening-snmp-v3-priv",
         "hardening-telnet",
         "hardening-weak-secret-types",
+        "lifecycle-hardware-eox",
+        "lifecycle-software-eox",
+        "lifecycle-suggested-release",
     ]
     runs = {run.check.id: run for run in results.checks}
     assert runs["advisory-openvuln"].ran is True
