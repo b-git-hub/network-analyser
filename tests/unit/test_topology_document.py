@@ -82,6 +82,7 @@ def test_records_become_objects_with_their_field_names() -> None:
         "subnets",
         "unplaced_next_hops",
         "analysis",
+        "cisco_lookups",
     }
 
 

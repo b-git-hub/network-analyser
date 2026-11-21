@@ -75,6 +75,15 @@ class CredentialSet:
         """
         return self.__password
 
+    def wipe(self) -> None:
+        """Wipe this set's password at the Run's end, before Cisco is asked (ADR 0007)."""
+        self.__password.wipe()
+
+    @property
+    def wiped(self) -> bool:
+        """Say whether this set's password was wiped."""
+        return self.__password.wiped
+
     @override
     def __init_subclass__(cls) -> NoReturn:
         """Refuse subclasses: one could add a way to the password."""
@@ -301,6 +310,20 @@ class CredentialSets:
         """Have the secret scan look for every set's password in everything written (#30)."""
         for credential_set in self.__sets:
             credential_set.add_to_scan(scan)
+
+    def wipe(self) -> None:
+        """Wipe every set's password at the Run's end, before Cisco is asked (ADR 0007).
+
+        A wiped password has no value left for `reveal()`; the secret scan keeps its own copy
+        until `forget()`, so the Run's outputs are still redacted.
+        """
+        for credential_set in self.__sets:
+            credential_set.wipe()
+
+    @property
+    def wiped(self) -> bool:
+        """Say whether every set's password was wiped, for the Run end to prove it."""
+        return all(credential_set.wiped for credential_set in self.__sets)
 
     def __index(self, number: int) -> int:
         """Return set `number`'s index; a number from outside (0, -1) must not wrap round."""

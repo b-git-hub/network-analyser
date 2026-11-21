@@ -74,6 +74,16 @@ class CiscoKey:
         scan.watch(self.client_id)
         scan.watch(self.client_secret)
 
+    def wipe(self) -> None:
+        """Wipe the client ID and secret once Cisco has answered (ADR 0007, story 20)."""
+        self.client_id.wipe()
+        self.client_secret.wipe()
+
+    @property
+    def wiped(self) -> bool:
+        """Say whether the client ID and secret were wiped, for the Run end to prove it."""
+        return self.client_id.wiped and self.client_secret.wiped
+
     def client_id_suffix(self) -> str:
         """Return the last 4 characters of the client ID, so `show` can say which key is set.
 

@@ -68,7 +68,7 @@ Ids hold only letters, digits, `.`, `-` and `_`. Items point at devices by id.
 
 ### `cisco_lookups` (#104, optional)
 
-`ran` (true when Cisco was asked) and `when` (when the lookups ran, as fixed ISO 8601 text). Optional: a file with no key, or a Run with `--cisco-lookups off`, reads as "Cisco lookups did not run". Every surface reads it through `diagram.cisco_lookups(topology)`, so the shape changes in one place.
+`ran` (true when Cisco was asked) and `when` (when the lookups ran, as fixed ISO 8601 text). Optional: a file with no key, or a Run with `--cisco-lookups off`, reads as "Cisco lookups did not run". Every surface reads it through `diagram.cisco_lookups(topology)`, so the shape changes in one place. Written by #104 (2026-11-21); a Run that did not ask Cisco records `{"ran": false, "when": null}`.
 
 ### `devices[]` (Visited Device)
 

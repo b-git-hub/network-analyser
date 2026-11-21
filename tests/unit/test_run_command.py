@@ -46,6 +46,8 @@ def test_flags_give_the_scope_and_seeds_and_the_scope_is_shown_before_any_secret
         "192.0.2.128/25",
         "--seed",
         "192.0.2.1",
+        "--cisco-lookups",
+        "off",
         typed=DECLINED,
     )
 
@@ -292,6 +294,7 @@ def test_a_run_file_with_an_unknown_key_is_refused(run: Runner, tmp_path: Path) 
         ("parallel = true", "parallel: must be a whole number from 1 to 50"),
         ("failure_budget = 6", "failure_budget: must be a whole number from 1 to 5"),
         ('sweep = "yes"', "sweep: must be true or false"),
+        ('cisco_lookups = "off"', "cisco_lookups: must be true or false"),
         ("label = 7", "label: must be text"),
         ('label = "dc1 core"', "label: may hold only letters, digits, - . _"),
         ('label = "../outside"', "label: may hold only letters, digits, - . _"),

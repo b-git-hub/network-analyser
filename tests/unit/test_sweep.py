@@ -572,9 +572,20 @@ def test_a_confirmed_sweep_logs_in_only_to_matching_banners(
     held: list[CrawlResult] = []
     real_summary = summary.final_summary
 
-    def grab(result: CrawlResult, backups: BackupResults, *, elapsed_s: float) -> str:
+    def grab(
+        result: CrawlResult,
+        backups: BackupResults,
+        *,
+        elapsed_s: float,
+        extra_attention: object = (),
+    ) -> str:
         held.append(result)
-        return real_summary(result, backups, elapsed_s=elapsed_s)
+        return real_summary(
+            result,
+            backups,
+            elapsed_s=elapsed_s,
+            extra_attention=extra_attention,  # type: ignore[arg-type]
+        )
 
     monkeypatch.setattr(summary, "final_summary", grab)
 

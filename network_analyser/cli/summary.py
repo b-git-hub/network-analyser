@@ -21,7 +21,7 @@ Counts only, never a percentage (story 78). Usernames and device text are escape
 """
 
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Final
 
 from network_analyser.cli import backup_summary
@@ -70,9 +70,15 @@ _NEXT_STEP: Final = {
 }
 
 
-def final_summary(result: CrawlResult, backups: BackupResults, *, elapsed_s: float) -> str:
+def final_summary(
+    result: CrawlResult,
+    backups: BackupResults,
+    *,
+    elapsed_s: float,
+    extra_attention: Sequence[str] = (),
+) -> str:
     """Return the final summary block (story 87)."""
-    attention = attention_items(result, backups)
+    attention = attention_items(result, backups, extra=extra_attention)
     lines = [
         _outcome(result, len(attention), elapsed_s),
         _visited_line(result, backups),
@@ -89,8 +95,14 @@ def final_summary(result: CrawlResult, backups: BackupResults, *, elapsed_s: flo
     return "\n".join(lines)
 
 
-def attention_items(result: CrawlResult, backups: BackupResults) -> list[str]:
-    """Each thing the operator should fix, with its next step (story 88)."""
+def attention_items(
+    result: CrawlResult, backups: BackupResults, *, extra: Sequence[str] = ()
+) -> list[str]:
+    """Each thing the operator should fix, with its next step (story 88).
+
+    `extra` carries what the Run's end found outside the crawl, such as a Cisco source that
+    did not run (#104), so those lines sit with everything else that needs attention.
+    """
     locked = {b.ip for b in backups.backups if b.path is not None}
     items = [item for r in result.devices for item in _attention(r, locked)]
     items.extend(_retired_step(s) for s in result.credential_sets if s.retired)
@@ -102,19 +114,28 @@ def attention_items(result: CrawlResult, backups: BackupResults) -> list[str]:
             f"The Run stopped early: {result.stopped}. No further login was started. Check "
             "the disk holding the per-user data folder, then run again."
         )
+    items.extend(extra)
     return items
 
 
-def needs_attention(result: CrawlResult, backups: BackupResults) -> bool:
+def needs_attention(
+    result: CrawlResult, backups: BackupResults, *, extra: Sequence[str] = ()
+) -> bool:
     """Say whether anything in the Run needs the operator."""
-    return bool(attention_items(result, backups))
+    return bool(attention_items(result, backups, extra=extra))
 
 
-def exit_code(result: CrawlResult, backups: BackupResults, *, scan_hits: int) -> ExitCode:
+def exit_code(
+    result: CrawlResult,
+    backups: BackupResults,
+    *,
+    scan_hits: int,
+    extra_attention: Sequence[str] = (),
+) -> ExitCode:
     """0 clean, 1 needs attention (a secret-scan hit included), 3 stopped (story 90)."""
     if result.stopped:
         return ExitCode.STOPPED
-    if scan_hits or needs_attention(result, backups):
+    if scan_hits or needs_attention(result, backups, extra=extra_attention):
         return ExitCode.NEEDS_ATTENTION
     return ExitCode.CLEAN
 

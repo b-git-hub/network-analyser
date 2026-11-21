@@ -255,6 +255,12 @@ def _add_run(commands: _Commands) -> None:
 
     lookups = run.add_argument_group("Cisco lookups")
     lookups.add_argument(
+        "--cisco-lookups",
+        choices=["on", "off"],
+        help="ask Cisco for Advisories, EoX and Suggested Releases at the Run's end "
+        "(default on). Off makes no outbound connection and leaves the stored key untouched.",
+    )
+    lookups.add_argument(
         "--proxy",
         type=_proxy,
         metavar="HOST:PORT",

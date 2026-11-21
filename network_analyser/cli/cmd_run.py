@@ -34,9 +34,11 @@ from ipaddress import IPv4Address
 
 from network_analyser import _winsys, backup_store, device_gateway, discovery, run_output
 from network_analyser._version import __version__
+from network_analyser.advisories import ProxyConfig
 from network_analyser.cli import (
     progress,
     ready,
+    run_end,
     run_file,
     run_report,
     run_secrets,
@@ -107,6 +109,7 @@ def run(args: argparse.Namespace) -> ExitCode:
             return ExitCode.REFUSED
         finally:
             run_trail.warn_of_scan_hits(scan)
+            scan.forget()
 
 
 def _refuse_while_a_change_is_pending(data: run_output.DataFolder) -> None:
@@ -124,6 +127,8 @@ def _after_folder_checks(
     loaded = _load_run_file(args.run_file)
     if isinstance(loaded, ExitCode):
         return loaded
+    lookups = _lookups_enabled(args, loaded)
+    _print_missing_key_notice(data, lookups=lookups)
     ask = Prompter.for_this_process()
     request = run_start.scope_and_seeds(args, loaded, ask)
     if isinstance(request, ExitCode):
@@ -139,7 +144,14 @@ def _after_folder_checks(
         print(_FOLDER_HOLDS_A_SECRET, file=sys.stderr)
         return ExitCode.REFUSED
     source = Source.COMMAND_LINE if args.runs_dir is not None else Source.DEFAULT
-    print(ready.ready_block(request, sets.views(), Sourced(check.parent, source), started))
+    block = ready.ready_block(
+        request,
+        sets.views(),
+        Sourced(check.parent, source),
+        started,
+        key_stored=data.cisco_key_file.is_file(),
+    )
+    print(block)
     if not ready.confirm_start(ask):
         print("Run cancelled. Nothing was contacted.", file=sys.stderr)
         return ExitCode.STOPPED
@@ -168,12 +180,30 @@ def _after_folder_checks(
         draft=draft,
     )
 
+    def end(audit: run_output.AuditLog, _result: CrawlResult) -> run_end.EndOutcome:
+        outcome = run_end.finish(
+            audit=audit,
+            folder=folder,
+            collected=collected,
+            scan=scan,
+            scope=request.scope.value,
+            passphrase=passphrase,
+            sets=sets,
+            key_file=data.cisco_key_file,
+            lookups_enabled=request.cisco_lookups.value,
+            proxy=ProxyConfig.explicit(args.proxy) if args.proxy else None,
+        )
+        draft.analysis_results = outcome.results
+        draft.cisco_lookups = outcome.lookups
+        draft.extra_attention = outcome.attention
+        return outcome
+
     try:
         code = run_topology.then_save(
             folder,
             collected,
             scan,
-            lambda: run_trail.run_with_audit_trail(request, sets, folder, scan, crawl),
+            lambda: run_trail.run_with_audit_trail(request, sets, folder, scan, crawl, end),
             scope=request.scope.value,
         )
     except KeyboardInterrupt:
@@ -228,6 +258,22 @@ def _shown_as_well(
         shown.event(event)
 
     return emit
+
+
+def _print_missing_key_notice(data: run_output.DataFolder, *, lookups: bool) -> None:
+    """Print the one notice a Run with no stored key gives, before the first prompt."""
+    notice = run_end.missing_key_notice(lookups_enabled=lookups, key_file=data.cisco_key_file)
+    if notice is not None:
+        print(notice)
+
+
+def _lookups_enabled(args: argparse.Namespace, run_file: run_file.RunFile | None) -> bool:
+    """Whether Cisco is asked: the flag, else the run file, else on (#104, story 8)."""
+    if getattr(args, "cisco_lookups", None) is not None:
+        return bool(args.cisco_lookups == "on")
+    if run_file is not None and run_file.cisco_lookups is not None:
+        return run_file.cisco_lookups
+    return True
 
 
 def _load_run_file(path: str | None) -> run_file.RunFile | ExitCode | None:

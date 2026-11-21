@@ -128,6 +128,40 @@ class RunEnded(AuditEvent):
 
 
 @dataclass(frozen=True, slots=True)
+class AnalysisRan(AuditEvent):
+    """Analysis ran at the Run's end, and what it found, as counts only (stories 22, 114).
+
+    It holds no device name, no per-device Finding and no Cisco value, client ID or token:
+    the log stays evidence, not a roadmap (story 114). Every tuple is plain data, because the
+    Audit log writes only fixed, plain fields.
+
+    Attributes:
+        cisco_lookups_ran: True only when Cisco was asked this Run.
+        cisco_lookups_when: when Cisco was asked, as fixed ISO 8601 text; None otherwise.
+        checks: one `(check id, ran, reason)` per shipped Check, in Check id order; `reason`
+            is fixed text when the Check was skipped, else None.
+        findings_by_level: one `(level, count)` per level, worst first.
+        findings_by_check: one `(check id, count)` per Check, in Check id order; a Check
+            that ran with nothing found has 0.
+        token_outcome: the token request's result, one of Cisco's fixed outcomes.
+        token_status: the HTTP status Cisco answered the token request with; None when none.
+        token_error: Cisco's token error code, such as `invalid_client`; None when none.
+        endpoints: one `(endpoint, calls, values, retries)` per Cisco endpoint, in a fixed
+            order, while lookups ran; empty when they did not.
+    """
+
+    cisco_lookups_ran: bool
+    cisco_lookups_when: str | None
+    checks: tuple[tuple[str, bool, str | None], ...]
+    findings_by_level: tuple[tuple[str, int], ...]
+    findings_by_check: tuple[tuple[str, int], ...]
+    token_outcome: str
+    token_status: int | None
+    token_error: str | None
+    endpoints: tuple[tuple[str, int, int, int], ...]
+
+
+@dataclass(frozen=True, slots=True)
 class CtrlCPressed(AuditEvent):
     """The operator pressed Ctrl+C during the Run (stories 82-83).
 
