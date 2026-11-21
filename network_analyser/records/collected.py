@@ -149,6 +149,10 @@ class Neighbour:
     native_vlan: int | None = None
 
 
+_UNKNOWN_RELEASE: Final = Unknown("release not reported by show version")
+_UNKNOWN_MODE: Final = Unknown("mode not reported by show version")
+
+
 @dataclass(frozen=True, slots=True)
 class StackMember:
     """One member switch of a stack or StackWise Virtual pair.
@@ -166,9 +170,8 @@ class StackMember:
     number: int
     serial: str | Unknown
     model: str | Unknown
-    software_version: str | Unknown = Unknown("version not reported by show version")
-    mode: str | Unknown = Unknown("mode not reported by show version")
-
+    software_version: str | Unknown = _UNKNOWN_RELEASE
+    mode: str | Unknown = _UNKNOWN_MODE
 
 
 @unique

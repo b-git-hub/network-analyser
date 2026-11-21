@@ -72,7 +72,9 @@ Ids hold only letters, digits, `.`, `-` and `_`. Items point at devices by id.
 
 ### `devices[]` (Visited Device)
 
-`id`, `outcome` (`visited` / `partial`), `partial_reason`, `hostname`, `platform`, `model`, `software_version`, `serials[]`, `stack_members[]` (`number`, `serial`, `model`), `management_ip`, `alias_ips[]` (learned aliases and interface addresses), `interfaces[]`, `vlan_database`, `vpc`, and the optional `advice` (#105).
+`id`, `outcome` (`visited` / `partial`), `partial_reason`, `hostname`, `platform`, `model`, `software_version`, `serials[]`, `stack_members[]` (`number`, `serial`, `model`, `software_version`, `mode`), `management_ip`, `alias_ips[]` (learned aliases and interface addresses), `interfaces[]`, `vlan_database`, `vpc`, and the optional `advice` (#105).
+
+`stack_members[]` is the member table of `show version`: `software_version` and `mode` (such as `INSTALL` or `BUNDLE`) are read per member for the consistency Checks (#99), and are `{"unknown": reason}` when the table does not report them. They are optional fields; a file from before #99 has neither, and no format-version bump was needed because an older `render` drops them.
 
 `advice` (#105, read by #108): the per-device Analysis advice: `outcome` (its Advisory outcome: "N Advisories match", "no known Critical/High Advisories for release X" or "could not check: reason"), `upgrade_target` (the release to move to, null when no release in its Train is clear) and `latest_release` (newest overall; `latest_in_train` holds the newest in its Train). Optional, so a file from before #105, or a device Analysis did not advise, has none and the Advisory pane shows "not available" rather than guessing (#89).
 
