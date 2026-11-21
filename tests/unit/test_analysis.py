@@ -41,13 +41,19 @@ C = "192.0.2.3"
 D = "192.0.2.4"
 MODEL = "C9300-48P"
 HARDENING_CHECKS = (
+    "hardening-aaa-central",
+    "hardening-aaa-fallback",
     "hardening-enable-secret",
+    "hardening-exec-timeout",
     "hardening-http-server",
     "hardening-insecure-mode",
     "hardening-legacy-services",
     "hardening-snmp-v1-v2c",
     "hardening-snmp-v3-priv",
+    "hardening-ssh-v2",
     "hardening-telnet",
+    "hardening-type-6",
+    "hardening-vty-access-class",
     "hardening-weak-secret-types",
 )
 
@@ -172,13 +178,19 @@ def test_every_shipped_check_runs_and_one_advice_record_exists_per_visited_devic
         "consistency-stack-mismatch",
         "consistency-standard-support-train",
         "consistency-vpc-mismatch",
+        "hardening-aaa-central",
+        "hardening-aaa-fallback",
         "hardening-enable-secret",
+        "hardening-exec-timeout",
         "hardening-http-server",
         "hardening-insecure-mode",
         "hardening-legacy-services",
         "hardening-snmp-v1-v2c",
         "hardening-snmp-v3-priv",
+        "hardening-ssh-v2",
         "hardening-telnet",
+        "hardening-type-6",
+        "hardening-vty-access-class",
         "hardening-weak-secret-types",
     ]
     assert all(run.ran for run in results.checks)
@@ -321,13 +333,19 @@ def test_the_results_fit_topology_json_as_optional_fields() -> None:
         "consistency-stack-mismatch",
         "consistency-standard-support-train",
         "consistency-vpc-mismatch",
+        "hardening-aaa-central",
+        "hardening-aaa-fallback",
         "hardening-enable-secret",
+        "hardening-exec-timeout",
         "hardening-http-server",
         "hardening-insecure-mode",
         "hardening-legacy-services",
         "hardening-snmp-v1-v2c",
         "hardening-snmp-v3-priv",
+        "hardening-ssh-v2",
         "hardening-telnet",
+        "hardening-type-6",
+        "hardening-vty-access-class",
         "hardening-weak-secret-types",
     ]
     assert checks[3]["ran"] is True

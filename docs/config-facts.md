@@ -31,6 +31,15 @@ The facts ride `DeviceRecord.config_facts`; the cli puts them in `AnalysisInput.
 | `http_server` | `bool` | both | The plain HTTP server is enabled (`ip http server` or `feature http-server`). |
 | `ip_source_route` | `bool` | both | IP source routing is on. The vendor default is on, so only `no ip source-route` makes it `False`. |
 | `legacy_services` | `tuple[str, ...]` | both | The legacy services explicitly enabled, by fixed keyword: `PAD`, `finger`, `TCP small servers`, `UDP small servers`, `BOOTP`, `ODR`, `rcmd`, `FTP`, `TFTP`. |
+| `ssh_version` | `int` | IOS/IOS-XE | The value of `ip ssh version`: 0 when the line is absent, else 1 or 2. |
+| `vty_access_class_missing_lines` | `tuple[str, ...]` or `Unknown` | both | The `line vty` block headers with no inbound `access-class`. `Unknown` when no `line vty` block is shown. |
+| `aaa_login_fallback_none` | `int` | both | How many `aaa authentication login` method lists include `none`. |
+| `aaa_new_model` | `bool` | IOS/IOS-XE | `aaa new-model` is configured. NX-OS has no such command. |
+| `aaa_central_login` | `bool` | both | An `aaa authentication login` method list names a server group (`group`). |
+| `aaa_authorization` | `bool` | both | Any `aaa authorization` command is configured. |
+| `aaa_accounting` | `bool` | both | Any `aaa accounting` command is configured. |
+| `exec_timeout_disabled_lines` | `tuple[str, ...]` | both | The console and vty block headers whose `exec-timeout` is 0 (disabled). An absent line is the vendor default, not a hit. |
+| `type_6_enabled` | `bool` or `Unknown` | IOS/IOS-XE; `Unknown` on NX-OS | `password encryption aes` is configured. The NX-OS command is unconfirmed, so NX-OS is `Unknown`, never "absent". |
 | `snmp_v1_v2c_communities` | `int` | both | SNMPv1/v2c communities configured. |
 | `snmp_v1_v2c_read_write_communities` | `int` | both | How many are read-write. |
 | `snmp_v1_v2c_read_write_default_name` | `int` | both | How many read-write communities use a default name (`public` or `private`). |
@@ -54,4 +63,23 @@ The facts ride `DeviceRecord.config_facts`; the cli puts them in `AnalysisInput.
 | `hardening-http-server` | High | `http_server` |
 | `hardening-legacy-services` | High | `ip_source_route`, `legacy_services` |
 
-A fact that was not read makes the Check raise a Low "could not decide" Finding, never a silent pass (story 6). Later batches ([#100](https://github.com/b-git-hub/network-analyser/issues/100), [#101](https://github.com/b-git-hub/network-analyser/issues/101), [#102](https://github.com/b-git-hub/network-analyser/issues/102)) add their own facts alongside these and use the same names for any they share.
+A fact that was not read makes the Check raise a Low "could not decide" Finding, never a silent pass (story 6). Later batches ([#101](https://github.com/b-git-hub/network-analyser/issues/101), [#102](https://github.com/b-git-hub/network-analyser/issues/102)) add their own facts alongside these and use the same names for any they share.
+
+## The Checks that read them (#100)
+
+Written 2026-11-21 for [#100](https://github.com/b-git-hub/network-analyser/issues/100) (stories 59, 61, 64-66, 69).
+
+| Check id | Level | Facts |
+|---|---|---|
+| `hardening-ssh-v2` | High | `ssh_version`; `VisitedDevice.software_version` for the 17.10 boundary |
+| `hardening-vty-access-class` | High | `vty_access_class_missing_lines` |
+| `hardening-aaa-fallback` | High | `aaa_login_fallback_none` |
+| `hardening-aaa-central` | Medium | `aaa_new_model` (IOS/IOS-XE), `aaa_central_login`, `aaa_authorization`, `aaa_accounting` |
+| `hardening-exec-timeout` | Medium | `exec_timeout_disabled_lines` |
+| `hardening-type-6` | Medium | `type_6_enabled` |
+
+- **SSHv2** is absence-is-the-problem on IOS/IOS-XE: an absent `ip ssh version 2` (fact `0`) is High on classic IOS and IOS-XE before 17.10, whose default is SSH 1.99. On 17.10 and later Cisco refuses SSHv1 by default, so an absent line is a Low "could not decide" until `show ip ssh` is read (#102); the running config cannot show the version in force. NX-OS supports SSHv2 only, so the Check does not apply there.
+- **Exec timeout** is absence-is-the-problem for the protection, not for the line: an absent `exec-timeout` is the vendor default (10 minutes on IOS/IOS-XE) and raises nothing. An explicit `exec-timeout 0` is Medium. Console and vty blocks are checked; an AUX block's `exec-timeout 0 1` is a hardening recommendation, not a hit.
+- **Central AAA** names the missing items and their count. NX-OS has no `aaa new-model`, so it is judged on its three items, not four.
+- **Type 6** reads `password encryption aes` on IOS/IOS-XE. The NX-OS command is unconfirmed, so its fact is `Unknown` and the Check raises a Low "could not decide" there rather than reading silence as "not enabled".
+- Every Finding names keywords, line-block headers, type numbers and counts only; no secret, hash, key, method-list name, server group or quoted config line reaches it.

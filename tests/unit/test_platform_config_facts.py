@@ -10,8 +10,14 @@ import pytest
 from network_analyser import platforms
 from network_analyser.records import Platform
 from network_analyser.records.config_facts import (
+    AAA_ACCOUNTING,
+    AAA_AUTHORIZATION,
+    AAA_CENTRAL_LOGIN,
+    AAA_LOGIN_FALLBACK_NONE,
+    AAA_NEW_MODEL,
     ENABLE_PASSWORD,
     ENABLE_SECRET,
+    EXEC_TIMEOUT_DISABLED_LINES,
     HTTP_SERVER,
     INSECURE_MODE,
     IP_SOURCE_ROUTE,
@@ -32,7 +38,10 @@ from network_analyser.records.config_facts import (
     SNMP_V3_GROUPS_WITHOUT_PRIV,
     SNMP_V3_USERS,
     SNMP_V3_USERS_WITHOUT_PRIV,
+    SSH_VERSION,
     TELNET_LINES,
+    TYPE_6_ENABLED,
+    VTY_ACCESS_CLASS_MISSING_LINES,
     FactValue,
 )
 from network_analyser.records.unknown import Unknown
@@ -61,6 +70,15 @@ def test_ios_xe_running_config_gives_every_hardening_fact() -> None:
         LEGACY_SERVICES: ("PAD", "finger", "BOOTP", "rcmd", "FTP", "TFTP"),
         HTTP_SERVER: True,
         INSECURE_MODE: False,
+        SSH_VERSION: 0,
+        VTY_ACCESS_CLASS_MISSING_LINES: ("line vty 0 4", "line vty 5 15"),
+        AAA_LOGIN_FALLBACK_NONE: 0,
+        AAA_NEW_MODEL: False,
+        AAA_CENTRAL_LOGIN: False,
+        AAA_AUTHORIZATION: False,
+        AAA_ACCOUNTING: False,
+        EXEC_TIMEOUT_DISABLED_LINES: (),
+        TYPE_6_ENABLED: False,
         SNMP_V1_V2C_COMMUNITIES: 3,
         SNMP_V1_V2C_READ_WRITE_COMMUNITIES: 2,
         SNMP_V1_V2C_READ_WRITE_DEFAULT_NAME: 1,
@@ -77,6 +95,15 @@ def test_nxos_running_config_gives_its_own_hardening_facts() -> None:
 
     assert facts == {
         TELNET_LINES: ("line vty",),
+        VTY_ACCESS_CLASS_MISSING_LINES: (),
+        AAA_LOGIN_FALLBACK_NONE: 0,
+        AAA_CENTRAL_LOGIN: False,
+        AAA_AUTHORIZATION: False,
+        AAA_ACCOUNTING: False,
+        EXEC_TIMEOUT_DISABLED_LINES: (),
+        TYPE_6_ENABLED: Unknown(
+            "the NX-OS command that enables AES type 6 encryption is not confirmed"
+        ),
         SECRET_TYPE_0: 0,
         SECRET_TYPE_4: 0,
         SECRET_TYPE_5: 1,

@@ -1,4 +1,4 @@
-"""The first hardening Checks: Telnet, secrets, SNMP, insecure mode, HTTP, legacy services (#96).
+"""The hardening Checks decided from secret-free config facts (#96, #100).
 
 Each is decided from the secret-free config facts in `records.config_facts` (stories 59-66,
 69). A Check raises one Finding per Visited Device per Check, never a secret, hash, key,
@@ -6,14 +6,17 @@ community string or quoted config line.
 
 - Presence-is-the-problem Checks fire only on a hit: Telnet, weak secret types, `enable
   password`, SNMPv1/v2c, insecure mode, the HTTP server, legacy services (story 62).
-- The `enable secret` Check is absence-is-the-problem: it always runs on IOS/IOS-XE (story 61).
+- The `enable secret`, SSHv2, VTY access-class, AAA, exec-timeout and type 6 Checks are
+  absence-is-the-problem: they always run on IOS/IOS-XE (story 61).
 - SNMPv3 privacy runs only where SNMPv3 is configured (story 63).
 - A fact that was not read makes a Low "could not decide" Finding, never a silent pass
-  (story 6).
-- IOS-XE Checks also run on classic IOS with its own rules; insecure mode stays IOS-XE only
-  (story 64).
+  (story 6). So does a hidden default the config cannot settle, such as SSHv1 on IOS-XE
+  17.10+ (story 64).
+- IOS-XE Checks also run on classic IOS with its own rules and defaults (for example SSH
+  1.99); insecure mode stays IOS-XE only (story 64).
 """
 
+import re
 from typing import Final
 
 from network_analyser.analysis.definition import CheckDefinition
@@ -21,8 +24,14 @@ from network_analyser.analysis.ids import finding_id
 from network_analyser.records import Platform
 from network_analyser.records.analysis import AnalysisInput, ConfigFacts
 from network_analyser.records.config_facts import (
+    AAA_ACCOUNTING,
+    AAA_AUTHORIZATION,
+    AAA_CENTRAL_LOGIN,
+    AAA_LOGIN_FALLBACK_NONE,
+    AAA_NEW_MODEL,
     ENABLE_PASSWORD,
     ENABLE_SECRET,
+    EXEC_TIMEOUT_DISABLED_LINES,
     HTTP_SERVER,
     INSECURE_MODE,
     IP_SOURCE_ROUTE,
@@ -40,7 +49,10 @@ from network_analyser.records.config_facts import (
     SNMP_V3_GROUPS_WITHOUT_PRIV,
     SNMP_V3_USERS,
     SNMP_V3_USERS_WITHOUT_PRIV,
+    SSH_VERSION,
     TELNET_LINES,
+    TYPE_6_ENABLED,
+    VTY_ACCESS_CLASS_MISSING_LINES,
 )
 from network_analyser.records.topology import (
     Check,
@@ -73,6 +85,26 @@ HTTP_SERVER_CHECK: Final = Check(
 LEGACY_SERVICES_CHECK: Final = Check(
     "hardening-legacy-services", "Legacy services", CheckType.CONFIGURATION
 )
+SSH_V2_CHECK: Final = Check("hardening-ssh-v2", "SSHv2 not enforced", CheckType.CONFIGURATION)
+VTY_ACCESS_CLASS_CHECK: Final = Check(
+    "hardening-vty-access-class", "No VTY access-class", CheckType.CONFIGURATION
+)
+AAA_FALLBACK_CHECK: Final = Check(
+    "hardening-aaa-fallback", "AAA fallback to none", CheckType.CONFIGURATION
+)
+AAA_CENTRAL_CHECK: Final = Check(
+    "hardening-aaa-central",
+    "No central AAA, authorisation or accounting",
+    CheckType.CONFIGURATION,
+)
+EXEC_TIMEOUT_CHECK: Final = Check("hardening-exec-timeout", "Exec timeout", CheckType.CONFIGURATION)
+TYPE_6_CHECK: Final = Check("hardening-type-6", "Type 6 not enabled", CheckType.CONFIGURATION)
+
+SSH_V1_REMOVED: Final = (17, 10)
+"""The IOS-XE release from which SSHv1 is refused even without `ip ssh version 2` (#76, X2)."""
+
+_SSH_V2_NUMBER: Final = 2
+"""The `ip ssh version` value that refuses SSHv1."""
 
 _UNDECIDED_TODO: Final = "Re-run the tool so the running config can be read."
 _REPLACE_WEAK_TYPES: Final = "Replace each weak secret with a type 8 or 9 secret."
@@ -134,6 +166,25 @@ def _is_classic_ios(device: VisitedDevice) -> bool:
 def _family_known(device: VisitedDevice) -> bool:
     """Whether the family is known well enough to apply a classic IOS / IOS-XE difference."""
     return device.platform is Platform.NX_OS or isinstance(device.software_version, str)
+
+
+_RELEASE_MAJOR_MINOR: Final = re.compile(r"^(\d+)\.(\d+)")
+
+
+def _release_at_least(device: VisitedDevice, major: int, minor: int) -> bool | Unknown:
+    """Whether the release is at least `major.minor`, or `Unknown` when it was not read."""
+    release = device.software_version
+    if not isinstance(release, str):
+        return Unknown("the release was not read")
+    match = _RELEASE_MAJOR_MINOR.match(release)
+    if match is None:
+        return Unknown("the release could not be read")
+    return (int(match.group(1)), int(match.group(2))) >= (major, minor)
+
+
+def _could_not_decide(check: Check, device: VisitedDevice, what: str, todo: str) -> Finding:
+    """A Low Finding saying a hidden default stops the config deciding a Check (story 6)."""
+    return _finding(check, device, FindingLevel.LOW, f"Could not decide: {what}", todo)
 
 
 def _checked_devices(data: AnalysisInput) -> tuple[tuple[VisitedDevice, ConfigFacts], ...]:
@@ -453,6 +504,240 @@ def legacy_services(data: AnalysisInput) -> tuple[Finding, ...]:
     return tuple(findings)
 
 
+# -- SSHv2 not enforced ------------------------------------------------------------------------
+
+
+def ssh_v2(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Story 61: absence-is-the-problem; SSH 1.99 on classic IOS and IOS-XE before 17.10."""
+    findings: list[Finding] = []
+    for device, facts in _checked_devices(data):
+        if device.platform is not Platform.IOS_XE:
+            # NX-OS supports SSHv2 only, so SSHv1 cannot be enabled there.
+            continue
+        version = _count(facts, SSH_VERSION)
+        if isinstance(version, Unknown):
+            findings.append(_undecided(SSH_V2_CHECK, device, SSH_VERSION, version))
+            continue
+        if version == _SSH_V2_NUMBER:
+            continue
+        if version == 1:
+            what = "SSHv2 is not enforced: ip ssh version 1 is configured."
+        else:
+            late = _release_at_least(device, *SSH_V1_REMOVED)
+            if late is not False:
+                # The line is absent. From 17.10 Cisco refuses SSHv1 anyway, but the running
+                # config cannot show which version is in force (#76, X2).
+                findings.append(
+                    _could_not_decide(
+                        SSH_V2_CHECK,
+                        device,
+                        "the SSH version in force: the running config has no ip ssh version 2, "
+                        "and IOS-XE 17.10 or later refuses SSHv1 by default",
+                        "Confirm the SSH version in force with show ip ssh.",
+                    )
+                )
+                continue
+            what = (
+                "SSHv2 is not enforced: ip ssh version 2 is not configured, so the "
+                "release's default (SSH 1.99) accepts SSHv1."
+            )
+        findings.append(
+            _finding(
+                SSH_V2_CHECK,
+                device,
+                FindingLevel.HIGH,
+                what,
+                "Configure ip ssh version 2 on every device that still accepts SSHv1.",
+            )
+        )
+    return tuple(findings)
+
+
+# -- No VTY access-class -----------------------------------------------------------------------
+
+
+def vty_access_class(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Story 61: absence-is-the-problem; name every vty block without an inbound ACL."""
+    findings: list[Finding] = []
+    for device, facts in _checked_devices(data):
+        value = facts.fact(VTY_ACCESS_CLASS_MISSING_LINES)
+        if isinstance(value, Unknown):
+            findings.append(
+                _undecided(VTY_ACCESS_CLASS_CHECK, device, VTY_ACCESS_CLASS_MISSING_LINES, value)
+            )
+            continue
+        if not isinstance(value, tuple):
+            findings.append(
+                _undecided(
+                    VTY_ACCESS_CLASS_CHECK,
+                    device,
+                    VTY_ACCESS_CLASS_MISSING_LINES,
+                    Unknown("not a list of line blocks"),
+                )
+            )
+            continue
+        if not value:
+            continue
+        count = len(value)
+        noun = "block" if count == 1 else "blocks"
+        what = f"No inbound VTY access-class on {count} vty line {noun}: {', '.join(value)}."
+        findings.append(
+            _finding(
+                VTY_ACCESS_CLASS_CHECK,
+                device,
+                FindingLevel.HIGH,
+                what,
+                "Apply an inbound access-class to every line vty block.",
+            )
+        )
+    return tuple(findings)
+
+
+# -- AAA fallback to none ----------------------------------------------------------------------
+
+
+def aaa_fallback(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Story 61: absence-is-the-problem; a login method list that falls back to `none` is a hit."""
+    findings: list[Finding] = []
+    for device, facts in _checked_devices(data):
+        count = _count(facts, AAA_LOGIN_FALLBACK_NONE)
+        if isinstance(count, Unknown):
+            findings.append(_undecided(AAA_FALLBACK_CHECK, device, AAA_LOGIN_FALLBACK_NONE, count))
+            continue
+        if count == 0:
+            continue
+        noun = "method list" if count == 1 else "method lists"
+        what = f"AAA login falls back to none on {count} {noun}."
+        findings.append(
+            _finding(
+                AAA_FALLBACK_CHECK,
+                device,
+                FindingLevel.HIGH,
+                what,
+                "Remove none from each aaa authentication login method list and keep local "
+                "as the fallback.",
+            )
+        )
+    return tuple(findings)
+
+
+# -- No central AAA, authorisation or accounting -----------------------------------------------
+
+_AAA_ITEMS: Final = (
+    ("aaa new-model", AAA_NEW_MODEL),
+    ("central login server group", AAA_CENTRAL_LOGIN),
+    ("command authorisation", AAA_AUTHORIZATION),
+    ("accounting", AAA_ACCOUNTING),
+)
+"""The central-AAA items in the order a Finding names them."""
+
+
+def aaa_central(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Story 61: absence-is-the-problem; name the central-AAA items the config lacks."""
+    findings: list[Finding] = []
+    for device, facts in _checked_devices(data):
+        on_ios = device.platform is Platform.IOS_XE
+        items = tuple(
+            (label, name) for label, name in _AAA_ITEMS if on_ios or name != AAA_NEW_MODEL
+        )
+        missing: list[str] = []
+        unknown: Unknown | None = None
+        for label, name in items:
+            value = _flag(facts, name)
+            if isinstance(value, Unknown):
+                unknown = value
+            elif not value:
+                missing.append(label)
+        if missing:
+            what = (
+                f"Central AAA is incomplete: {len(missing)} of {len(items)} items missing "
+                f"({', '.join(missing)})."
+            )
+            todo = (
+                "Configure aaa new-model, a central login server group, command "
+                "authorisation and accounting."
+                if on_ios
+                else "Configure a central AAA login server group, command authorisation "
+                "and accounting."
+            )
+            findings.append(_finding(AAA_CENTRAL_CHECK, device, FindingLevel.MEDIUM, what, todo))
+        elif isinstance(unknown, Unknown):
+            findings.append(_undecided(AAA_CENTRAL_CHECK, device, "a central AAA item", unknown))
+    return tuple(findings)
+
+
+# -- Exec timeout ------------------------------------------------------------------------------
+
+
+def exec_timeout(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Story 61: absence-is-the-problem; an explicit `exec-timeout 0` is a hit.
+
+    An absent line is the vendor default (10 minutes on IOS/IOS-XE), not a hit (#76, X10).
+    """
+    findings: list[Finding] = []
+    for device, facts in _checked_devices(data):
+        value = facts.fact(EXEC_TIMEOUT_DISABLED_LINES)
+        if isinstance(value, Unknown):
+            findings.append(
+                _undecided(EXEC_TIMEOUT_CHECK, device, EXEC_TIMEOUT_DISABLED_LINES, value)
+            )
+            continue
+        if not isinstance(value, tuple):
+            findings.append(
+                _undecided(
+                    EXEC_TIMEOUT_CHECK,
+                    device,
+                    EXEC_TIMEOUT_DISABLED_LINES,
+                    Unknown("not a list of line blocks"),
+                )
+            )
+            continue
+        if not value:
+            continue
+        count = len(value)
+        noun = "block" if count == 1 else "blocks"
+        what = (
+            f"The exec timeout is disabled (exec-timeout 0) on {count} line {noun}: "
+            f"{', '.join(value)}."
+        )
+        findings.append(
+            _finding(
+                EXEC_TIMEOUT_CHECK,
+                device,
+                FindingLevel.MEDIUM,
+                what,
+                "Set exec-timeout 10 0 or shorter on every console and vty line.",
+            )
+        )
+    return tuple(findings)
+
+
+# -- Type 6 not enabled ------------------------------------------------------------------------
+
+
+def type_6(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Story 61: absence-is-the-problem; without `password encryption aes` only type 7 exists."""
+    findings: list[Finding] = []
+    for device, facts in _checked_devices(data):
+        value = _flag(facts, TYPE_6_ENABLED)
+        if isinstance(value, Unknown):
+            findings.append(_undecided(TYPE_6_CHECK, device, TYPE_6_ENABLED, value))
+            continue
+        if value:
+            continue
+        findings.append(
+            _finding(
+                TYPE_6_CHECK,
+                device,
+                FindingLevel.MEDIUM,
+                "Reversible secrets are not protected by type 6 (AES) encryption; "
+                "they fall back to type 7.",
+                "Configure password encryption aes (type 6) and protect its master key.",
+            )
+        )
+    return tuple(findings)
+
+
 HARDENING_CHECKS: Final[tuple[CheckDefinition, ...]] = (
     CheckDefinition(TELNET_CHECK, telnet),
     CheckDefinition(WEAK_SECRET_CHECK, weak_secret_types),
@@ -462,5 +747,11 @@ HARDENING_CHECKS: Final[tuple[CheckDefinition, ...]] = (
     CheckDefinition(INSECURE_MODE_CHECK, insecure_mode),
     CheckDefinition(HTTP_SERVER_CHECK, http_server),
     CheckDefinition(LEGACY_SERVICES_CHECK, legacy_services),
+    CheckDefinition(SSH_V2_CHECK, ssh_v2),
+    CheckDefinition(VTY_ACCESS_CLASS_CHECK, vty_access_class),
+    CheckDefinition(AAA_FALLBACK_CHECK, aaa_fallback),
+    CheckDefinition(AAA_CENTRAL_CHECK, aaa_central),
+    CheckDefinition(EXEC_TIMEOUT_CHECK, exec_timeout),
+    CheckDefinition(TYPE_6_CHECK, type_6),
 )
-"""These eight Checks, ready to join `checks.CHECKS`."""
+"""These fourteen Checks, ready to join `checks.CHECKS`."""
