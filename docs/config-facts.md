@@ -29,7 +29,7 @@ The facts ride `DeviceRecord.config_facts`; the cli puts them in `AnalysisInput.
 | `enable_password` | `bool` | IOS/IOS-XE | The config has an `enable password` line. |
 | `insecure_mode` | `bool` | IOS/IOS-XE | `system mode insecure` is configured (IOS-XE 26.1.1+). |
 | `http_server` | `bool` | both | The plain HTTP server is enabled (`ip http server` or `feature http-server`). |
-| `ip_source_route` | `bool` | both | IP source routing is on. The vendor default is on, so only `no ip source-route` makes it `False`. |
+| `ip_source_route` | `bool` | IOS/IOS-XE | IP source routing is on. The IOS default is on, so only `no ip source-route` makes it `False`. Not read on NX-OS, where no default is proven: the fact is absent there and the Check raises nothing for it. |
 | `legacy_services` | `tuple[str, ...]` | both | The legacy services explicitly enabled, by fixed keyword: `PAD`, `finger`, `TCP small servers`, `UDP small servers`, `BOOTP`, `ODR`, `rcmd`, `FTP`, `TFTP`. |
 | `ssh_version` | `int` | IOS/IOS-XE | The value of `ip ssh version`: 0 when the line is absent, else 1 or 2. |
 | `vty_access_class_missing_lines` | `tuple[str, ...]` or `Unknown` | both | The `line vty` block headers with no inbound `access-class`. `Unknown` when no `line vty` block is shown. |
@@ -48,6 +48,7 @@ The facts ride `DeviceRecord.config_facts`; the cli puts them in `AnalysisInput.
 | `snmp_v3_users` | `int` | both | SNMPv3 users visible in the running config. IOS-XE may keep users out of it. |
 | `snmp_v3_users_without_priv` | `int` | both | How many of them have no privacy protocol. |
 | `snmp_v3_groups_without_priv` | `int` | both | SNMPv3 groups configured below the `priv` security level. |
+| `snmp_v3_user_crypto` | `tuple[str, ...]` or `Unknown` | NX-OS | One `<auth>/<privacy>` keyword pair per `snmp-server user` line, in config order, with no user name or key. `auth` is `MD5`, `SHA`, `SHA-256` or `none`. `privacy` is `AES128` when the line has `priv aes-128`, `DES` when it has `priv` without `aes-128`, and `none` when it has no `priv`. An empty tuple means no user is configured. `Unknown` when a user line cannot be read. IOS/IOS-XE read their users from `show snmp user` instead. |
 | `snmp_global_enforce_priv` | `bool` | NX-OS | `snmp-server globalEnforcePriv` is set. |
 | `ntp_configured` | `bool` | both | An NTP server, peer or master is configured. |
 | `ntp_authenticated` | `bool` | both | A configured server or peer uses an authentication key that is also trusted. |
@@ -73,7 +74,7 @@ The facts ride `DeviceRecord.config_facts`; the cli puts them in `AnalysisInput.
 | `hardening-snmp-v3-priv` | High | `snmp_v3_configured`, `snmp_v3_users`, `snmp_v3_users_without_priv`, `snmp_v3_groups_without_priv`, `snmp_global_enforce_priv` (NX-OS) |
 | `hardening-insecure-mode` | High | `insecure_mode` (IOS-XE only) |
 | `hardening-http-server` | High | `http_server` |
-| `hardening-legacy-services` | High | `ip_source_route`, `legacy_services` |
+| `hardening-legacy-services` | High | `ip_source_route` (IOS/IOS-XE only), `legacy_services` |
 
 ## The Checks that read the service facts (#101)
 

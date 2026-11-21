@@ -13,6 +13,7 @@ import re
 from typing import Final
 
 from network_analyser.records import Platform
+from network_analyser.records.analysis import SNMP_V3_USER_CRYPTO
 from network_analyser.records.config_facts import (
     AAA_ACCOUNTING,
     AAA_AUTHORIZATION,
@@ -88,6 +89,8 @@ _SECRET_TYPES: Final = (
     (9, SECRET_TYPE_9),
 )
 _NO_VTY: Final = "no line vty block in the running config"
+_NXOS_AUTH: Final = {"md5": "MD5", "sha": "SHA", "sha-256": "SHA-256"}
+_NXOS_SNMP_USER_UNREADABLE: Final = "an NX-OS snmp-server user line was not understood"
 _NXOS_TYPE_6_UNKNOWN: Final = (
     "the NX-OS command that enables AES type 6 encryption is not confirmed"
 )
@@ -157,7 +160,6 @@ def read_config_facts(platform: Platform, text: str) -> tuple[ConfigFact, ...]:
     lines = [line.rstrip() for line in text.splitlines()]
     facts: dict[str, FactValue] = {
         **_secret_facts(lines),
-        IP_SOURCE_ROUTE: _source_routing(lines),
         LEGACY_SERVICES: _legacy_services(lines),
         HTTP_SERVER: _http_server(lines),
         TELNET_LINES: _telnet_lines(platform, lines),
@@ -168,6 +170,7 @@ def read_config_facts(platform: Platform, text: str) -> tuple[ConfigFact, ...]:
         **_service_facts(platform, lines),
     }
     if platform is Platform.IOS_XE:
+        facts[IP_SOURCE_ROUTE] = _source_routing(lines)
         facts[ENABLE_SECRET] = any(_ENABLE_SECRET.match(line.strip()) for line in lines)
         facts[ENABLE_PASSWORD] = any(_ENABLE_PASSWORD.match(line.strip()) for line in lines)
         facts[INSECURE_MODE] = any(line.strip().lower() == "system mode insecure" for line in lines)
@@ -180,6 +183,7 @@ def read_config_facts(platform: Platform, text: str) -> tuple[ConfigFact, ...]:
             line.strip().lower() == "password encryption aes" for line in lines
         )
     else:
+        facts[SNMP_V3_USER_CRYPTO] = _nxos_snmp_user_crypto(lines)
         facts[SNMP_GLOBAL_ENFORCE_PRIV] = any(
             line.strip().lower() == "snmp-server globalenforcepriv" for line in lines
         )
@@ -202,7 +206,11 @@ def _secret_facts(lines: list[str]) -> dict[str, int]:
 
 
 def _source_routing(lines: list[str]) -> bool:
-    """Whether IP source routing is on. Its default is on, so only the `no` form turns it off."""
+    """Whether IP source routing is on, on IOS/IOS-XE only.
+
+    The IOS default is on, so only the `no` form turns it off. NX-OS has no such default we
+    can prove, so it is not read there.
+    """
     for line in lines:
         text = line.strip().lower()
         if text == "no ip source-route":
@@ -606,6 +614,40 @@ def _snmp_facts(lines: list[str]) -> dict[str, FactValue]:
         SNMP_V3_USERS_WITHOUT_PRIV: users_without_priv,
         SNMP_V3_GROUPS_WITHOUT_PRIV: groups_without_priv,
     }
+
+
+def _nxos_snmp_user_crypto(lines: list[str]) -> FactValue:
+    """One `<auth>/<privacy>` keyword pair per NX-OS `snmp-server user` line (story 60).
+
+    The line reads `snmp-server user <name> [<role>] auth {md5|sha|sha-256} <key> [priv
+    [aes-128] <key>] ...`. A `priv` with no `aes-128` is DES, the NX-OS default. The pair is
+    read by position, so a key can never be mistaken for a keyword, and it holds no name or
+    key. A line that cannot be read makes the whole fact `Unknown`, never a pass.
+    """
+    pairs: list[str] = []
+    for line in lines:
+        user = _SNMP_USER.match(line.strip())
+        if user is None:
+            continue
+        pair = _nxos_user_pair(user.group(1).lower().split())
+        if pair is None:
+            return Unknown(_NXOS_SNMP_USER_UNREADABLE)
+        pairs.append(pair)
+    return tuple(pairs)
+
+
+def _nxos_user_pair(tokens: list[str]) -> str | None:
+    """`<auth>/<privacy>` from the tokens after an NX-OS user's name, or None if unreadable."""
+    if "auth" not in tokens:
+        return None if "priv" in tokens else "none/none"
+    after = tokens.index("auth") + 1
+    auth = _NXOS_AUTH.get(tokens[after]) if after < len(tokens) else None
+    if auth is None:
+        return None
+    privacy = "none"
+    if tokens[after + 2 : after + 3] == ["priv"]:
+        privacy = "AES128" if tokens[after + 3 : after + 4] == ["aes-128"] else "DES"
+    return f"{auth}/{privacy}"
 
 
 def _community_access(tail: list[str]) -> tuple[bool, str | None]:
