@@ -390,8 +390,8 @@ def _add_cisco_key(commands: _Commands) -> None:
     actions.add_parser(
         "show",
         help="say whether a key is stored, and show its details",
-        description="Say whether a Cisco API key is stored and, with the Backup Passphrase, "
-        "when it\nwas set and the last 4 characters of the client ID.",
+        description="Say whether a Cisco API key is stored and when it was set. With the "
+        "Backup Passphrase,\nit also shows the last 4 characters of the client ID.",
         allow_abbrev=False,
         color=False,
     )

@@ -13,16 +13,18 @@ from network_analyser import backup_store
 from network_analyser.backup_store import (
     KEY_LOCKED_ELSEWHERE,
     CiscoKey,
+    key_file_set_time,
     lock_key_file,
     relock_key_file,
     remove_key_file,
     unlock_key_file,
 )
-from network_analyser.credentials import Secret
+from network_analyser.credentials import BLOCKED, Secret, SecretScan
 from tests.support import fake_age
 
 OLD = "CANARY-pp-0ld1-current"
 NEW = "CANARY-pp-n3w2-rotated"
+THIRD = "CANARY-pp-th1rd-other"
 CLIENT_ID = "CANARY-client-id-103a"
 CLIENT_SECRET = "CANARY-client-secret-103a"
 SET_AT = datetime(2026, 11, 20, 12, 34, 56, tzinfo=UTC)
@@ -33,10 +35,14 @@ def _fake(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_age.use_fake_age(monkeypatch)
 
 
-def _passphrases(tmp_path: Path) -> tuple[backup_store.BackupPassphrase, backup_store.BackupPassphrase]:
-    old = backup_store.create_check_file(tmp_path / "check.age", Secret(OLD))
-    new = backup_store.create_check_file(tmp_path / "new.age", Secret(NEW))
-    return old, new
+def _passphrase(tmp_path: Path, name: str, secret: str) -> backup_store.BackupPassphrase:
+    return backup_store.create_check_file(tmp_path / name, Secret(secret))
+
+
+def _passphrases(
+    tmp_path: Path,
+) -> tuple[backup_store.BackupPassphrase, backup_store.BackupPassphrase]:
+    return _passphrase(tmp_path, "check.age", OLD), _passphrase(tmp_path, "new.age", NEW)
 
 
 def _store(
@@ -64,6 +70,47 @@ def test_a_key_round_trips_and_holds_no_plaintext(tmp_path: Path) -> None:
     assert key.client_id_suffix() == CLIENT_ID[-4:]
 
 
+def test_a_new_key_replaces_an_earlier_one(tmp_path: Path) -> None:
+    old, _ = _passphrases(tmp_path)
+    path = _store(tmp_path, old)
+
+    lock_key_file(
+        path,
+        Secret("CANARY-client-id-new1"),
+        Secret("CANARY-client-secret-new1"),
+        old,
+        set_at=SET_AT,
+    )
+
+    key = unlock_key_file(path, old)
+    assert key is not None
+    assert key.client_id.same_as(Secret("CANARY-client-id-new1"))
+    assert key.client_secret.same_as(Secret("CANARY-client-secret-new1"))
+
+
+def test_the_key_file_says_when_it_was_set_and_a_relock_keeps_that_time(tmp_path: Path) -> None:
+    old, new = _passphrases(tmp_path)
+    path = _store(tmp_path, old)
+
+    assert key_file_set_time(path) == SET_AT
+    assert relock_key_file(path, old, new).problem is None
+
+    assert key_file_set_time(path) == SET_AT
+
+
+def test_the_client_id_and_secret_join_the_scan_when_the_key_is_unlocked(tmp_path: Path) -> None:
+    old, _ = _passphrases(tmp_path)
+    key = unlock_key_file(_store(tmp_path, old), old)
+    assert key is not None
+    scan = SecretScan()
+
+    key.add_to_scan(scan)
+
+    blocked, hits = scan.contains_secret(f"{CLIENT_ID} {CLIENT_SECRET}")
+    assert blocked == f"{BLOCKED} {BLOCKED}"
+    assert hits == 2
+
+
 def test_a_key_the_passphrase_cannot_open_is_none(tmp_path: Path) -> None:
     old, _ = _passphrases(tmp_path)
     path = _store(tmp_path, old)
@@ -85,6 +132,26 @@ def test_a_file_that_is_not_age_at_all_is_none(tmp_path: Path) -> None:
     old, _ = _passphrases(tmp_path)
     path = tmp_path / "cisco-key.age"
     path.write_bytes(b"plain text, not an age file")
+
+    assert unlock_key_file(path, old) is None
+
+
+def test_a_key_document_without_a_zone_in_its_time_is_none(tmp_path: Path) -> None:
+    old, _ = _passphrases(tmp_path)
+    path = tmp_path / "cisco-key.age"
+    document = (
+        b'{"format_version": 1, "client_id": "CANARY-client-id-103a", '
+        b'"client_secret": "CANARY-client-secret-103a", "set_at": "2026-11-20T12:34:56"}'
+    )
+    path.write_bytes(old.lock(document))
+
+    assert unlock_key_file(path, old) is None
+
+
+def test_a_file_too_big_to_be_a_key_is_none(tmp_path: Path) -> None:
+    old, _ = _passphrases(tmp_path)
+    path = tmp_path / "cisco-key.age"
+    path.write_bytes(b"x" * (64 * 1024 + 1))
 
     assert unlock_key_file(path, old) is None
 
@@ -129,8 +196,8 @@ def test_relock_of_a_missing_file_is_nothing_to_do(tmp_path: Path) -> None:
 
 def test_relock_of_a_file_neither_passphrase_opens_is_reported(tmp_path: Path) -> None:
     old, new = _passphrases(tmp_path)
-    _, other = _passphrases(tmp_path / "other")
-    path = _store(tmp_path, other)  # locked under a third passphrase
+    third = _passphrase(tmp_path / "third", "check.age", THIRD)
+    path = _store(tmp_path, third)  # locked under a third passphrase
 
     outcome = relock_key_file(path, old, new)
 

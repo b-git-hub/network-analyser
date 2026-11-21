@@ -284,7 +284,7 @@ def _start(
         raise RefusedError(_NOT_STARTED) from error
 
 
-def _relock_all(
+def _relock_all(  # noqa: PLR0913, PLR0917 (the call's whole state, each part named)
     files: PassphraseFiles,
     plan: RelockPlan,
     old: BackupPassphrase,
@@ -329,7 +329,9 @@ def _short(path: str) -> str:
     return console_text("/".join(parts))
 
 
-def _report(plan: RelockPlan, results: list[RunResult], key_outcome: backup_store.KeyOutcome) -> ExitCode:
+def _report(
+    plan: RelockPlan, results: list[RunResult], key_outcome: backup_store.KeyOutcome
+) -> ExitCode:
     files = [f for run in results for f in run.files]
     backups = [f for f in files if f.path.endswith(backup_store.locker.BACKUP_SUFFIX)]
     relocked = [f for f in backups if f.outcome is not FileOutcome.SKIPPED]
@@ -356,10 +358,12 @@ def _report(plan: RelockPlan, results: list[RunResult], key_outcome: backup_stor
         lines.append("Re-lock record not written:")
         lines.extend(f"  {console_text(str(run.folder))}" for run in unrecorded)
     if key_outcome.problem is not None:
-        lines.append(f"Cisco API key not re-locked: {key_outcome.problem}.")
+        lines.append(f"{key_outcome.problem}.")
     lines.append(ROTATION_LIMITS)
     print("\n".join(lines))
-    attention = skipped or flagged or plan.not_found or unrecorded or key_outcome.problem is not None
+    attention = (
+        skipped or flagged or plan.not_found or unrecorded or key_outcome.problem is not None
+    )
     return ExitCode.NEEDS_ATTENTION if attention else ExitCode.CLEAN
 
 

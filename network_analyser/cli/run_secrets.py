@@ -52,9 +52,7 @@ def backup_passphrase(
         return ExitCode.REFUSED
 
 
-def _choose(
-    check_file: Path, ask: Prompter, key_file: Path | None
-) -> BackupPassphrase | ExitCode:
+def _choose(check_file: Path, ask: Prompter, key_file: Path | None) -> BackupPassphrase | ExitCode:
     ask.say(
         "First Run: choose the Backup Passphrase. It locks every Backup this tool takes.\n"
         f"  It must be at least {backup_store.PASSPHRASE_MIN} characters. It cannot be "

@@ -3,7 +3,7 @@
     set     ask the Backup Passphrase (checked against the check file, 3 tries), then the
             client ID and secret at masked prompts, lock them into `cisco-key.age`, and
             send one token-only request to Cisco unless `--no-check`.
-    show    say whether a key is stored and, with the passphrase, when it was set and the
+    show    say whether a key is stored and when it was set and, with the passphrase, the
             last 4 characters of the client ID.
     remove  delete the key file after a [y/N] confirmation.
 
@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
-from network_analyser import _winsys, advisories, backup_store, run_output
+from network_analyser import advisories, backup_store, run_output
 from network_analyser.cli.console import scanned_console
 from network_analyser.cli.crash_dump_guard import guard_crash_dumps
 from network_analyser.cli.exit_codes import ExitCode
@@ -41,9 +41,7 @@ from network_analyser.records.cisco import TokenOutcome, TokenResult
 
 TRIES: Final = 3
 _NO_CHECK_FILE: Final = "no Backup Passphrase has been set yet: the first Run sets it"
-_HELP_FOR_FORGOTTEN: Final = (
-    f'If you have forgotten it, see "{PROG} change-passphrase --help".'
-)
+_HELP_FOR_FORGOTTEN: Final = f'If you have forgotten it, see "{PROG} change-passphrase --help".'
 _NO_KEY: Final = "No Cisco API key is stored. Add one with `cisco-key set`."
 _KEY_NOT_WRITTEN: Final = "the Cisco API key file could not be written"
 _KEY_NOT_REMOVED: Final = "the Cisco API key file could not be removed"
@@ -79,8 +77,8 @@ def _dispatch(args: argparse.Namespace, data: run_output.DataFolder, scan: Secre
     if action == "set":
         return _set(args, data, scan)
     if action == "show":
-        return _show(args, data, scan)
-    return _remove(args, data, scan)
+        return _show(data, scan)
+    return _remove(data)
 
 
 # -- set (stories 24-29) ---------------------------------------------------------------------
@@ -102,7 +100,11 @@ def _set(args: argparse.Namespace, data: run_output.DataFolder, scan: SecretScan
     ask.say("Locking the key with the Backup Passphrase (about a second)...")
     try:
         backup_store.lock_key_file(
-            data.cisco_key_file, client_id, client_secret, passphrase, set_at=datetime.now(UTC)
+            data.cisco_key_file,
+            client_id,
+            client_secret,
+            passphrase,
+            set_at=datetime.now(UTC),
         )
     except OSError as error:
         raise RefusedError(_KEY_NOT_WRITTEN) from error
@@ -110,8 +112,8 @@ def _set(args: argparse.Namespace, data: run_output.DataFolder, scan: SecretScan
     if args.no_check:
         ask.say("Skipped the online check (--no-check).")
         return ExitCode.CLEAN
-    result = advisories.check_api_key(client_id, client_secret, transport=_token_transport(), scan=scan)
-    return _report_token(ask, result)
+    ask.say("Checking the key with Cisco (one token request, no device data)...")
+    return _report_token(ask, advisories.check_api_key(client_id, client_secret, scan=scan))
 
 
 def _secret(ask: Prompter, prompt: str, scan: SecretScan) -> Secret:
@@ -148,19 +150,19 @@ def _token_detail(result: TokenResult) -> str:
     return f" ({', '.join(parts)})" if parts else ""
 
 
-def _token_transport() -> advisories.Transport:
-    """The fenced HTTPS transport `cisco-key set` uses for its one token-only request."""
-    return advisories.HttpsTransport()
-
-
 # -- show (story 30) -------------------------------------------------------------------------
 
 
-def _show(args: argparse.Namespace, data: run_output.DataFolder, scan: SecretScan) -> ExitCode:
-    if not data.cisco_key_file.is_file():
+def _show(data: run_output.DataFolder, scan: SecretScan) -> ExitCode:
+    path = data.cisco_key_file
+    if not path.is_file():
         print(_NO_KEY)
         return ExitCode.CLEAN
-    print("A Cisco API key is stored.")
+    set_time = backup_store.key_file_set_time(path)
+    if set_time is None:
+        print("A Cisco API key is stored.")
+    else:
+        print(f"A Cisco API key is stored, set {_utc_text(set_time)}.")
     ask = Prompter.for_this_process()
     if not guard_crash_dumps(ask):
         return ExitCode.REFUSED
@@ -168,13 +170,12 @@ def _show(args: argparse.Namespace, data: run_output.DataFolder, scan: SecretSca
     if isinstance(passphrase, ExitCode):
         return passphrase
     passphrase.add_to_scan(scan)
-    key = backup_store.unlock_key_file(data.cisco_key_file, passphrase)
+    key = backup_store.unlock_key_file(path, passphrase)
     if key is None:
         print(backup_store.KEY_LOCKED_ELSEWHERE, file=sys.stderr)  # story 38
         return ExitCode.NEEDS_ATTENTION
     key.add_to_scan(scan)
-    print(f"  Set {_utc_text(key.set_at)}.")
-    print(f"  Client ID ends in {key.client_id_suffix()}.")
+    print(f"  The client ID ends in {key.client_id_suffix()}.")
     return ExitCode.CLEAN
 
 
@@ -185,16 +186,18 @@ def _utc_text(moment: datetime) -> str:
 # -- remove (story 31) -----------------------------------------------------------------------
 
 
-def _remove(args: argparse.Namespace, data: run_output.DataFolder, scan: SecretScan) -> ExitCode:
-    if not data.cisco_key_file.is_file():
+def _remove(data: run_output.DataFolder) -> ExitCode:
+    path = data.cisco_key_file
+    if not path.is_file():
         print(_NO_KEY)
         return ExitCode.CLEAN
     ask = Prompter.for_this_process()
-    if not ask.yes_no("Remove the Cisco API key? [y/N] ", default=False):
-        ask.say("Cancelled. Nothing was changed.")
+    question = f"Remove the Cisco API key in {console_text(str(path))}? [y/N] "
+    if not ask.yes_no(question, default=False):
+        ask.say("Cancelled. Nothing was removed.")
         return ExitCode.STOPPED
     try:
-        backup_store.remove_key_file(data.cisco_key_file)
+        backup_store.remove_key_file(path)
     except OSError as error:
         raise RefusedError(_KEY_NOT_REMOVED) from error
     ask.say("Cisco API key removed.")
@@ -224,8 +227,10 @@ def _checked(
             ask.say(f"  That does not unlock its check file (try {attempt} of {TRIES}).")
     except backup_store.CheckFileError as error:
         raise RefusedError(fixed_message(error)) from error
-    ask.say(f"Stopped: it did not unlock its check file after {TRIES} tries. {nothing} "
-            f"{_HELP_FOR_FORGOTTEN}")
+    ask.say(
+        f"Stopped: it did not unlock its check file after {TRIES} tries. {nothing} "
+        f"{_HELP_FOR_FORGOTTEN}"
+    )
     return ExitCode.REFUSED
 
 
