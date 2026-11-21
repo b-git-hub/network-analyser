@@ -169,8 +169,10 @@ def test_one_release_cisco_does_not_know_leaves_the_other_releases_answered() ->
     replies = _replies()
     replies = replace(
         replies,
-        advisories=(AdvisoriesAnswer(unknown, (), unavailable="INVALID_IOS_VERSION"),
-                    *replies.advisories),
+        advisories=(
+            AdvisoriesAnswer(unknown, (), unavailable="INVALID_IOS_VERSION"),
+            *replies.advisories,
+        ),
     )
 
     answers = run_analysis.analysis_answers(replies, _asked())

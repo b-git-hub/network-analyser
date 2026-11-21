@@ -67,8 +67,19 @@ def release(name: str) -> dict[str, Any]:
     }
 
 
-def questions(**kwargs: Any) -> LookupQuestions:
-    return LookupQuestions(**kwargs)
+def questions(
+    *,
+    releases: tuple[ReleaseQuestion, ...] = (),
+    hardware_pids: tuple[str, ...] = (),
+    suggestion_pids: tuple[str, ...] = (),
+    compatible_pids: tuple[str, ...] = (),
+) -> LookupQuestions:
+    return LookupQuestions(
+        releases=releases,
+        hardware_pids=hardware_pids,
+        suggestion_pids=suggestion_pids,
+        compatible_pids=compatible_pids,
+    )
 
 
 def releases_asked() -> tuple[ReleaseQuestion, ...]:
@@ -236,7 +247,10 @@ def test_a_long_retry_after_is_that_compatible_pids_failure_only() -> None:
 
     assert isinstance(answers.compatible, CompatibleAnswers)
     (unanswered,) = answers.compatible.unanswered
-    assert (unanswered.product_id, unanswered.reason) == ("C9300-48P", "Cisco asked for a long wait")
+    assert (unanswered.product_id, unanswered.reason) == (
+        "C9300-48P",
+        "Cisco asked for a long wait",
+    )
     assert [answer.product_id for answer in answers.compatible.answers] == ["C9300-24T"]
 
 

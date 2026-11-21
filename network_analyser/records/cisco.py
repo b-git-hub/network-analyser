@@ -123,10 +123,13 @@ class AdvisoriesAnswer:
     Attributes:
         question: the question it answers.
         advisories: every Advisory the reply names, in the reply's order.
+        unavailable: why Cisco gave no answer for this release alone, as Cisco's error code
+            (such as `INVALID_IOS_VERSION`) or `HTTP 404`; None when it answered (#131).
     """
 
     question: ReleaseQuestion
     advisories: tuple[CiscoAdvisory, ...]
+    unavailable: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

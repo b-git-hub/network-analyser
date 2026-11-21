@@ -23,13 +23,15 @@ from network_analyser.advisories.patterns import (
 from network_analyser.advisories.proxy import ProxyConfig
 from network_analyser.advisories.replies import (
     advisories_answer,
+    advisories_error_answer,
     compatible_answer,
+    compatible_error_answer,
     compatible_last_page,
     eox_answer,
     eox_last_page,
     suggestion_answer,
 )
-from network_analyser.advisories.session import REJECTED, CallOutcome, Session
+from network_analyser.advisories.session import REJECTED, Call, CallOutcome, Session
 from network_analyser.advisories.transport import Transport
 from network_analyser.credentials import Secret, SecretScan
 from network_analyser.records.cisco import (
@@ -152,6 +154,8 @@ def _advisory(session: Session, question: ReleaseQuestion) -> AdvisoriesAnswer |
     call = session.get(CiscoEndpoint.OPENVULN, _advisory_path(question), values=1)
     if call.outcome is CallOutcome.OK and call.response is not None:
         return advisories_answer(question, call.response.body)
+    if call.outcome is CallOutcome.CALL_FAILED and call.response is not None:
+        return advisories_error_answer(question, call.response.status, call.response.body)
     return SourceUnavailable(call.reason or UNAVAILABLE)
 
 
@@ -184,8 +188,11 @@ def _eox(session: Session, kind: str, values: Sequence[str]) -> EoxAnswer | Sour
 def _compatible(session: Session, values: Sequence[str]) -> CompatibleAnswers | SourceUnavailable:
     """Ask one PID at a time, paged by `pageIndex` to the reply's `lastIndex` (#127).
 
-    A PID the reply refuses is `unanswered` for that PID alone. At the page cap the PID's
-    answer is `unanswered: page cap`, so a list that never ends cannot make a Run page forever.
+    A PID the reply refuses, a call Cisco refuses with a 4xx, an entry that is not understood
+    and a long `Retry-After` are each `unanswered` for that PID alone (#131). At the page cap
+    the PID's answer is `unanswered: page cap`, so a list that never ends cannot make a Run
+    page forever. Only an auth rejection, a token failure or no connection at all makes the
+    whole source `SourceUnavailable`.
     """
     if session.auth_rejected:
         return SourceUnavailable(REJECTED)
@@ -205,10 +212,14 @@ def _compatible(session: Session, values: Sequence[str]) -> CompatibleAnswers | 
                 pages=1,
             )
             if call.outcome is not CallOutcome.OK or call.response is None:
+                if _fails_this_pid_only(call):
+                    unanswered.append(_unanswered_pid(pid, call))
+                    break
                 return SourceUnavailable(call.reason or UNAVAILABLE)
             answer = compatible_answer(pid, call.response.body)
             if isinstance(answer, SourceUnavailable):
-                return answer
+                unanswered.append(CompatibleUnanswered(product_id=pid, reason=answer.reason))
+                break
             if isinstance(answer, CompatibleUnanswered):
                 unanswered.append(answer)
                 break
@@ -222,6 +233,24 @@ def _compatible(session: Session, values: Sequence[str]) -> CompatibleAnswers | 
                 break
             page += 1
     return CompatibleAnswers(answers=tuple(answers), unanswered=tuple(unanswered))
+
+
+def _fails_this_pid_only(call: Call) -> bool:
+    """Whether a failed compatible call spares the other PIDs (#131).
+
+    A refused call and a reply that did come but could not be used (a long `Retry-After`, a
+    limit or a 5xx that held after the one retry) leave that PID `unanswered`. No reply at all
+    means the connection or token is down, so the whole source is unavailable.
+    """
+    if call.outcome is CallOutcome.CALL_FAILED:
+        return True
+    return call.outcome is CallOutcome.UNAVAILABLE and call.response is not None
+
+
+def _unanswered_pid(pid: str, call: Call) -> CompatibleUnanswered:
+    if call.outcome is CallOutcome.CALL_FAILED and call.response is not None:
+        return compatible_error_answer(pid, call.response.status, call.response.body)
+    return CompatibleUnanswered(product_id=pid, reason=call.reason or UNAVAILABLE)
 
 
 def _suggestions(session: Session, values: Sequence[str]) -> SuggestionsAnswer | SourceUnavailable:
