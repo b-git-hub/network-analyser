@@ -9,10 +9,14 @@ All data here is synthetic: made-up releases, PIDs, ids and text. No Cisco reply
 
 `FakeOpener` stands in for `transport.open_https`, so the real transport's own checks (TLS
 context, timeouts, tunnel, redirect refusal, size cap) are tested without a socket.
+`FakeNetwork` is lower still: the real `open_https` and `http.client` run on in-memory sockets,
+so a test sees the bytes a proxy and Cisco would receive (the tunnel, #132).
 """
 
 import base64
+import io
 import json
+import ssl
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -358,7 +362,7 @@ class FakeOpener:
         connect_timeout_s: float,
         read_timeout_s: float,
         context: object,
-        tunnel: tuple[str, int] | None,
+        proxy: tuple[str, int] | None,
     ) -> FakeConnection:
         """Record the opening, then return the connection or raise the scripted error."""
         self.opened.append(
@@ -368,10 +372,108 @@ class FakeOpener:
                 "connect_timeout_s": connect_timeout_s,
                 "read_timeout_s": read_timeout_s,
                 "context": context,
-                "tunnel": tunnel,
+                "proxy": proxy,
             }
         )
         if self.error is not None:
             raise self.error
         assert self.connection is not None
         return self.connection
+
+
+# -- the lowest seam: the real `open_https` on in-memory sockets ------------------------------
+
+CONNECT_ESTABLISHED = b"HTTP/1.1 200 Connection established\r\n\r\n"
+"""What a proxy says when it has opened the tunnel."""
+
+CISCO_REPLY = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"
+"""What the fake Cisco says through the tunnel (or directly)."""
+
+
+class FakeSocket:
+    """A socket with scripted incoming bytes that records everything sent on it."""
+
+    def __init__(self, incoming: bytes) -> None:
+        """Hold the bytes the other end will say."""
+        self._incoming = incoming
+        self.sent = bytearray()
+        self.closed = False
+
+    def settimeout(self, value: float | None) -> None:
+        """Accept a timeout."""
+
+    def setsockopt(self, *args: object) -> None:
+        """Accept an option."""
+
+    def sendall(self, data: bytes) -> None:
+        """Record what was sent."""
+        self.sent += data
+
+    def makefile(self, *_args: object, **_kwargs: object) -> io.BytesIO:
+        """Hand out the scripted incoming bytes."""
+        return io.BytesIO(self._incoming)
+
+    def close(self) -> None:
+        """Record the close."""
+        self.closed = True
+
+
+class FakeTlsContext:
+    """A TLS context that records who the handshake is for, and wraps a socket in a fake one.
+
+    It has the two settings `http.client` checks, so the real `HTTPSConnection` accepts it.
+    """
+
+    check_hostname = True
+    verify_mode = ssl.CERT_REQUIRED
+
+    def __init__(self, tls_reply: bytes) -> None:
+        """Hold the bytes the far end says once the handshake is done."""
+        self._tls_reply = tls_reply
+        self.server_names: list[str | None] = []
+        self.wrapped: list[FakeSocket] = []
+        self.tls_sockets: list[FakeSocket] = []
+
+    def wrap_socket(self, sock: FakeSocket, *, server_hostname: str | None = None) -> FakeSocket:
+        """Record the name the certificate would be checked against."""
+        self.server_names.append(server_hostname)
+        self.wrapped.append(sock)
+        wrapped = FakeSocket(self._tls_reply)
+        self.tls_sockets.append(wrapped)
+        return wrapped
+
+
+@dataclass
+class FakeNetwork:
+    """`socket.create_connection` and the TLS context, on in-memory sockets.
+
+    `connected` is every address the code under test tried to reach, so a test can say
+    that nothing but the proxy was ever dialled.
+    """
+
+    proxy_says: bytes = CONNECT_ESTABLISHED
+    cisco_says: bytes = CISCO_REPLY
+    connected: list[tuple[str, int]] = field(default_factory=list)
+    plain_sockets: list[FakeSocket] = field(default_factory=list)
+    context: FakeTlsContext = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Make the TLS context that answers as Cisco."""
+        self.context = FakeTlsContext(self.cisco_says)
+
+    def create_connection(
+        self, address: tuple[str, int], _timeout: float | None = None, *_args: object
+    ) -> FakeSocket:
+        """Record the address, and give back a socket that speaks as a proxy would."""
+        self.connected.append(address)
+        sock = FakeSocket(self.proxy_says)
+        self.plain_sockets.append(sock)
+        return sock
+
+    def sent_in_clear(self) -> bytes:
+        """Everything written on the plain connections, before any TLS."""
+        return b"".join(bytes(sock.sent) for sock in self.plain_sockets)
+
+    def sent_over_tls(self) -> bytes:
+        """Everything written after the handshake."""
+        return b"".join(bytes(sock.sent) for sock in self.context.tls_sockets)
