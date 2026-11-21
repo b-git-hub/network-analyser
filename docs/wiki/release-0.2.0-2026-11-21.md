@@ -39,9 +39,12 @@ Release and the lab results are the operator's, not this session's.
   and no previously passing test removed.
 - `uv run --locked python -m scripts.release_gate check --tag v0.2.0` passes, so the entry is
   dated, opens with the two required sections, and the tag would match the version.
-- `build.ps1` was run on the release commit after the gates above, once the checkout was
-  clean. Its result is in the session report for #111; the build that becomes the GitHub
-  Release is the operator's, made on `main` after merging.
+- `build.ps1` succeeded at commit `9a75eed` on 2026-11-21: the clean-checkout gate, signed
+  python.org CPython 3.14.10, `uv sync --locked --no-build`, all 246 security tests, the
+  licence check, PyInstaller `--onedir --noupx`, a version resource that matches `--version`
+  (0.2.0), and `dist\network-analyser-0.2.0-win-x64.zip` (17.8 MB, 37.6 MB unpacked) with
+  `SHA256SUMS.txt`. It made no change to the checkout. The build that becomes the GitHub
+  Release is still the operator's, rebuilt on `main` after merging.
 
 ## Left to the operator
 
