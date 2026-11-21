@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final
 
-KNOWN_FORMAT_VERSION: Final = 1
+KNOWN_FORMAT_VERSION: Final = 2
 NOT_RECORDED: Final = "not recorded in this topology.json"
 
 type Plain = str | int | float | bool | tuple[Plain, ...] | Mapping[str, Plain] | None
@@ -52,6 +52,38 @@ class TopologyFile:
 
     format_version: int
     content: Mapping[str, Plain]
+
+
+@dataclass(frozen=True, slots=True)
+class CiscoLookups:
+    """Whether Cisco lookups ran during the Run, and when (#104, read here for #108).
+
+    The field is optional: a file from before #104, or from a Run with lookups off, has none,
+    and reads as "they did not run" rather than as absent.
+
+    Attributes:
+        ran: True only when the file records `cisco_lookups.ran` as true.
+        when: the time the file records, as fixed text; None when it records none.
+    """
+
+    ran: bool
+    when: str | None
+
+
+def cisco_lookups(topology: TopologyFile) -> CiscoLookups:
+    """Return the one reading of `topology.json`'s Cisco lookup metadata (story 95).
+
+    Every surface that says whether lookups ran goes through here, so a change to the field's
+    shape is a change in one place. A missing or unreadable field means they did not run.
+    """
+    recorded = topology.content.get("cisco_lookups")
+    if not isinstance(recorded, Mapping):
+        return CiscoLookups(ran=False, when=None)
+    when = recorded.get("when")
+    return CiscoLookups(
+        ran=recorded.get("ran") is True,
+        when=when if isinstance(when, str) else None,
+    )
 
 
 class _Leaf:
@@ -90,6 +122,14 @@ _VPC: dict[str, _Schema] = {
     "keepalive": {"source": LEAF, "destination": LEAF, "vrf": LEAF},
     "port_channels": [{"number": LEAF, "port_channel": _NAME}],
 }
+_ADVICE: dict[str, _Schema] = {
+    "outcome": LEAF,
+    "upgrade_target": LEAF,
+    "latest_release": LEAF,
+    "latest_in_train": LEAF,
+}
+"""Per-device Analysis advice (#105): its Advisory outcome, Upgrade Target and Latest
+Release. Optional, so a file from before #105 reads it as unknown."""
 _DEVICE: dict[str, _Schema] = {
     "id": ID,
     "outcome": LEAF,
@@ -105,6 +145,7 @@ _DEVICE: dict[str, _Schema] = {
     "interfaces": [_INTERFACE],
     "vlan_database": LEAF,
     "vpc": _VPC,
+    "advice": _ADVICE,
 }
 _UNVISITED: dict[str, _Schema] = {
     "id": ID,
@@ -143,9 +184,12 @@ _ADVISORY_DETAIL: dict[str, _Schema] = {
     "published": LEAF,
     "updated": LEAF,
     "first_fixed": LEAF,
+    "status": LEAF,
+    "fixed_line": LEAF,
     "hardware_family_not_confirmed": LEAF,
 }
 _EOX_ITEM: dict[str, _Schema] = {
+    "kind": LEAF,
     "name": LEAF,
     "last_date_of_support": LEAF,
     "end_of_security_support": LEAF,
@@ -154,6 +198,7 @@ _EOX_ITEM: dict[str, _Schema] = {
     "replacement": LEAF,
 }
 _CISCO_DETAIL: dict[str, _Schema] = {
+    "kind": LEAF,
     **_ADVISORY_DETAIL,
     "items": [_EOX_ITEM],
 }
@@ -190,6 +235,8 @@ _SUBNET: dict[str, _Schema] = {
     "conflicts": [LEAF],
 }
 _SKIPPED: dict[str, _Schema] = {"device": ID, "data": LEAF, "reason": LEAF}
+_LOOKUPS: dict[str, _Schema] = {"ran": LEAF, "when": LEAF}
+"""Cisco lookup metadata (#104): whether Cisco was asked, and when. Optional."""
 _TOP: dict[str, _Schema] = {
     "devices": [_DEVICE],
     "unvisited": [_UNVISITED],
@@ -200,6 +247,7 @@ _TOP: dict[str, _Schema] = {
     "adjacencies": [_ADJACENCY],
     "subnets": [_SUBNET],
     "skipped": [_SKIPPED],
+    "cisco_lookups": _LOOKUPS,
 }
 
 

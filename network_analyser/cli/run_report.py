@@ -5,15 +5,17 @@ report is written best-effort: a failure to write it does not change how the Run
 it never prints an exception's text.
 """
 
+import dataclasses
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from network_analyser import _winsys, run_output, topology
+from network_analyser import _winsys, analysis, run_output, topology
 from network_analyser._version import __version__
 from network_analyser.cli import summary
 from network_analyser.credentials import CredentialSets, SecretScan
 from network_analyser.discovery import STOPPED_BY_CTRL_C
+from network_analyser.records.analysis import AnalysisInput
 from network_analyser.records.backup import BackupResults
 from network_analyser.records.crawl import CrawlResult
 from network_analyser.records.device import DeviceRecord
@@ -99,6 +101,10 @@ def _report(draft: Draft) -> RunReport:
     if draft.ending is RunEnding.STOPPED and stopped is None and draft.ctrl_c:
         stopped = STOPPED_BY_CTRL_C
     built = topology.build(records, scope=draft.request.scope.value)
+    # #94: the report shows Analysis Findings too. It does not use the online step's answers;
+    # the Run-end results in topology.json are the ones #104 and #110 will share.
+    results = analysis.analyse(AnalysisInput(topology=built))
+    built = dataclasses.replace(built, findings=results.findings, analysis=results.summary)
     crawl = CrawlResult(
         devices=records,
         stopped=stopped,

@@ -30,6 +30,7 @@ from network_analyser.records.topology import (
     AdvisoryDetail,
     Check,
     CheckType,
+    CiscoDetailKind,
     Finding,
     FindingKind,
     FindingLevel,
@@ -176,9 +177,10 @@ def test_a_secret_that_slips_into_a_finding_never_reaches_disk(tmp_path: Path) -
     scan = _scan()
     scan.watch(Secret(quoted))
     detail = AdvisoryDetail(
+        kind=CiscoDetailKind.ADVISORY,
         id=quoted,
         title=f"{DEVICE_CANARY} {BACKUP_CANARY}",
-        sir=DEVICE_CANARY,
+        sir=FindingLevel.CRITICAL,
         cvss=BACKUP_CANARY,
         cves=(quoted,),
         published=DEVICE_CANARY,
