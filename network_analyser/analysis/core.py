@@ -19,6 +19,10 @@ def analyse(data: AnalysisInput) -> AnalysisResults:
     findings = list(data.topology.findings)
     runs: list[CheckRun] = []
     for definition in CHECKS:
+        reason = definition.skip_reason(data) if definition.skip_reason is not None else None
+        if reason is not None:
+            runs.append(CheckRun(check=definition.check, ran=False, reason=reason))
+            continue
         findings.extend(definition.run(data))
         runs.append(CheckRun(check=definition.check, ran=True))
     return AnalysisResults(

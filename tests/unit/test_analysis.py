@@ -149,9 +149,18 @@ def test_unvisited_devices_get_no_analysis() -> None:
 
 
 def test_every_shipped_check_runs_and_one_advice_record_exists_per_visited_device() -> None:
-    results = _results(_device(A, "S1", "sw-a"), _device(B, "S2", "sw-b"))
+    results = _results(
+        _device(A, "S1", "sw-a", release="17.12.4"),
+        _device(B, "S2", "sw-b", release="17.12.4"),
+    )
 
-    assert [run.check.id for run in results.checks] == ["consistency-model-drift"]
+    assert [run.check.id for run in results.checks] == [
+        "consistency-bundle-mode",
+        "consistency-model-drift",
+        "consistency-stack-mismatch",
+        "consistency-standard-support-train",
+        "consistency-vpc-mismatch",
+    ]
     assert all(run.ran for run in results.checks)
     assert all(run.reason is None for run in results.checks)
     assert [advice.device for advice in results.advice] == ["dev-S1", "dev-S2"]
@@ -281,8 +290,16 @@ def test_the_results_fit_topology_json_as_optional_fields() -> None:
     assert advice[0]["upgrade_target"] == "not available"
     checks = analysis_record["checks"]
     assert isinstance(checks, list)
-    assert [item["check"]["id"] for item in checks] == ["consistency-model-drift"]
-    assert checks[0]["ran"] is True
+    assert [item["check"]["id"] for item in checks] == [
+        "consistency-bundle-mode",
+        "consistency-model-drift",
+        "consistency-stack-mismatch",
+        "consistency-standard-support-train",
+        "consistency-vpc-mismatch",
+    ]
+    assert checks[1]["ran"] is True
+    assert checks[3]["ran"] is False
+    assert "17.9" in checks[3]["reason"]
 
 
 def test_the_advice_shape_accepts_an_advisory_answer() -> None:
