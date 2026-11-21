@@ -194,6 +194,9 @@ def test_every_shipped_check_runs_and_one_advice_record_exists_per_visited_devic
         "hardening-strength-check",
         "hardening-telnet",
         "hardening-weak-secret-types",
+        "lifecycle-hardware-eox",
+        "lifecycle-software-eox",
+        "lifecycle-suggested-release",
     ]
     assert all(run.ran for run in results.checks)
     assert all(run.reason is None for run in results.checks)
@@ -350,6 +353,9 @@ def test_the_results_fit_topology_json_as_optional_fields() -> None:
         "hardening-strength-check",
         "hardening-telnet",
         "hardening-weak-secret-types",
+        "lifecycle-hardware-eox",
+        "lifecycle-software-eox",
+        "lifecycle-suggested-release",
     ]
     assert checks[3]["ran"] is True
     assert checks[5]["ran"] is False

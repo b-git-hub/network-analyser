@@ -14,6 +14,7 @@ can never look like "Cisco said none" (stories 118-119).
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum, unique
 
 from network_analyser.records.config_facts import ConfigFact, ConfigFacts, FactValue
@@ -275,12 +276,16 @@ class AnalysisInput:
             visit (#96). A device with no entry has every fact `Unknown`.
         inventory: each device's hardware PIDs, once #97 and #98 fill them.
         answers: Cisco's answers, or why each source could not be asked.
+        as_of: the moment the Lifecycle Checks judge EoX dates against, as an aware UTC
+            datetime; None means now, so a Run uses its own end and a test can pin a date
+            without reaching for the clock (#106).
     """
 
     topology: Topology
     config_facts: tuple[ConfigFacts, ...] = ()
     inventory: tuple[DeviceInventory, ...] = ()
     answers: CiscoAnswers = field(default_factory=CiscoAnswers)
+    as_of: datetime | None = None
 
     def facts_for(self, device: str) -> ConfigFacts:
         """Return `device`'s config facts, or an empty set whose every fact is `Unknown`."""
