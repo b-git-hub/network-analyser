@@ -27,12 +27,14 @@ from typing import Final
 _PID: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{2,63}(?:/[A-Za-z0-9-]{1,16})?")
 _DIGIT: Final = re.compile(r"[0-9]")
 
-# A normalised release: `17.9.4a`, `15.2(7)E9`, `9.3(10)`, `7.0(3)I7(9)`. It starts with a
-# major and a minor number, then at most three parenthesised parts and two dotted parts.
+# A normalised release: `17.9.4a`, `26.1.2s1`, `15.2(7)E9`, `15.1(4)M12a`, `9.3(10)`,
+# `10.6(3s)`, `7.0(3)I4(8b)`. It starts with a major and a minor number, then at most three
+# parenthesised parts (a number, up to two letters) and two dotted parts (a number, up to two
+# letters, up to two digits). It admits every shape `analysis.releases` names a family for.
 _RELEASE: Final = re.compile(
     r"[0-9]{1,2}\.[0-9]{1,2}"
-    r"(?:\([0-9]{1,3}\)[A-Za-z]{0,3}[0-9]{0,3}){0,3}"
-    r"(?:\.[0-9]{1,3}[A-Za-z]{0,2}){0,2}"
+    r"(?:\([0-9]{1,3}[a-z]{0,2}\)[A-Za-z]{0,3}[0-9]{0,3}[a-z]{0,2}){0,3}"
+    r"(?:\.[0-9]{1,3}[a-z]{0,2}[0-9]{0,2}){0,2}"
 )
 
 # The Nexus hardware family openVuln matches NX-OS on, such as `NEXUS9000`.
