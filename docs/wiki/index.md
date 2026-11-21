@@ -20,7 +20,7 @@ A dated, historical record kept by the coordinating (chief-of-staff) session and
 - [delivery-one-draft-pr](delivery-one-draft-pr.md): spec #37 ships as one draft PR from the integration branch.
 
 ## Reference snapshots
-- [config-facts](../config-facts.md): the secret-free config-fact vocabulary and the Checks that read it, for #96 (2026-11-21).
+- [config-facts](../config-facts.md): the secret-free config-fact vocabulary and the Checks that read it, for #96 and #100 (2026-11-21).
 - [spec-37-notes/architecture](spec-37-notes/architecture.md): module map, records, file formats, CLI (2026-11-18).
 - [spec-37-notes/tickets](spec-37-notes/tickets.md): per-ticket files, blockers and collisions (2026-11-18).
 - [spec-37-notes/environment](spec-37-notes/environment.md): what the Linux cloud container can and cannot verify (2026-11-18).

@@ -593,6 +593,23 @@ class DeviceAdvice:
 
 
 @dataclass(frozen=True, slots=True)
+class CheckSkip:
+    """One Visited Device a Check could not run for, and why (#102, stories 6 and 80).
+
+    A Device Role that predates a 0.2.0 command makes that command's result `Unknown`; the
+    Check that needs it is skipped for that device, never passed. The reason is fixed text
+    naming the command and the refusal, such as `show snmp user: denied`.
+
+    Attributes:
+        device: the device's id.
+        reason: why the Check could not run there, as fixed text.
+    """
+
+    device: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
 class CheckRun:
     """Whether one shipped Analysis Check ran this Run, and why not (stories 4, 10; #94).
 
@@ -601,13 +618,15 @@ class CheckRun:
 
     Attributes:
         check: the Check's stable identity.
-        ran: True when it ran.
-        reason: why it was skipped, as fixed text; None when it ran.
+        ran: True when the Check ran for at least one Visited Device, or the Run had none.
+        reason: why it was skipped everywhere, as fixed text; None when it ran.
+        skipped: one record per Visited Device it could not run for (#102); empty otherwise.
     """
 
     check: Check
     ran: bool
     reason: str | None = None
+    skipped: tuple[CheckSkip, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,13 +1,20 @@
-"""The shipped Checks, and the machinery that always runs every one of them (#94).
+"""The shipped Checks, and the machinery that always runs every one of them (#94, #102).
 
-A Check is a stable `Check` record and a function from the Run's plain records to its
-Findings. Every shipped Check runs on every Run (story 4). A Check whose feature is not in
-use returns nothing for that device (story 5); it is not skipped. A Check is skipped only
-when it cannot decide anything at all: a source it needs was unavailable (story 10), or a
-built-in classification, such as the Train support table, does not cover what it found. The
-reason is then recorded and shown, so a skip never passes for a clean result.
+A Check is a stable `Check` record and two functions over the Run's plain records: one for its
+Findings and one for the Visited Devices it could not run for. Every shipped Check runs on
+every Run (story 4). A Check whose feature is not in use returns nothing for that device
+(story 5); it is not skipped. A Check is skipped for a device only when the show output it
+needs was refused (a Device Role out of date, story 80) or was never collected, and then the
+reason is recorded (`CheckRun.skipped`), never passed (story 6).
 
-New Checks are added to `CHECKS`; nothing else in `analysis` needs to change.
+A Check is skipped for the whole Run only when it cannot decide anything at all: a source it
+needs was unavailable (story 10), or a built-in classification, such as the Train support
+table, does not cover what it found. The reason is then recorded and shown, so a skip never
+passes for a clean result.
+
+New Checks are added to `CHECKS`; nothing else in `analysis` needs to change. The one
+exception is Cisco's insecure-configuration list: its Check needs every other Check's Findings
+to mark a match, so `analysis.cisco_list.apply` runs after the loop in `core.analyse`.
 """
 
 import re
@@ -16,6 +23,7 @@ from ipaddress import IPv4Address
 from typing import Final
 
 from network_analyser.analysis import advisory, lifecycle
+from network_analyser.analysis.catalogue import MODEL_DRIFT_CHECK
 from network_analyser.analysis.definition import CheckDefinition
 from network_analyser.analysis.hardening import HARDENING_CHECKS
 from network_analyser.analysis.ids import finding_id
@@ -32,15 +40,10 @@ from network_analyser.records.topology import (
 )
 from network_analyser.records.unknown import Unknown
 
+__all__ = ["CHECKS", "CheckDefinition", "model_drift"]
+
 MINIMUM_DRIFT_RELEASES: Final = 2
 """Two releases of one model is drift; one is not (story 70)."""
-
-MODEL_DRIFT_CHECK: Check = Check(
-    "consistency-model-drift",
-    "Same model on different releases",
-    CheckType.CONSISTENCY,
-)
-"""Story 70: one network-wide Low Finding per model running more than one release."""
 
 STACK_MISMATCH_CHECK: Check = Check(
     "consistency-stack-mismatch",
@@ -448,7 +451,7 @@ CHECKS: tuple[CheckDefinition, ...] = (
     CheckDefinition(STACK_MISMATCH_CHECK, stack_mismatch),
     CheckDefinition(VPC_MISMATCH_CHECK, vpc_mismatch),
     CheckDefinition(BUNDLE_MODE_CHECK, bundle_mode),
-    CheckDefinition(TRAIN_SUPPORT_CHECK, train_support, train_support_skip_reason),
+    CheckDefinition(TRAIN_SUPPORT_CHECK, train_support, skip_reason=train_support_skip_reason),
     CheckDefinition(
         advisory.ADVISORY_CHECK,
         advisory.advisory_findings,

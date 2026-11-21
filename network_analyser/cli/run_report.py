@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 
 from network_analyser import _winsys, analysis, run_output, topology
 from network_analyser._version import __version__
-from network_analyser.cli import summary
+from network_analyser.cli import run_analysis, summary
 from network_analyser.credentials import CredentialSets, SecretScan
 from network_analyser.discovery import STOPPED_BY_CTRL_C
 from network_analyser.records.analysis import AnalysisInput
@@ -110,11 +110,14 @@ def _report(draft: Draft) -> RunReport:
         stopped = STOPPED_BY_CTRL_C
     built = topology.build(records, scope=draft.request.scope.value)
     # #94/#104: the report shows Analysis Findings too, with the Run-end's own results
-    # (Cisco's answers included) when it got that far; otherwise it analyses offline.
+    # (Cisco's answers included) when it got that far; otherwise it analyses offline with
+    # whatever show output the records hold (#102).
     results = (
         draft.analysis_results
         if draft.analysis_results is not None
-        else analysis.analyse(AnalysisInput(topology=built))
+        else analysis.analyse(
+            AnalysisInput(topology=built, collected=run_analysis.collected_from(records))
+        )
     )
     built = dataclasses.replace(
         built,

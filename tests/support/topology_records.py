@@ -12,14 +12,20 @@ from network_analyser.records.collected import (
     ArpEntry,
     BundleMember,
     Collected,
+    ControlPlanePolicy,
     FhrpGroup,
+    InsecureConfigurationItem,
     Interface,
     InterfaceIp,
+    InventoryItem,
     MacEntry,
     Neighbour,
+    NtpAssociation,
     PortChannel,
     Reading,
     RoutingNeighbour,
+    SnmpUser,
+    SshSettings,
     StaticRoute,
     SwitchportMode,
     VpcKeepalive,
@@ -43,6 +49,13 @@ ROUTING = "show ip ospf neighbor"
 STATIC = "show ip route static"
 FHRP = "show standby brief"
 VRFS = "show vrf"
+INVENTORY = "show inventory"
+SNMP_USERS = "show snmp user"
+NTP = "show ntp associations"
+COPP = "show policy-map control-plane"
+SSH = "show ip ssh"
+INSECURE = "show system insecure configuration"
+GUEST_SHELL = "show guestshell"
 NOT_IN_TEST = "not collected in this test"
 
 
@@ -144,8 +157,15 @@ def visited(  # noqa: PLR0913 (a device's collected data, by name)
     mac: Iterable[MacEntry] | None = None,
     routing: Iterable[RoutingNeighbour] | None = None,
     static: Iterable[StaticRoute] | None = None,
-    fhrp: Iterable[FhrpGroup] | None = None,
+    fhrp: Iterable[FhrpGroup] | Unknown | None = None,
     vrfs: Iterable[Vrf] | None = None,
+    inventory: Iterable[InventoryItem] | Unknown | None = None,
+    snmp_users: Iterable[SnmpUser] | Unknown | None = None,
+    ntp: Iterable[NtpAssociation] | Unknown | None = None,
+    copp: ControlPlanePolicy | Unknown | None = None,
+    ssh: SshSettings | Unknown | None = None,
+    insecure: Iterable[InsecureConfigurationItem] | Unknown | None = None,
+    guest_shell: bool | Unknown | None = None,
 ) -> DeviceRecord:
     """Return a Visited Device's record; any data not given is unknown.
 
@@ -154,26 +174,53 @@ def visited(  # noqa: PLR0913 (a device's collected data, by name)
     """
     unknown = Unknown(NOT_IN_TEST)
 
-    def reading[T](command: str, value: T | None) -> Reading[T] | Unknown:
-        return unknown if value is None else Reading((command,), value)
+    def shown[T](command: str, value: T | Unknown | None) -> Reading[T] | Unknown | None:
+        """A 0.2.0 show command's part: `None` stays "does not apply or was not asked"."""
+        if value is None or isinstance(value, Unknown):
+            return value
+        return Reading((command,), value)
+
+    def sequence[T](
+        command: str, value: Iterable[T] | Unknown | None
+    ) -> Reading[tuple[T, ...]] | Unknown | None:
+        """A 0.2.0 show command whose reading is a tuple."""
+        if value is None or isinstance(value, Unknown):
+            return value
+        return Reading((command,), tuple(value))
 
     nothing = Collected.nothing(NOT_IN_TEST)
+
+    def reading[T](
+        command: str, value: Iterable[T] | Unknown | None
+    ) -> Reading[tuple[T, ...]] | Unknown:
+        """A v1 collection field: not given in a test means unknown, as before."""
+        if value is None:
+            return unknown
+        if isinstance(value, Unknown):
+            return value
+        return Reading((command,), tuple(value))
+
     collected = Collected(
         stack_members=nothing.stack_members,
-        interfaces=reading(INTERFACES, None if interfaces is None else tuple(interfaces)),
+        interfaces=reading(INTERFACES, interfaces),
         cdp=cdp if isinstance(cdp, Unknown) else Reading((CDP,), tuple(cdp)),
         lldp=lldp if isinstance(lldp, Unknown) else Reading((LLDP,), tuple(lldp)),
         vlans=nothing.vlans,
-        port_channels=reading(
-            PORT_CHANNELS, None if port_channels is None else tuple(port_channels)
-        ),
+        port_channels=reading(PORT_CHANNELS, port_channels),
         vpc=None if vpc_state is None else Reading((VPC,), vpc_state),
-        vrfs=reading(VRFS, None if vrfs is None else tuple(vrfs)),
-        arp=reading(ARP, None if arp is None else tuple(arp)),
-        mac=reading(MAC, None if mac is None else tuple(mac)),
-        routing_neighbours=reading(ROUTING, None if routing is None else tuple(routing)),
-        static_routes=reading(STATIC, None if static is None else tuple(static)),
-        fhrp=reading(FHRP, None if fhrp is None else tuple(fhrp)),
+        vrfs=reading(VRFS, vrfs),
+        arp=reading(ARP, arp),
+        mac=reading(MAC, mac),
+        routing_neighbours=reading(ROUTING, routing),
+        static_routes=reading(STATIC, static),
+        fhrp=reading(FHRP, fhrp),
+        inventory=sequence(INVENTORY, inventory),
+        snmp_users=sequence(SNMP_USERS, snmp_users),
+        ntp_associations=sequence(NTP, ntp),
+        control_plane=shown(COPP, copp),
+        ssh=shown(SSH, ssh),
+        insecure_configuration=sequence(INSECURE, insecure),
+        guest_shell=shown(GUEST_SHELL, guest_shell),
     )
     serials: tuple[str, ...] | Unknown = (
         (serial,) if serial is not None else Unknown("serial not found in show version")

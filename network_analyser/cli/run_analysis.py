@@ -1,4 +1,4 @@
-"""Analysis at the Run's end, and the bridge to the one online step (#94, #104).
+"""Analysis at the Run's end, and the bridge to the one online step (#94, #104, #102).
 
 The Run's end order (ADR 0007) is:
 
@@ -12,13 +12,18 @@ device record in them. `answers_for` asks Cisco through `advisories` with the un
 Checks take (`records.analysis`), keeping "source unavailable: reason" as a source with no
 answers, so an outage never reads as "Cisco said none".
 
+`collected_from` is the show-output half of the input (#102): the Run's device records hold
+each Visited Device's `Collected`, and Analysis cannot ask a device for it later.
+
 `analysed` runs every Check on the built Topology. It takes Cisco's answers when the Run had
-them, and the records' secret-free config facts (#96); without answers it is the offline form
-for a stopped Run, a Run with lookups off, or a Run with no key: every source is unavailable,
-so the configuration, consistency and v1 Topology Checks still run.
+them, the records' secret-free config facts (#96) and their collected show output (#102);
+without answers it is the offline form for a stopped Run, a Run with lookups off, or a Run
+with no key: every source is unavailable, so the configuration, consistency and v1 Topology
+Checks still run.
 """
 
 import re
+from collections.abc import Iterable
 from typing import Final
 
 from network_analyser import advisories, analysis
@@ -30,6 +35,7 @@ from network_analyser.records.analysis import (
     AnalysisInput,
     CiscoAnswers,
     ConfigFacts,
+    DeviceCollected,
     EoxAnswers,
     FixedRelease,
     HardwareEox,
@@ -111,19 +117,33 @@ def lookup_questions(data: AnalysisInput) -> CiscoQuestions:
     )
 
 
+def collected_from(records: Iterable[DeviceRecord]) -> tuple[DeviceCollected, ...]:
+    """Return each device's collected show output, keyed by the address logged into.
+
+    A record with no collection (a device the visit never reached, or an Unvisited Device) is
+    left out; Analysis then reads its show output as `Unknown`, never as a pass (#102).
+    """
+    return tuple(
+        DeviceCollected(record.ip, record.collected)
+        for record in records
+        if record.collected is not None
+    )
+
+
 def analysed(
     built: Topology,
     answers: CiscoAnswers | None = None,
     *,
     records: tuple[DeviceRecord, ...] = (),
 ) -> AnalysisResults:
-    """Run every Check on `built`, with Cisco's answers and the records' config facts.
+    """Run every Check on `built`, with Cisco's answers, config facts and show output.
 
     Without `answers`, every source is unavailable, so the offline Checks still run and no
     per-device Finding is raised from Cisco (story 10). `records` are the same device records
     `built` was made from; their secret-free config facts ride into `AnalysisInput.config_facts`
-    (#96). With none, every fact reads as `Unknown`, so a Check says it could not decide
-    rather than passing.
+    (#96) and their collected show output into `AnalysisInput.collected` (#102). With none,
+    every fact and show command reads as `Unknown`, so a Check says it could not decide rather
+    than passing.
     """
     without_cisco = CiscoAnswers.unavailable(LOOKUPS_DID_NOT_RUN)
     return analysis.analyse(
@@ -131,6 +151,7 @@ def analysed(
             topology=built,
             answers=answers if answers is not None else without_cisco,
             config_facts=_config_facts(records),
+            collected=collected_from(records),
         )
     )
 

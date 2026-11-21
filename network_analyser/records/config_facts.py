@@ -1,4 +1,4 @@
-"""The secret-free config facts `platforms` reads and Analysis decides Checks from (#96).
+"""The secret-free config facts `platforms` reads and Analysis decides Checks from (#96, #100).
 
 A fact is a `ConfigFact(name, value)`: a fixed name and a plain value, never a config line,
 secret, hash, key or community string. `platforms` reads them from the running config at
@@ -17,8 +17,14 @@ from typing import Final
 from network_analyser.records.unknown import Unknown
 
 __all__ = [
+    "AAA_ACCOUNTING",
+    "AAA_AUTHORIZATION",
+    "AAA_CENTRAL_LOGIN",
+    "AAA_LOGIN_FALLBACK_NONE",
+    "AAA_NEW_MODEL",
     "ENABLE_PASSWORD",
     "ENABLE_SECRET",
+    "EXEC_TIMEOUT_DISABLED_LINES",
     "FHRP_GROUPS",
     "FHRP_GROUPS_WITHOUT_AUTHENTICATION",
     "HTTP_SERVER",
@@ -51,7 +57,10 @@ __all__ = [
     "SNMP_V3_GROUPS_WITHOUT_PRIV",
     "SNMP_V3_USERS",
     "SNMP_V3_USERS_WITHOUT_PRIV",
+    "SSH_VERSION",
     "TELNET_LINES",
+    "TYPE_6_ENABLED",
+    "VTY_ACCESS_CLASS_MISSING_LINES",
     "ConfigFact",
     "ConfigFacts",
     "FactValue",
@@ -87,6 +96,24 @@ IP_SOURCE_ROUTE: Final = "ip_source_route"
 """True when IP source routing is enabled: the default, unless `no ip source-route` is set."""
 LEGACY_SERVICES: Final = "legacy_services"
 """The legacy services explicitly enabled, by keyword; empty when none is."""
+SSH_VERSION: Final = "ssh_version"
+"""The value of `ip ssh version`: 0 when the line is absent, else 1 or 2 (IOS/IOS-XE only)."""
+VTY_ACCESS_CLASS_MISSING_LINES: Final = "vty_access_class_missing_lines"
+"""The `line vty` block headers with no inbound `access-class`; `Unknown` when none is shown."""
+AAA_LOGIN_FALLBACK_NONE: Final = "aaa_login_fallback_none"
+"""How many `aaa authentication login` method lists include `none` as a fallback."""
+AAA_NEW_MODEL: Final = "aaa_new_model"
+"""True when `aaa new-model` is configured (IOS/IOS-XE only; NX-OS has no such command)."""
+AAA_CENTRAL_LOGIN: Final = "aaa_central_login"
+"""True when an `aaa authentication login` method list names a server group."""
+AAA_AUTHORIZATION: Final = "aaa_authorization"
+"""True when any `aaa authorization` command is configured."""
+AAA_ACCOUNTING: Final = "aaa_accounting"
+"""True when any `aaa accounting` command is configured."""
+EXEC_TIMEOUT_DISABLED_LINES: Final = "exec_timeout_disabled_lines"
+"""The console and vty block headers whose `exec-timeout` is 0 (disabled)."""
+TYPE_6_ENABLED: Final = "type_6_enabled"
+"""True when AES type 6 encryption is enabled by `password encryption aes` (IOS/IOS-XE only)."""
 SNMP_V1_V2C_COMMUNITIES: Final = "snmp_v1_v2c_communities"
 """How many SNMPv1/v2c communities are configured."""
 SNMP_V1_V2C_READ_WRITE_COMMUNITIES: Final = "snmp_v1_v2c_read_write_communities"
