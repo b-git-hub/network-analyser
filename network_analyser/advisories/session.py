@@ -120,7 +120,7 @@ class Session:
         self._token_reason = ""
         self._auth_rejected = False
         self._counts: dict[CiscoEndpoint, list[int]] = {
-            endpoint: [0, 0, 0] for endpoint in CiscoEndpoint
+            endpoint: [0, 0, 0, 0] for endpoint in CiscoEndpoint
         }
         if scan is not None:
             scan.watch(client_id)
@@ -152,14 +152,19 @@ class Session:
                     calls=self._counts[endpoint][0],
                     values=self._counts[endpoint][1],
                     retries=self._counts[endpoint][2],
+                    pages=self._counts[endpoint][3],
                 )
                 for endpoint in CiscoEndpoint
             ),
         )
 
-    def get(self, endpoint: CiscoEndpoint, path: str, *, values: int) -> Call:
-        """Ask an `apix.cisco.com` endpoint, with the token, paced and retried once."""
-        return self._call(endpoint, API_HOST, path, values=values)
+    def get(self, endpoint: CiscoEndpoint, path: str, *, values: int, pages: int = 0) -> Call:
+        """Ask an `apix.cisco.com` endpoint, with the token, paced and retried once.
+
+        `values` counts the PIDs or releases this logical call carries, and `pages` the reply
+        pages it reads; both count once per logical call, never once per retry.
+        """
+        return self._call(endpoint, API_HOST, path, values=values, pages=pages)
 
     # -- internals ---------------------------------------------------------------------------
 
@@ -213,7 +218,9 @@ class Session:
             self._scan.watch(self._token)
         return TokenResult(TokenOutcome.OK, reply.response.status)
 
-    def _call(self, endpoint: CiscoEndpoint, host: str, path: str, *, values: int) -> Call:
+    def _call(
+        self, endpoint: CiscoEndpoint, host: str, path: str, *, values: int, pages: int = 0
+    ) -> Call:
         if self._auth_rejected:
             return Call(CallOutcome.REJECTED, reason=REJECTED)
         token = self.token()
@@ -233,6 +240,7 @@ class Session:
         reply = self._send(endpoint, request)
         if reply.response is not None:
             self._counts[endpoint][1] += values
+            self._counts[endpoint][3] += pages
         if reply.outcome is CallOutcome.REJECTED:
             self._auth_rejected = True
             self._token_reason = REJECTED

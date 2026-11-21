@@ -333,6 +333,8 @@ def test_a_device_s_advice_is_read_for_the_advisory_pane() -> None:
         "upgrade_target": "17.12.8",
         "latest_release": "17.12.10",
         "latest_in_train": "17.12.10",
+        "latest_release_lifecycle": "ED",
+        "latest_in_train_lifecycle": "MD",
     }
 
     advice = diagram.device_advice(_content(document)["devices"][0])
@@ -342,6 +344,8 @@ def test_a_device_s_advice_is_read_for_the_advisory_pane() -> None:
     assert (advice.upgrade_target, advice.target_recorded) == ("17.12.8", True)
     assert advice.latest_release == "17.12.10"
     assert advice.latest_in_train == "17.12.10"
+    assert advice.latest_release_lifecycle == "ED"
+    assert advice.latest_in_train_lifecycle == "MD"
 
 
 def test_a_device_from_before_advice_reads_it_as_not_known() -> None:

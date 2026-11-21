@@ -285,12 +285,17 @@ def _no_fix(advice: DeviceAdvice) -> str:
 
 
 def _latest(advice: DeviceAdvice, redact: Callable[[str], str]) -> str:
-    release = NOT_AVAILABLE if advice.latest_release is None else advice.latest_release
-    line = f"Latest Release {_text(release, redact)}"
-    if advice.latest_in_train is not None:
-        where = f"latest in Train {advice.train}: " if advice.train else "latest in its Train: "
-        line += f' <span class="muted">({_text(where + advice.latest_in_train, redact)})</span>'
-    return line
+    """Both Latest Release values with Cisco's lifecycle code beside each (#127)."""
+    in_train = _latest_value(advice.latest_in_train, advice.latest_in_train_lifecycle, redact)
+    overall = _latest_value(advice.latest_release, advice.latest_release_lifecycle, redact)
+    return f"Latest Release in Train: {in_train}; overall: {overall}"
+
+
+def _latest_value(release: str | None, lifecycle: str | None, redact: Callable[[str], str]) -> str:
+    shown = _text(NOT_AVAILABLE if release is None else release, redact)
+    if lifecycle is None:
+        return shown
+    return f"{shown} ({_text(lifecycle, redact)})"
 
 
 def _advisories(

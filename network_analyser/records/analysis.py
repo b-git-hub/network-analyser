@@ -34,6 +34,8 @@ __all__ = [
     "AnalysisInput",
     "CiscoAnswer",
     "CiscoAnswers",
+    "CompatibleRelease",
+    "CompatibleReleases",
     "ConfigFact",
     "ConfigFacts",
     "DeviceCollected",
@@ -273,24 +275,56 @@ class SuggestedReleases:
 
 
 @dataclass(frozen=True, slots=True)
+class CompatibleRelease:
+    """One release Cisco lists as compatible with a chassis PID (#127).
+
+    Attributes:
+        release: the release's display name, as Cisco gives it.
+        lifecycle: Cisco's lifecycle code, such as `ED`; None when the reply names none or
+            the code did not pass its pattern.
+    """
+
+    release: str
+    lifecycle: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CompatibleReleases:
+    """Cisco's compatible-release list for one chassis PID (#127).
+
+    Attributes:
+        pid: the chassis PID asked about.
+        releases: every release Cisco lists as compatible, in the reply's order.
+        unanswered: why Cisco gave no list for this PID, such as `S3_INV_BASEPID` or
+            `page cap`; None when it answered.
+    """
+
+    pid: str
+    releases: tuple[CompatibleRelease, ...] = ()
+    unanswered: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CiscoAnswers:
     """Everything the Run asked Cisco, each source answered or unavailable (ADR 0007).
 
     Attributes:
         advisories: per OS type and release.
         eox: per PID and per release.
-        suggestions: per PID.
+        suggestions: per PID, from the Suggested Release Check's call.
+        compatible: per chassis PID, from the compatible-releases call (#127).
     """
 
     advisories: CiscoAnswer[ReleaseAdvisories] = ()
     eox: CiscoAnswer[EoxAnswers] = ()
     suggestions: CiscoAnswer[SuggestedReleases] = ()
+    compatible: CiscoAnswer[CompatibleReleases] = ()
 
     @classmethod
     def unavailable(cls, reason: str) -> CiscoAnswers:
         """Return answers where every source is unavailable for `reason`."""
         missing = SourceUnavailable(reason)
-        return cls(advisories=missing, eox=missing, suggestions=missing)
+        return cls(advisories=missing, eox=missing, suggestions=missing, compatible=missing)
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,10 +354,13 @@ class LookupQuestions:
     Attributes:
         pids: chassis, stack-member, supervisor and line-card PIDs.
         releases: one per distinct OS type and release.
+        compatible_pids: Visited Devices' chassis models only, for the compatible-releases
+            call; never a line card or any other part (#127).
     """
 
     pids: tuple[str, ...] = ()
     releases: tuple[ReleaseQuestion, ...] = ()
+    compatible_pids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

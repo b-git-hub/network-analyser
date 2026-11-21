@@ -253,6 +253,7 @@ def test_cisco_answers_are_either_an_answer_or_unavailable() -> None:
     assert answer.advisories == ()
     assert isinstance(answer.eox, SourceUnavailable)
     assert answer.suggestions == ()
+    assert answer.compatible == ()
     assert isinstance(CiscoAnswers().advisories, tuple)
 
 
@@ -306,6 +307,7 @@ def test_the_lookup_questions_are_deduplicated_and_pattern_valid() -> None:
     questions = analysis.lookup_questions(results_input)
 
     assert questions.pids == (MODEL, "C9300-NM-8X")
+    assert questions.compatible_pids == (MODEL,)
     assert [(q.os_type, q.release) for q in questions.releases] == [
         (OsType.IOS_XE, "17.9.5"),
     ]

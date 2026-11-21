@@ -146,8 +146,9 @@ class AnalysisRan(AuditEvent):
         token_outcome: the token request's result, one of Cisco's fixed outcomes.
         token_status: the HTTP status Cisco answered the token request with; None when none.
         token_error: Cisco's token error code, such as `invalid_client`; None when none.
-        endpoints: one `(endpoint, calls, values, retries)` per Cisco endpoint, in a fixed
-            order, while lookups ran; empty when they did not.
+        endpoints: one `(endpoint, calls, values, retries, pages)` per Cisco endpoint, in a
+            fixed order, while lookups ran; empty when they did not. `pages` counts reply
+            pages read, such as a paged compatible list (#127).
     """
 
     cisco_lookups_ran: bool
@@ -158,7 +159,7 @@ class AnalysisRan(AuditEvent):
     token_outcome: str
     token_status: int | None
     token_error: str | None
-    endpoints: tuple[tuple[str, int, int, int], ...]
+    endpoints: tuple[tuple[str, int, int, int, int], ...]
 
 
 @dataclass(frozen=True, slots=True)

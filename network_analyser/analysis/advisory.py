@@ -8,9 +8,10 @@ outcome, so silence never reads as safe (stories 52-53).
 
 Advice is attached to the device, never a Finding (story 58): the Advisory outcome, the Upgrade
 Target (the highest of each Advisory's first fix above the running release in its Train, with
-how many Advisories it leaves open, stories 20-24) and the Latest Release (story 57). The Latest
-Release and the NX-OS Upgrade Target stay `not available` until #127 and #126 give them their
-sources; Analysis never guesses them.
+how many Advisories it leaves open, stories 20-24) and the Latest Release (#127, stories 1-13).
+The Latest Release is the highest release on Cisco's compatible list for the device's chassis
+PID, in its Train and overall, with Cisco's lifecycle code beside each value. The NX-OS Upgrade
+Target stays `not available` until #126 gives it a source; Analysis never guesses it.
 """
 
 import re
@@ -30,10 +31,10 @@ from network_analyser.records.analysis import (
     AdvisoryAnswer,
     AnalysisInput,
     CiscoAnswer,
+    CompatibleReleases,
     OsType,
     ReleaseAdvisories,
     SourceUnavailable,
-    SuggestedReleases,
 )
 from network_analyser.records.topology import (
     ADVISORY_FIXED_LINE,
@@ -67,6 +68,10 @@ _NOT_READ: Final = "show version not read"
 """The fixed reason `topology` gives a device whose `show version` was never read."""
 _ADVISORY_ID: Final = re.compile(r"cisco-sa-[A-Za-z0-9._-]{1,160}")
 """What an Advisory id must match to keep a Check's stable id safe (story 51)."""
+_LIFECYCLE: Final = re.compile(r"[A-Z][A-Z0-9]{1,7}")
+"""Cisco's lifecycle code shape: two to eight upper-case letters or digits, such as `ED`."""
+NEWER_THAN_LIST: Final = "running release is newer than Cisco's list"
+"""What a Latest Release value becomes when the device already runs something above it (#127)."""
 _WHAT_TO_DO: Final = (
     "Make sure show version is readable and that the release is one Cisco openVuln knows."
 )
@@ -138,15 +143,17 @@ def advice_for(data: AnalysisInput) -> tuple[DeviceAdvice, ...]:
     advice: list[DeviceAdvice] = []
     for device in data.topology.devices:
         resolved = _resolve(data, device)
-        latest_in_train, latest = _latest(data.answers.suggestions, device)
+        latest = _latest(data.answers.compatible, device)
         target, not_cleared = _upgrade_target(resolved)
         advice.append(
             DeviceAdvice(
                 device=device.id,
                 advisory_outcome=resolved.outcome,
                 upgrade_target=target,
-                latest_release_in_train=latest_in_train,
-                latest_release=latest,
+                latest_release_in_train=latest.in_train,
+                latest_release=latest.overall,
+                latest_in_train_lifecycle=latest.in_train_lifecycle,
+                latest_release_lifecycle=latest.overall_lifecycle,
                 train=resolved.train,
                 not_cleared=not_cleared,
             )
@@ -369,14 +376,85 @@ def _upgrade_target(resolved: DeviceAdvisory) -> tuple[str, int]:
     return max(fixes, key=release_key), not_cleared
 
 
-def _latest(suggestions: CiscoAnswer[SuggestedReleases], device: VisitedDevice) -> tuple[str, str]:
-    """The Latest Release in the device's Train and overall, or `not available` (#89)."""
-    if isinstance(suggestions, SourceUnavailable) or not isinstance(device.model, str):
-        return NOT_AVAILABLE, NOT_AVAILABLE
-    for answer in suggestions:
-        if answer.pid == device.model:
-            return (
-                answer.latest_release_in_train or NOT_AVAILABLE,
-                answer.latest_release or NOT_AVAILABLE,
-            )
-    return NOT_AVAILABLE, NOT_AVAILABLE
+@dataclass(frozen=True, slots=True)
+class LatestRelease:
+    """A device's two Latest Release values and the lifecycle code beside each (#127).
+
+    Attributes:
+        in_train: the newest listed release in the device's Train, the running-release text,
+            or `not available`.
+        in_train_lifecycle: the lifecycle code beside `in_train`; None when there is none.
+        overall: the newest listed release overall, the running-release text, or `not
+            available`.
+        overall_lifecycle: the lifecycle code beside `overall`; None when there is none.
+    """
+
+    in_train: str = NOT_AVAILABLE
+    in_train_lifecycle: str | None = None
+    overall: str = NOT_AVAILABLE
+    overall_lifecycle: str | None = None
+
+
+def _latest(answers: CiscoAnswer[CompatibleReleases], device: VisitedDevice) -> LatestRelease:
+    """The Latest Release in the device's Train and overall (#127, stories 1-13).
+
+    Overall is the highest release on Cisco's compatible list by the tool's own release order;
+    in Train is the highest listed release whose Train, by the same rule, is the device's.
+    Cisco's `releaseTrain` text is never used. A device running above a value reads
+    `running release is newer than Cisco's list` instead of being shown an older release
+    (story 7). An unanswered or rejected PID, an empty list, the page cap and an outage all
+    read `not available` (stories 9, 11-13).
+    """
+    missing = LatestRelease()
+    if isinstance(answers, SourceUnavailable) or not isinstance(device.model, str):
+        return missing
+    answer = next((item for item in answers if item.pid == device.model), None)
+    if answer is None or answer.unanswered is not None or not answer.releases:
+        return missing
+    listed = tuple((release.release, _lifecycle(release.lifecycle)) for release in answer.releases)
+    overall, overall_lifecycle = max(listed, key=lambda pair: release_key(pair[0]))
+    running = _running_release(device)
+    if running is not None and release_key(running) > release_key(overall):
+        overall, overall_lifecycle = NEWER_THAN_LIST, None
+    in_train, in_train_lifecycle = _latest_in_train(listed, device, running)
+    return LatestRelease(
+        in_train=in_train,
+        in_train_lifecycle=in_train_lifecycle,
+        overall=overall,
+        overall_lifecycle=overall_lifecycle,
+    )
+
+
+def _latest_in_train(
+    listed: tuple[tuple[str, str | None], ...],
+    device: VisitedDevice,
+    running: str | None,
+) -> tuple[str, str | None]:
+    """The highest listed release in the device's Train, or `not available` (#127)."""
+    if running is None:
+        return NOT_AVAILABLE, None
+    os_type = family_of(device.platform, device.software_version)
+    if os_type is None:
+        return NOT_AVAILABLE, None
+    train = train_of(running, os_type)
+    candidates = tuple(pair for pair in listed if train_of(pair[0], os_type) == train)
+    if not candidates:
+        return NOT_AVAILABLE, None
+    release, lifecycle = max(candidates, key=lambda pair: release_key(pair[0]))
+    if release_key(running) > release_key(release):
+        return NEWER_THAN_LIST, None
+    return release, lifecycle
+
+
+def _running_release(device: VisitedDevice) -> str | None:
+    """The device's normalised release, or None when `show version` named none."""
+    if not isinstance(device.software_version, str) or not device.software_version:
+        return None
+    return normalise_release(device.software_version)
+
+
+def _lifecycle(code: str | None) -> str | None:
+    """Cisco's lifecycle code when it passes the strict short pattern; None otherwise."""
+    if code is None or _LIFECYCLE.fullmatch(code) is None:
+        return None
+    return code

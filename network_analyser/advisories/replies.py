@@ -16,6 +16,9 @@ from typing import Any, Final
 from network_analyser.records.cisco import (
     AdvisoriesAnswer,
     CiscoAdvisory,
+    CompatibleAnswer,
+    CompatibleRelease,
+    CompatibleUnanswered,
     EoxAnswer,
     EoxRecord,
     EoxUnanswered,
@@ -34,6 +37,7 @@ _CODE = re.compile(r"[A-Z][A-Z0-9_]{1,63}")
 _ERROR_KEY = re.compile(r"(?:SSA_ERR|S3)_[A-Za-z0-9_]{1,60}")
 _DATE_LIMIT: Final = 40
 _ID_LIMIT: Final = 96
+_LIFECYCLE_LIMIT: Final = 16
 _TITLE_LIMIT: Final = 300
 
 
@@ -117,6 +121,52 @@ def suggestion_answer(body: bytes) -> SuggestionsAnswer | SourceUnavailable:
             )
         )
     return SuggestionsAnswer(answers=tuple(answers), unanswered=tuple(unanswered))
+
+
+def compatible_answer(  # noqa: PLR0911 (one return per reply shape, each named)
+    product_id: str, body: bytes
+) -> CompatibleAnswer | CompatibleUnanswered | SourceUnavailable:
+    """Return the compatible releases for `product_id`, or why the reply cannot be used.
+
+    The entries sit under `suggestions`, each with `releaseFormat1`, `isSuggested`,
+    `releaseTrain` and `releaseLifeCycle`. A reply naming Cisco's error code is `unanswered`
+    for that one PID, never an outage of the source (#127).
+    """
+    document = _document(body)
+    if document is None:
+        return SourceUnavailable(NOT_JSON)
+    entries = document.get("suggestions")
+    if not isinstance(entries, list):
+        code = _reply_error(document)
+        if code is not None:
+            return CompatibleUnanswered(product_id=product_id, reason=code)
+        return SourceUnavailable(NOT_UNDERSTOOD)
+    releases: list[CompatibleRelease] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return SourceUnavailable(NOT_UNDERSTOOD)
+        code = _reply_error(entry)
+        if code is not None:
+            return CompatibleUnanswered(product_id=product_id, reason=code)
+        release = _compatible_release(entry)
+        if release is None:
+            return SourceUnavailable(NOT_UNDERSTOOD)
+        releases.append(release)
+    return CompatibleAnswer(product_id=product_id, releases=tuple(releases))
+
+
+def compatible_last_page(body: bytes) -> int:
+    """Return the last `pageIndex` Cisco's compatible reply names; 1 when it does not say."""
+    document = _document(body)
+    record = document.get("paginationResponseRecord") if document is not None else None
+    value = record.get("lastIndex") if isinstance(record, dict) else None
+    if isinstance(value, bool):
+        return 1
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, str) and value.isdigit() and int(value) > 0:
+        return int(value)
+    return 1
 
 
 def eox_last_page(body: bytes) -> int:
@@ -220,6 +270,21 @@ def _suggested_releases(entry: dict[str, Any]) -> tuple[SuggestedRelease, ...] |
             )
         )
     return tuple(releases)
+
+
+def _compatible_release(entry: dict[str, Any]) -> CompatibleRelease | None:
+    """One entry of a compatible list, or None when it names no release."""
+    release = _optional_text(entry.get("releaseFormat1")) or _optional_text(
+        entry.get("releaseFormat2")
+    )
+    if release is None:
+        return None
+    return CompatibleRelease(
+        release=release,
+        suggested=_suggested(entry.get("isSuggested")),
+        train=_optional_text(entry.get("releaseTrain")),
+        lifecycle=_optional_text(entry.get("releaseLifeCycle"), limit=_LIFECYCLE_LIMIT),
+    )
 
 
 def _reply_error(entry: dict[str, Any]) -> str | None:

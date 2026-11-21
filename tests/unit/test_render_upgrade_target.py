@@ -160,6 +160,8 @@ def test_topology_json_carries_each_devices_advice_and_the_new_count() -> None:
         upgrade_target="17.12.8",
         latest_release_in_train="17.12.10",
         latest_release="17.15.1",
+        latest_in_train_lifecycle="MD",
+        latest_release_lifecycle="ED",
         train="17.12",
         not_cleared=1,
     )
@@ -174,12 +176,19 @@ def test_topology_json_carries_each_devices_advice_and_the_new_count() -> None:
         "upgrade_target": "17.12.8",
         "latest_release": "17.15.1",
         "latest_in_train": "17.12.10",
+        "latest_release_lifecycle": "ED",
+        "latest_in_train_lifecycle": "MD",
         "train": "17.12",
         "not_cleared": 1,
     }
     read_back = diagram.read_topology(json.dumps(written))
     content: Any = read_back.content
-    assert device_advice(content["devices"][0]).not_cleared == 1
+    read_advice = device_advice(content["devices"][0])
+    assert read_advice.not_cleared == 1
+    assert (read_advice.latest_release_lifecycle, read_advice.latest_in_train_lifecycle) == (
+        "ED",
+        "MD",
+    )
 
 
 def test_the_format_version_is_bumped_for_the_partial_target() -> None:

@@ -48,12 +48,15 @@ class LookupQuestions:
             supervisors and line cards, never optics, PSUs or fans.
         software_releases: release strings for the software EoX lookup.
         suggestion_pids: base PIDs for the Software Suggestion lookup.
+        compatible_pids: chassis PIDs for the compatible-releases lookup (#127), never line
+            cards or any other part.
     """
 
     releases: tuple[ReleaseQuestion, ...] = ()
     hardware_pids: tuple[str, ...] = ()
     software_releases: tuple[str, ...] = ()
     suggestion_pids: tuple[str, ...] = ()
+    compatible_pids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,6 +227,64 @@ class SuggestionsAnswer:
     unanswered: tuple[SuggestionUnanswered, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class CompatibleRelease:
+    """One release Software Suggestion lists as compatible with a chassis PID (#127).
+
+    Attributes:
+        release: the release's display name, as Cisco gives it.
+        suggested: whether Cisco marks it as suggested.
+        train: the release line Cisco's reply names; None when it names none. Analysis uses
+            its own Train rule instead of this text.
+        lifecycle: Cisco's lifecycle code, such as `ED`; None when the reply names none.
+    """
+
+    release: str
+    suggested: bool
+    train: str | None
+    lifecycle: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class CompatibleAnswer:
+    """Software Suggestion's compatible-releases answer for one chassis PID (#127).
+
+    Attributes:
+        product_id: the chassis PID asked about.
+        releases: every release the reply lists for it.
+    """
+
+    product_id: str
+    releases: tuple[CompatibleRelease, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class CompatibleUnanswered:
+    """One chassis PID Software Suggestion had no compatible list for (#127).
+
+    Attributes:
+        product_id: the chassis PID asked about.
+        reason: Cisco's error code, such as `S3_INV_BASEPID`, or fixed text such as
+            `page cap`.
+    """
+
+    product_id: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class CompatibleAnswers:
+    """Software Suggestion's compatible lists for every chassis PID sent (#127).
+
+    Attributes:
+        answers: one answer per PID Cisco knew.
+        unanswered: the PIDs Cisco had no list for, with its error code or fixed reason.
+    """
+
+    answers: tuple[CompatibleAnswer, ...] = ()
+    unanswered: tuple[CompatibleUnanswered, ...] = ()
+
+
 @unique
 class CiscoEndpoint(Enum):
     """A Cisco endpoint, as the Audit log counts it (story 22)."""
@@ -232,6 +293,7 @@ class CiscoEndpoint(Enum):
     OPENVULN = "openVuln"
     EOX = "EoX"
     SUGGESTION = "Software Suggestion"
+    COMPATIBLE = "Software Suggestion (compatible)"
 
 
 @unique
@@ -271,15 +333,18 @@ class EndpointUse:
     Attributes:
         endpoint: which Cisco endpoint.
         calls: requests sent to it, retries included.
-        values: the PIDs or releases its requests carried, each request counted once and its
-            single retry not counted twice; 0 for the token endpoint.
+        values: the PIDs or releases its requests carried, each logical call counted once
+            and its single retry not counted twice; a paged compatible list counts its PID
+            once, however many pages it took. 0 for the token endpoint.
         retries: how many of the calls were the single retry.
+        pages: reply pages read from it; 0 for an endpoint asked without paging.
     """
 
     endpoint: CiscoEndpoint
     calls: int
     values: int
     retries: int
+    pages: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,6 +373,8 @@ class CiscoAnswers:
         software_eox: the software EoX answer, or why there is none.
         suggestions: the Software Suggestion answer, or why there is none.
         tally: the counts the Audit log records.
+        compatible: the compatible-releases answer, or why there is none (#127); empty when
+            the caller did not ask for one.
     """
 
     advisories: tuple[AdvisoriesAnswer | SourceUnavailable, ...]
@@ -315,3 +382,4 @@ class CiscoAnswers:
     software_eox: EoxAnswer | SourceUnavailable
     suggestions: SuggestionsAnswer | SourceUnavailable
     tally: CiscoCallTally
+    compatible: CompatibleAnswers | SourceUnavailable = CompatibleAnswers()

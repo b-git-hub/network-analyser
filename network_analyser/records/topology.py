@@ -579,8 +579,14 @@ class DeviceAdvice:
         upgrade_target: the highest of each Advisory's first fix above the running release in
             its Train, or the fixed text `no fix in Train T` / `no Critical/High Advisories`;
             `NOT_AVAILABLE` until known (#124).
-        latest_release_in_train: the newest release in its Train; `NOT_AVAILABLE` until known.
-        latest_release: the newest release overall; `NOT_AVAILABLE` until known.
+        latest_release_in_train: the newest release in its Train, or the running-release text;
+            `NOT_AVAILABLE` until known (#127).
+        latest_release: the newest release overall, or the running-release text;
+            `NOT_AVAILABLE` until known (#127).
+        latest_in_train_lifecycle: Cisco's lifecycle code beside the in-Train value, only when
+            it passed its pattern; None when the value has no code (#127).
+        latest_release_lifecycle: Cisco's lifecycle code beside the overall value, only when it
+            passed its pattern; None when the value has no code (#127).
         upcoming_eox: EoX dates still in the future, for the device's details rather than a
             Finding (story 76); empty until the Lifecycle Checks fill it.
         train: the device's Train, such as `17.12`, when one was worked out; None otherwise.
@@ -594,6 +600,8 @@ class DeviceAdvice:
     upgrade_target: str = NOT_AVAILABLE
     latest_release_in_train: str = NOT_AVAILABLE
     latest_release: str = NOT_AVAILABLE
+    latest_in_train_lifecycle: str | None = None
+    latest_release_lifecycle: str | None = None
     upcoming_eox: tuple[EoxItem, ...] = ()
     train: str | None = None
     not_cleared: int = 0

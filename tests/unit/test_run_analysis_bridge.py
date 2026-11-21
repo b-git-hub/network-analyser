@@ -18,6 +18,8 @@ from network_analyser.records.cisco import (
     CiscoCallTally,
     CiscoEndpoint,
     CiscoOsType,
+    CompatibleAnswer,
+    CompatibleAnswers,
     EndpointUse,
     EoxAnswer,
     EoxRecord,
@@ -28,6 +30,9 @@ from network_analyser.records.cisco import (
     SuggestionsAnswer,
     TokenOutcome,
     TokenResult,
+)
+from network_analyser.records.cisco import (
+    CompatibleRelease as CiscoCompatibleRelease,
 )
 from network_analyser.records.cisco import (
     SourceUnavailable as CiscoUnavailable,
@@ -98,6 +103,22 @@ def _replies() -> CiscoAnswers:
             ),
             unanswered=(),
         ),
+        compatible=CompatibleAnswers(
+            answers=(
+                CompatibleAnswer(
+                    "C9300-48P",
+                    (
+                        CiscoCompatibleRelease(
+                            "17.12.8", suggested=False, train="17.12", lifecycle="MD"
+                        ),
+                        CiscoCompatibleRelease(
+                            "26.2.1", suggested=False, train="26.2", lifecycle="ED"
+                        ),
+                    ),
+                ),
+            ),
+            unanswered=(),
+        ),
         tally=CiscoCallTally(
             token=TokenResult(TokenOutcome.OK),
             endpoints=tuple(
@@ -115,6 +136,7 @@ def test_the_questions_are_only_de_duplicated_pids_and_releases() -> None:
     assert asked.hardware_pids == ("C9300-48P",)
     assert asked.software_releases == ("17.9.4",)
     assert asked.suggestion_pids == ("C9300-48P",)
+    assert asked.compatible_pids == ("C9300-48P",)
 
 
 def test_advisories_become_analysis_answers_with_cisco_s_detail() -> None:
@@ -163,6 +185,19 @@ def test_suggestions_keep_only_the_releases_cisco_suggests() -> None:
     assert suggested.releases == ("17.9.5",)
 
 
+def test_compatible_releases_carry_each_lifecycle_code() -> None:
+    answers = run_analysis.analysis_answers(_replies(), _asked())
+
+    assert isinstance(answers.compatible, tuple)
+    (compatible,) = answers.compatible
+    assert compatible.pid == "C9300-48P"
+    assert [(item.release, item.lifecycle) for item in compatible.releases] == [
+        ("17.12.8", "MD"),
+        ("26.2.1", "ED"),
+    ]
+    assert compatible.unanswered is None
+
+
 def test_a_source_unavailable_stays_unavailable_and_has_no_answers() -> None:
     asked = _asked()
     missing = CiscoUnavailable("Cisco could not be reached")
@@ -171,6 +206,7 @@ def test_a_source_unavailable_stays_unavailable_and_has_no_answers() -> None:
         hardware_eox=missing,
         software_eox=missing,
         suggestions=missing,
+        compatible=missing,
         tally=_replies().tally,
     )
 
@@ -179,6 +215,7 @@ def test_a_source_unavailable_stays_unavailable_and_has_no_answers() -> None:
     assert isinstance(answers.advisories, SourceUnavailable)
     assert isinstance(answers.eox, SourceUnavailable)
     assert isinstance(answers.suggestions, SourceUnavailable)
+    assert isinstance(answers.compatible, SourceUnavailable)
 
 
 def test_an_nxos_release_is_not_sent_without_its_hardware_family() -> None:
