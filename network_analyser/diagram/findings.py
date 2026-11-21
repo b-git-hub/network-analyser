@@ -24,7 +24,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
-from network_analyser.diagram.topology_file import Plain, TopologyFile, cisco_lookups
+from network_analyser.diagram.topology_file import (
+    DeviceAdvice,
+    Plain,
+    TopologyFile,
+    cisco_lookups,
+    device_advice,
+)
 
 LEVELS: Final = ("Critical", "High", "Medium", "Low")
 """Worst first. There is no Info level (spec #92, "Levels")."""
@@ -340,14 +346,14 @@ def _device_rows(
 
 
 def _device_row(device: Mapping[str, Plain]) -> DeviceRow:
-    advice = _record(device.get("advice"))
+    advice = device_advice(device)
     return DeviceRow(
         hostname=_device_name(device),
         management_ip=_text(device.get("management_ip")),
         model=_text(device.get("model")),
         release=_text(device.get("software_version")),
-        upgrade_target=_advice(advice, "upgrade_target", missing_none="no fix in Train"),
-        latest_release=_advice(advice, "latest_release"),
+        upgrade_target=_upgrade_target(advice),
+        latest_release=_latest_release(advice),
     )
 
 
@@ -359,16 +365,17 @@ def _device_name(device: Mapping[str, Plain]) -> str:
     return _text(device.get("id"))
 
 
-def _advice(
-    advice: Mapping[str, Plain] | None, field: str, *, missing_none: str = NOT_AVAILABLE
-) -> str:
-    if advice is None:
+def _upgrade_target(advice: DeviceAdvice) -> str:
+    if not advice.known:
         return NOT_AVAILABLE
-    value = advice.get(field)
-    if isinstance(value, str) and value:
-        return value
-    if value is None:
-        return missing_none
+    if advice.upgrade_target:
+        return advice.upgrade_target
+    return "no fix in Train" if advice.target_recorded else NOT_AVAILABLE
+
+
+def _latest_release(advice: DeviceAdvice) -> str:
+    if advice.known and advice.latest_release:
+        return advice.latest_release
     return NOT_AVAILABLE
 
 
