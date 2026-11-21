@@ -1,2 +1,0 @@
-from network_analyser.credentials.sets import CredentialSets
-from network_analyser.device_gateway import visit

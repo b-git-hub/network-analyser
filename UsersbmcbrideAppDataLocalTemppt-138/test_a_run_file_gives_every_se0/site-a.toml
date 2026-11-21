@@ -1,8 +1,0 @@
-# A synthetic run file.
-label = "site-a"
-scope = ["192.0.2.0/24", "198.51.100.0/24"]
-exclude = ["192.0.2.128/25"]
-seeds = ["192.0.2.1"]
-parallel = 20
-failure_budget = 2
-sweep = true
