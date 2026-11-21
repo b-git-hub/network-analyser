@@ -7,6 +7,11 @@ Every Finding also carries the 0.2.0 scale: level, Check identity, what was foun
 source, and optional Cisco detail (#93). A new optional field needs no format-version bump;
 a change an older `render` would misread does (`topology.FORMAT_VERSION`).
 
+Analysis at the Run's end (#94) adds the per-device advice record, the per-Check ran/skipped
+list and its Findings. Its output records live here because they are the `topology.json`
+schema: `Topology.analysis` holds the advice and Check list, while `Topology.findings` holds
+every Finding, v1's and Analysis's together.
+
 **Stable ids** (`id` fields) are shared by `topology.json`, the diagram (`#device=<id>`,
 `#finding=<id>`) and the Run report. Each is worked out from what it names, never from the
 order things were found, so the same network gives the same ids in every Run:
@@ -26,6 +31,7 @@ No record here holds a username (story 141).
 from dataclasses import dataclass
 from enum import Enum, unique
 from ipaddress import IPv4Address, IPv4Interface, IPv4Network, IPv6Address
+from typing import Final
 
 from network_analyser.records.collected import Interface, StackMember, VpcState
 from network_analyser.records.device import UnvisitedReason
@@ -349,42 +355,82 @@ class Check:
     soft: bool = False
 
 
+@unique
+class CiscoDetailKind(Enum):
+    """Which Cisco detail a Finding carries: an Advisory's, or EoX dates (#93).
+
+    The discriminator on `cisco_detail`: readers branch on it instead of sniffing `id` or
+    `items` (stories 87, 89, 112).
+    """
+
+    ADVISORY = "Advisory"
+    EOX = "EoX"
+
+
+ADVISORY_STATUS: Final = "Affected release"
+"""Story 49's fixed status, carried by every Advisory Finding."""
+
+ADVISORY_FIXED_LINE: Final = (
+    "Matched on software release only. Cisco may limit this Advisory to devices that use a "
+    "particular feature; see 'Vulnerable Products' on Cisco's page."
+)
+"""Story 49's fixed line, so a version-only match is never overread."""
+
+
 @dataclass(frozen=True, slots=True)
 class AdvisoryDetail:
     """Cisco's own detail for an Advisory Finding (stories 49-51).
 
     Attributes:
+        kind: `CiscoDetailKind.ADVISORY`, the discriminator telling a reader this
+            `cisco_detail` is an Advisory rather than EoX.
         id: the Advisory id, such as `cisco-sa-example-abc123`.
         title: its title, in Cisco's words.
-        sir: Cisco's Security Impact Rating: Critical, High, Medium or Low.
+        sir: Cisco's Security Impact Rating, one of the four `FindingLevel`s. The Finding's
+            level equals it (story 47): Cisco's Critical/High/Medium/Low are the same scale.
         cvss: its CVSS score, as Cisco gives it.
         cves: the CVEs it covers, in Cisco's order.
         published: when Cisco published it, as fixed ISO 8601 text.
         updated: when Cisco last updated it, as fixed ISO 8601 text.
         first_fixed: the Advisory's first fixed release in the device's Train; None when
             it has no fix in that Train.
+        status: story 49's fixed status, `ADVISORY_STATUS`.
+        fixed_line: story 49's fixed line, `ADVISORY_FIXED_LINE`.
         hardware_family_not_confirmed: True when an NX-OS match rests on the release alone
             because the Nexus hardware family could not be worked out (story 46).
     """
 
+    kind: CiscoDetailKind
     id: str
     title: str
-    sir: str
+    sir: FindingLevel
     cvss: str
     cves: tuple[str, ...]
     published: str
     updated: str
     first_fixed: str | None
+    status: str = ADVISORY_STATUS
+    fixed_line: str = ADVISORY_FIXED_LINE
     hardware_family_not_confirmed: bool = False
+
+
+@unique
+class EoxKind(Enum):
+    """Whether an EoX item is hardware or software (stories 74-75)."""
+
+    HARDWARE = "hardware"
+    SOFTWARE = "software"
 
 
 @dataclass(frozen=True, slots=True)
 class EoxItem:
-    """One hardware or software item Cisco gives end-of-life dates for (story 74).
+    """One hardware or software item Cisco gives end-of-life dates for (stories 74-75).
 
     Dates are fixed ISO 8601 text; None means Cisco gave none.
 
     Attributes:
+        kind: hardware or software, so a Check can map the item's level without guessing
+            from its name (story 74's hardware vs story 75's software).
         name: the item Cisco names: a PID, or a release string.
         last_date_of_support: Cisco's Last Date of Support.
         end_of_security_support: Cisco's End of Security/Vulnerability Support.
@@ -393,6 +439,7 @@ class EoxItem:
         replacement: Cisco's replacement PID; None when it names none.
     """
 
+    kind: EoxKind
     name: str
     last_date_of_support: str | None = None
     end_of_security_support: str | None = None
@@ -403,12 +450,15 @@ class EoxItem:
 
 @dataclass(frozen=True, slots=True)
 class EoxDetail:
-    """Cisco's EoX detail for a hardware or software Finding (story 74).
+    """Cisco's EoX detail for a hardware or software Finding (stories 74-75).
 
     Attributes:
+        kind: `CiscoDetailKind.EOX`, the discriminator telling a reader this `cisco_detail`
+            is EoX rather than an Advisory.
         items: one per item Cisco named, in Cisco's order.
     """
 
+    kind: CiscoDetailKind
     items: tuple[EoxItem, ...]
 
 
@@ -469,6 +519,129 @@ class Finding:
         `VLAN on one end only` is soft, so it is listed last within Low (story 85).
         """
         return (self.level.rank, 1 if self.check.soft else 0, self.check.id, self.id)
+
+
+NOT_AVAILABLE: Final = "not available"
+"""What advice says when Cisco gave no value, or the source was never asked (spec #92)."""
+
+
+@unique
+class AdvisoryOutcomeKind(Enum):
+    """What one device's Advisory result says (story 52; #94).
+
+    Every Visited Device ends with exactly one. `COULD_NOT_CHECK` keeps the reason, so
+    silence never reads as safe.
+    """
+
+    MATCHES = "matches"
+    """Critical or High Advisories name the device's release."""
+    NONE = "none"
+    """Cisco answered, and none of its Critical or High Advisories name the release."""
+    COULD_NOT_CHECK = "could not check"
+    """No usable answer: the release was unreadable, or the source was unavailable."""
+
+
+@dataclass(frozen=True, slots=True)
+class AdvisoryOutcome:
+    """One device's Advisory outcome: exactly one per Visited Device (story 52; #94).
+
+    Attributes:
+        kind: whether Advisories match, none match, or the check could not be made.
+        matched: how many Critical or High Advisories match; 0 unless `kind` is MATCHES.
+        release: the release that was checked, when the outcome names one.
+        reason: why the check could not be made; None unless `kind` is COULD_NOT_CHECK.
+    """
+
+    kind: AdvisoryOutcomeKind
+    matched: int = 0
+    release: str | None = None
+    reason: str | None = None
+
+    @property
+    def text(self) -> str:
+        """The outcome as one line, in the words stories 52 and 53 use."""
+        if self.kind is AdvisoryOutcomeKind.MATCHES:
+            return f"{self.matched} Advisories match"
+        if self.kind is AdvisoryOutcomeKind.NONE:
+            return f"no known Critical/High Advisories for release {self.release}"
+        return f"could not check: {self.reason}"
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceAdvice:
+    """What Analysis advises for one Visited Device (stories 55-58, 76; #94/#105/#106).
+
+    Advice is attached to the device, never a Finding, so it does not inflate counts.
+
+    Attributes:
+        device: the device's id.
+        advisory_outcome: its one Advisory outcome.
+        upgrade_target: the highest first-fixed release in its Train, or the fixed text
+            `no fix in Train T` / `no Critical/High Advisories`; `NOT_AVAILABLE` until known.
+        latest_release_in_train: the newest release in its Train; `NOT_AVAILABLE` until known.
+        latest_release: the newest release overall; `NOT_AVAILABLE` until known.
+        upcoming_eox: EoX dates still in the future, for the device's details rather than a
+            Finding (story 76); empty until the Lifecycle Checks fill it.
+    """
+
+    device: str
+    advisory_outcome: AdvisoryOutcome
+    upgrade_target: str = NOT_AVAILABLE
+    latest_release_in_train: str = NOT_AVAILABLE
+    latest_release: str = NOT_AVAILABLE
+    upcoming_eox: tuple[EoxItem, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class CheckRun:
+    """Whether one shipped Analysis Check ran this Run, and why not (stories 4, 10; #94).
+
+    Every shipped Check runs; a Check is skipped only when a source it needs was
+    unavailable. A Check that does not apply to a device raises nothing for that device.
+
+    Attributes:
+        check: the Check's stable identity.
+        ran: True when it ran.
+        reason: why it was skipped, as fixed text; None when it ran.
+    """
+
+    check: Check
+    ran: bool
+    reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisSummary:
+    """What `topology.json` keeps of Analysis besides the Findings (#94).
+
+    Attributes:
+        advice: one record per Visited Device, in device id order.
+        checks: every shipped Check, in Check id order.
+    """
+
+    advice: tuple[DeviceAdvice, ...]
+    checks: tuple[CheckRun, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisResults:
+    """Everything Analysis returns for a Run (#94).
+
+    Attributes:
+        findings: every Finding, v1's Topology Findings and Analysis's together, worst
+            first (`Finding.order`).
+        advice: one record per Visited Device, in device id order.
+        checks: every shipped Check, in Check id order.
+    """
+
+    findings: tuple[Finding, ...]
+    advice: tuple[DeviceAdvice, ...]
+    checks: tuple[CheckRun, ...]
+
+    @property
+    def summary(self) -> AnalysisSummary:
+        """The part `topology.json` keeps beside the Findings."""
+        return AnalysisSummary(advice=self.advice, checks=self.checks)
 
 
 @unique
@@ -629,3 +802,5 @@ class Topology:
     """Prefixes in one VRF shared by three or more devices (#62)."""
     unplaced_next_hops: tuple[UnplacedNextHop, ...] = ()
     """Next hops with no Link and no Shared Segment (#66). Empty when every hop was placed."""
+    analysis: AnalysisSummary | None = None
+    """Analysis's advice and Check list (#94); None until Analysis has run."""
