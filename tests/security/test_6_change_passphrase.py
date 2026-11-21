@@ -4,16 +4,18 @@ Run against a temporary per-user folder and a Run folder holding a canary config
 `enable secret 9` line), `change-passphrase` leaves no plaintext on disk: not at the end, and
 not at any moment on the way. Every byte the tool hands to the operating system for a file
 is watched as it goes, so even a temporary file that is later renamed or removed would be
-caught. The first test locks with real age, end to end. The second cuts the power at every
-single file write or rename in turn, with the fast fake age, and checks that each Backup is
-then wholly old or wholly new, that no plaintext is on disk, and that a rerun finishes the
-change.
+caught. The Cisco API Key file (#103) is in place too, so the change's re-lock of it is
+covered by the same watch. The first test locks with real age, end to end. The second cuts the
+power at every single file write or rename in turn, with the fast fake age, and checks that
+each Backup and the key file is then wholly old or wholly new, that no plaintext is on disk,
+and that a rerun finishes the change.
 """
 
 import io
 import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pyrage
@@ -31,7 +33,16 @@ pytestmark = pytest.mark.security
 
 OLD = "CANARY-pp-0ld6-current"
 NEW = "CANARY-pp-n3w6-rotated"
-_PLAINTEXT = (CONFIG_CANARY.encode(), b"enable secret 9", b"hostname sw-a")
+CLIENT_ID = "CANARY-client-id-1036"
+CLIENT_SECRET = "CANARY-client-secret-1036"
+SET_AT = datetime(2026, 11, 20, 12, 34, 56, tzinfo=UTC)
+_PLAINTEXT = (
+    CONFIG_CANARY.encode(),
+    b"enable secret 9",
+    b"hostname sw-a",
+    CLIENT_ID.encode(),
+    CLIENT_SECRET.encode(),
+)
 
 
 class _PowerCut(BaseException):
@@ -98,6 +109,9 @@ def test_a_real_age_change_never_writes_the_config_in_the_clear(
         tmp_path / "runs" / "20261118T101530Z", old, "sw-a", register=data.run_register
     )
     backup = folder / "backups" / "sw-a__TEST0001.cfg.age"
+    backup_store.lock_key_file(
+        data.cisco_key_file, Secret(CLIENT_ID), Secret(CLIENT_SECRET), old, set_at=SET_AT
+    )
     assert _plaintext_on_disk(data.root, folder) == []
 
     with _watched_writes(monkeypatch) as written:
@@ -105,6 +119,7 @@ def test_a_real_age_change_never_writes_the_config_in_the_clear(
 
     assert code == 0, capsys.readouterr().err
     assert pyrage.passphrase.decrypt(backup.read_bytes(), NEW) == CONFIG.encode()
+    assert pyrage.passphrase.decrypt(data.cisco_key_file.read_bytes(), NEW) is not None
     assert written  # the change did write: ciphertext, the marker and the record
     assert [w for w in written if any(p in w for p in _PLAINTEXT)] == []
     assert _plaintext_on_disk(data.root, folder) == []
@@ -144,6 +159,9 @@ def test_a_power_cut_at_any_write_leaves_no_plaintext_and_each_file_old_or_new(
         )
         backups = sorted((folder / "backups").glob("*.cfg.age"))
         configs = {p: fake_age.unlock(p.read_bytes(), OLD) for p in backups}
+        backup_store.lock_key_file(
+            data.cisco_key_file, Secret(CLIENT_ID), Secret(CLIENT_SECRET), old, set_at=SET_AT
+        )
 
         written: list[bytes] = []
         try:
@@ -160,11 +178,17 @@ def test_a_power_cut_at_any_write_leaves_no_plaintext_and_each_file_old_or_new(
         assert _plaintext_on_disk(data.root, folder) == [], cut_at
         for path, config in configs.items():
             assert config in {_opens(path)(OLD), _opens(path)(NEW)}, (cut_at, path)
+        key_file = data.cisco_key_file
+        assert (
+            fake_age.unlock(key_file.read_bytes(), OLD) is not None
+            or fake_age.unlock(key_file.read_bytes(), NEW) is not None
+        ), cut_at
 
         assert _resume(monkeypatch, _files(data)) == 0, (cut_at, capsys.readouterr().err)
         for path, config in configs.items():
             assert _opens(path)(NEW) == config, (cut_at, path)
         assert _opens(folder / "backups" / "manifest.age")(NEW) is not None, cut_at
+        assert fake_age.unlock(key_file.read_bytes(), NEW) is not None, cut_at
         assert not data.change_pending.exists(), cut_at
         assert _plaintext_on_disk(data.root, folder) == [], cut_at
     assert cut_at > 20

@@ -5,6 +5,8 @@ console output, `audit.log`, `topology.json` (#52), `diagram.html` (#63), `diagr
 (#65), `run-report.html` (#66) or `findings.html` (#107), and nothing from
 the `netmiko`/`paramiko` loggers reaches any file or the console. Plain pytest, no device.
 Every Finding's text is scanned too, as a backstop for a Check that leaks a secret (#93).
+The Cisco API Key's client ID, secret and token are canaries too (#103): they never reach the
+console, any file or the Findings in a report.
 """
 
 import dataclasses
@@ -37,7 +39,7 @@ from network_analyser.records.topology import (
     FindingLevel,
 )
 from network_analyser.run_output.report import write_run_report
-from tests.support import fake_age
+from tests.support import fake_age, fake_cisco
 from tests.support.run_driver import (
     BACKUP_CANARY,
     DEVICE_CANARY,
@@ -45,6 +47,7 @@ from tests.support.run_driver import (
     Runner,
     data_folder,
     first_run,
+    typed,
 )
 from tests.support.topology_documents import device, document
 from tests.support.topology_records import neighbour, port, visited
@@ -262,6 +265,59 @@ def test_a_secret_that_slips_into_device_text_never_reaches_the_run_report(tmp_p
 
     text = (tmp_path / "run-report.html").read_text(encoding="utf-8")
     for canary in (*CANARIES, quoted, "CANARY-pw"):
+        assert canary not in text
+    assert "[blocked]" in text
+    assert scan.hits >= 1
+
+
+def test_a_stored_cisco_key_and_its_token_never_reach_the_console_or_any_file(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = data_folder()
+    backup_store.create_check_file(data.check_file, Secret(BACKUP_CANARY))
+    fake = fake_cisco.FakeCisco()
+    monkeypatch.setattr("network_analyser.advisories.session.HttpsTransport", lambda **_: fake)
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(typed("YES", BACKUP_CANARY, fake_cisco.CLIENT_ID, fake_cisco.CLIENT_SECRET)),
+    )
+
+    assert main(["cisco-key", "set"]) == 0
+
+    got = capsys.readouterr()
+    assert fake.token_calls() == 1
+    canaries = (fake_cisco.CLIENT_ID, fake_cisco.CLIENT_SECRET, fake_cisco.TOKEN)
+    for canary in canaries:
+        assert canary not in got.out + got.err
+    written = [p for p in data.root.rglob("*") if p.is_file()]
+    for canary in canaries:
+        assert [p for p in written if canary.encode() in p.read_bytes()] == []
+
+
+def test_a_cisco_key_in_a_finding_never_reaches_the_run_outputs(tmp_path: Path) -> None:
+    scan = SecretScan()
+    key = backup_store.CiscoKey(
+        Secret(fake_cisco.CLIENT_ID), Secret(fake_cisco.CLIENT_SECRET), datetime.now(UTC)
+    )
+    key.add_to_scan(scan)
+    scan.watch(Secret(fake_cisco.TOKEN))
+    canaries = (fake_cisco.CLIENT_ID, fake_cisco.CLIENT_SECRET, fake_cisco.TOKEN)
+    page_report = _report()
+    built = dataclasses.replace(
+        page_report.topology,
+        findings=(
+            dataclasses.replace(
+                page_report.topology.findings[0],
+                summary=" ".join(canaries),
+            ),
+        ),
+    )
+    folder = run_output.RunFolder(path=tmp_path, io_path=tmp_path)
+
+    write_run_report(folder, dataclasses.replace(page_report, topology=built), scan)
+
+    text = (tmp_path / "run-report.html").read_text(encoding="utf-8")
+    for canary in canaries:
         assert canary not in text
     assert "[blocked]" in text
     assert scan.hits >= 1

@@ -222,6 +222,10 @@ WRITE_OWNERS: frozenset[str] = frozenset(
         # unlocked, re-locked and checked in memory first, so only age ciphertext is written.
         # Also each Run folder's re-lock record: paths and fingerprints, through the scan.
         "backup_store/relock.py",
+        # #103: the Cisco API key file, `cisco-key.age`, locked with the Backup Passphrase
+        # and written ciphertext-only, temp-then-rename. The plaintext holds the client ID
+        # and secret but never reaches the disk.
+        "backup_store/cisco_key.py",
     }
 )
 _WRITE_CALLS = frozenset({"write_text", "write_bytes", "symlink_to", "hardlink_to", "touch"})

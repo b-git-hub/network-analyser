@@ -139,7 +139,7 @@ def _change(args: argparse.Namespace, data: run_output.DataFolder, scan: SecretS
         return ExitCode.STOPPED
     _register(ask, data.run_register, plan, extras, scan)
     started = _start(files, old, new, scan)
-    return _relock_all(files, plan, old, started, scan)
+    return _relock_all(files, plan, old, started, scan, data.cisco_key_file)
 
 
 # -- Passphrases (story 109) ----------------------------------------------------------------
@@ -284,12 +284,13 @@ def _start(
         raise RefusedError(_NOT_STARTED) from error
 
 
-def _relock_all(
+def _relock_all(  # noqa: PLR0913, PLR0917 (the call's whole state, each part named)
     files: PassphraseFiles,
     plan: RelockPlan,
     old: BackupPassphrase,
     started: tuple[BackupPassphrase, PendingChange],
     scan: SecretScan,
+    key_file: Path,
 ) -> ExitCode:
     new, pending = started
     relocker = backup_store.Relocker(
@@ -311,8 +312,9 @@ def _relock_all(
                 print(_STOPPED, file=sys.stderr)
                 return ExitCode.STOPPED
             results.append(result)
+    key_outcome = backup_store.relock_key_file(key_file, old, new)  # the Cisco API key (story 37)
     backup_store.finish_change(files)
-    return _report(plan, results)
+    return _report(plan, results, key_outcome)
 
 
 def _said(result: FileResult) -> str:
@@ -327,7 +329,9 @@ def _short(path: str) -> str:
     return console_text("/".join(parts))
 
 
-def _report(plan: RelockPlan, results: list[RunResult]) -> ExitCode:
+def _report(
+    plan: RelockPlan, results: list[RunResult], key_outcome: backup_store.KeyOutcome
+) -> ExitCode:
     files = [f for run in results for f in run.files]
     backups = [f for f in files if f.path.endswith(backup_store.locker.BACKUP_SUFFIX)]
     relocked = [f for f in backups if f.outcome is not FileOutcome.SKIPPED]
@@ -353,9 +357,13 @@ def _report(plan: RelockPlan, results: list[RunResult]) -> ExitCode:
     if unrecorded:
         lines.append("Re-lock record not written:")
         lines.extend(f"  {console_text(str(run.folder))}" for run in unrecorded)
+    if key_outcome.problem is not None:
+        lines.append(f"{key_outcome.problem}.")
     lines.append(ROTATION_LIMITS)
     print("\n".join(lines))
-    attention = skipped or flagged or plan.not_found or unrecorded
+    attention = (
+        skipped or flagged or plan.not_found or unrecorded or key_outcome.problem is not None
+    )
     return ExitCode.NEEDS_ATTENTION if attention else ExitCode.CLEAN
 
 

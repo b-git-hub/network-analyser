@@ -1,9 +1,9 @@
 r"""The per-user data folder, `%LOCALAPPDATA%\NetworkAnalyser\` (spec #37 "Per-user data").
 
 It holds what the tool keeps between Runs: the Trust Store, the Backup check file, the Run
-register, the change-pending marker and the single-instance lock file, and the default Runs
-folder. Every installed version shares it (story 177). The file names here are part of the
-tool's compatibility promise: changing one is a breaking change (decision #32).
+register, the change-pending marker, the Cisco API key file and the single-instance lock file,
+and the default Runs folder. Every installed version shares it (story 177). The file names here
+are part of the tool's compatibility promise: changing one is a breaking change (decision #32).
 """
 
 from dataclasses import dataclass
@@ -42,6 +42,11 @@ class DataFolder:
     def change_pending(self) -> Path:
         """The marker `change-passphrase` leaves while it is unfinished (#22, #58)."""
         return self.root / "change-pending.json"
+
+    @property
+    def cisco_key_file(self) -> Path:
+        """The Cisco API key file (ADR 0008, #103)."""
+        return self.root / "cisco-key.age"
 
     @property
     def lock_file(self) -> Path:
