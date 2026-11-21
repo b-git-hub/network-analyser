@@ -1,4 +1,4 @@
-"""The first hardening Checks: Telnet, secrets, SNMP, insecure mode, HTTP, legacy services (#96).
+"""The hardening Checks decided from secret-free config facts (#96, #101).
 
 Each is decided from the secret-free config facts in `records.config_facts` (stories 59-66,
 69). A Check raises one Finding per Visited Device per Check, never a secret, hash, key,
@@ -8,10 +8,14 @@ community string or quoted config line.
   password`, SNMPv1/v2c, insecure mode, the HTTP server, legacy services (story 62).
 - The `enable secret` Check is absence-is-the-problem: it always runs on IOS/IOS-XE (story 61).
 - SNMPv3 privacy runs only where SNMPv3 is configured (story 63).
+- NTP, remote syslog and brute-force protection are absence-is-the-problem and always run
+  where the Platform has them; NTP authentication is judged only where NTP is configured.
+- Routing authentication is judged per protocol and only with a live neighbour; FHRP only on
+  configured groups; ICMP only on L3 interfaces that are up (story 63).
+- NX-OS strength-check and IOS/IOS-XE brute-force protection follow their Platform; insecure
+  mode stays IOS-XE only, while the IOS-XE Checks also run on classic IOS (story 64).
 - A fact that was not read makes a Low "could not decide" Finding, never a silent pass
   (story 6).
-- IOS-XE Checks also run on classic IOS with its own rules; insecure mode stays IOS-XE only
-  (story 64).
 """
 
 from typing import Final
@@ -20,13 +24,26 @@ from network_analyser.analysis.definition import CheckDefinition
 from network_analyser.analysis.ids import finding_id
 from network_analyser.records import Platform
 from network_analyser.records.analysis import AnalysisInput, ConfigFacts
+from network_analyser.records.collected import InterfaceIp
 from network_analyser.records.config_facts import (
     ENABLE_PASSWORD,
     ENABLE_SECRET,
+    FHRP_GROUPS,
+    FHRP_GROUPS_WITHOUT_AUTHENTICATION,
     HTTP_SERVER,
+    ICMP_REDIRECTS_L3_INTERFACES,
+    ICMP_UNREACHABLES_L3_INTERFACES,
     INSECURE_MODE,
     IP_SOURCE_ROUTE,
     LEGACY_SERVICES,
+    LOGIN_BLOCK_FOR,
+    NTP_AUTHENTICATED,
+    NTP_CONFIGURED,
+    NTP_MD5_AUTHENTICATION,
+    PASSWORD_STRENGTH_CHECK,
+    PROXY_ARP_L3_INTERFACES,
+    REMOTE_SYSLOG_SERVERS,
+    ROUTING_AUTHENTICATION_MISSING,
     SECRET_TYPE_0,
     SECRET_TYPE_4,
     SECRET_TYPE_5,
@@ -43,6 +60,7 @@ from network_analyser.records.config_facts import (
     TELNET_LINES,
 )
 from network_analyser.records.topology import (
+    AdjacencyKind,
     Check,
     CheckType,
     Finding,
@@ -72,6 +90,31 @@ HTTP_SERVER_CHECK: Final = Check(
 )
 LEGACY_SERVICES_CHECK: Final = Check(
     "hardening-legacy-services", "Legacy services", CheckType.CONFIGURATION
+)
+NTP_CHECK: Final = Check("hardening-ntp", "NTP missing or weak", CheckType.CONFIGURATION)
+REMOTE_SYSLOG_CHECK: Final = Check(
+    "hardening-remote-syslog", "No remote syslog", CheckType.CONFIGURATION
+)
+STRENGTH_CHECK: Final = Check(
+    "hardening-strength-check", "Password strength-check off", CheckType.CONFIGURATION
+)
+BRUTE_FORCE_CHECK: Final = Check(
+    "hardening-brute-force", "No brute-force protection", CheckType.CONFIGURATION
+)
+ROUTING_AUTH_CHECK: Final = Check(
+    "hardening-routing-authentication",
+    "Routing authentication missing",
+    CheckType.CONFIGURATION,
+)
+FHRP_AUTH_CHECK: Final = Check(
+    "hardening-fhrp-authentication",
+    "FHRP authentication missing",
+    CheckType.CONFIGURATION,
+)
+ICMP_CHECK: Final = Check(
+    "hardening-icmp",
+    "ICMP redirects, unreachables or proxy ARP",
+    CheckType.CONFIGURATION,
 )
 
 _UNDECIDED_TODO: Final = "Re-run the tool so the running config can be read."
@@ -453,6 +496,288 @@ def legacy_services(data: AnalysisInput) -> tuple[Finding, ...]:
     return tuple(findings)
 
 
+# -- NTP ---------------------------------------------------------------------------------------
+
+
+def ntp(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Story 61/63: NTP must run; its authentication is judged only where NTP does."""
+    findings: list[Finding] = []
+    for device, facts in _checked_devices(data):
+        configured = _flag(facts, NTP_CONFIGURED)
+        if isinstance(configured, Unknown):
+            findings.append(_undecided(NTP_CHECK, device, NTP_CONFIGURED, configured))
+            continue
+        if not configured:
+            findings.append(
+                _finding(
+                    NTP_CHECK,
+                    device,
+                    FindingLevel.MEDIUM,
+                    "NTP is not configured.",
+                    "Configure at least two trusted NTP servers with authenticated time.",
+                )
+            )
+            continue
+        authenticated = _flag(facts, NTP_AUTHENTICATED)
+        if isinstance(authenticated, Unknown):
+            findings.append(_undecided(NTP_CHECK, device, NTP_AUTHENTICATED, authenticated))
+            continue
+        if not authenticated:
+            findings.append(
+                _finding(
+                    NTP_CHECK,
+                    device,
+                    FindingLevel.MEDIUM,
+                    "NTP is configured without authentication.",
+                    "Configure NTP authentication with a strong hash and trusted keys.",
+                )
+            )
+            continue
+        md5 = _flag(facts, NTP_MD5_AUTHENTICATION)
+        if isinstance(md5, Unknown):
+            findings.append(_undecided(NTP_CHECK, device, NTP_MD5_AUTHENTICATION, md5))
+        elif md5:
+            findings.append(
+                _finding(
+                    NTP_CHECK,
+                    device,
+                    FindingLevel.MEDIUM,
+                    "NTP authentication uses MD5.",
+                    "Replace MD5 NTP keys with SHA-1 or stronger authentication.",
+                )
+            )
+    return tuple(findings)
+
+
+# -- Remote syslog -----------------------------------------------------------------------------
+
+
+def remote_syslog(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Story 61: absence-is-the-problem; no remote syslog server is a Medium Finding."""
+    findings: list[Finding] = []
+    for device, facts in _checked_devices(data):
+        servers = _count(facts, REMOTE_SYSLOG_SERVERS)
+        if isinstance(servers, Unknown):
+            findings.append(_undecided(REMOTE_SYSLOG_CHECK, device, REMOTE_SYSLOG_SERVERS, servers))
+        elif servers == 0:
+            findings.append(
+                _finding(
+                    REMOTE_SYSLOG_CHECK,
+                    device,
+                    FindingLevel.MEDIUM,
+                    "No remote syslog server is configured.",
+                    "Send logs to a remote syslog server so they survive a device failure.",
+                )
+            )
+    return tuple(findings)
+
+
+# -- NX-OS password strength-check -------------------------------------------------------------
+
+
+def strength_check(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Story 64: NX-OS only; strength-check is on by default and off with the `no` form."""
+    findings: list[Finding] = []
+    for device, facts in _checked_devices(data):
+        if device.platform is not Platform.NX_OS:
+            continue
+        enabled = _flag(facts, PASSWORD_STRENGTH_CHECK)
+        if isinstance(enabled, Unknown):
+            findings.append(_undecided(STRENGTH_CHECK, device, PASSWORD_STRENGTH_CHECK, enabled))
+        elif not enabled:
+            findings.append(
+                _finding(
+                    STRENGTH_CHECK,
+                    device,
+                    FindingLevel.MEDIUM,
+                    "Password strength-check is off.",
+                    "Re-enable password strength-check (no password strength-check is set).",
+                )
+            )
+    return tuple(findings)
+
+
+# -- Brute-force protection --------------------------------------------------------------------
+
+
+def brute_force(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Story 61/64: absence-is-the-problem on IOS-XE and classic IOS alike."""
+    findings: list[Finding] = []
+    for device, facts in _checked_devices(data):
+        if device.platform is not Platform.IOS_XE:
+            continue
+        protected = _flag(facts, LOGIN_BLOCK_FOR)
+        if isinstance(protected, Unknown):
+            findings.append(_undecided(BRUTE_FORCE_CHECK, device, LOGIN_BLOCK_FOR, protected))
+        elif not protected:
+            findings.append(
+                _finding(
+                    BRUTE_FORCE_CHECK,
+                    device,
+                    FindingLevel.MEDIUM,
+                    "Brute-force protection is not configured.",
+                    "Configure login block-for with attempts and within.",
+                )
+            )
+    return tuple(findings)
+
+
+# -- Routing authentication --------------------------------------------------------------------
+
+
+def routing_authentication(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Story 63: per protocol, and only where this device has a live neighbour of it."""
+    findings: list[Finding] = []
+    for device, facts in _checked_devices(data):
+        live = _live_routing_protocols(data, device.id)
+        if not live:
+            continue
+        missing = facts.fact(ROUTING_AUTHENTICATION_MISSING)
+        if isinstance(missing, Unknown):
+            findings.append(
+                _undecided(ROUTING_AUTH_CHECK, device, ROUTING_AUTHENTICATION_MISSING, missing)
+            )
+            continue
+        if not isinstance(missing, tuple):
+            findings.append(
+                _undecided(
+                    ROUTING_AUTH_CHECK,
+                    device,
+                    ROUTING_AUTHENTICATION_MISSING,
+                    Unknown("not a list of protocols"),
+                )
+            )
+            continue
+        offending = sorted(live.intersection(item.upper() for item in missing))
+        if offending:
+            findings.append(
+                _finding(
+                    ROUTING_AUTH_CHECK,
+                    device,
+                    FindingLevel.MEDIUM,
+                    "Routing authentication is missing for "
+                    + ", ".join(offending)
+                    + " with a live neighbour.",
+                    "Configure authentication for each routing protocol that has a neighbour.",
+                )
+            )
+    return tuple(findings)
+
+
+def _live_routing_protocols(data: AnalysisInput, device: str) -> set[str]:
+    """The routing protocols with a live neighbour touching `device`."""
+    kinds = {
+        AdjacencyKind.OSPF: "OSPF",
+        AdjacencyKind.EIGRP: "EIGRP",
+        AdjacencyKind.BGP: "BGP",
+    }
+    return {
+        kinds[adjacency.kind]
+        for adjacency in data.topology.adjacencies
+        if adjacency.kind in kinds and any(end.device == device for end in adjacency.ends)
+    }
+
+
+# -- FHRP authentication -----------------------------------------------------------------------
+
+
+def fhrp_authentication(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Story 63: only configured HSRP, VRRP or GLBP groups are judged."""
+    findings: list[Finding] = []
+    for device, facts in _checked_devices(data):
+        groups = _count(facts, FHRP_GROUPS)
+        if isinstance(groups, Unknown):
+            findings.append(_undecided(FHRP_AUTH_CHECK, device, FHRP_GROUPS, groups))
+            continue
+        if groups == 0:
+            continue
+        without = _count(facts, FHRP_GROUPS_WITHOUT_AUTHENTICATION)
+        if isinstance(without, Unknown):
+            findings.append(
+                _undecided(FHRP_AUTH_CHECK, device, FHRP_GROUPS_WITHOUT_AUTHENTICATION, without)
+            )
+        elif without:
+            findings.append(
+                _finding(
+                    FHRP_AUTH_CHECK,
+                    device,
+                    FindingLevel.MEDIUM,
+                    f"FHRP authentication is missing on {without} of {groups} configured groups.",
+                    "Configure authentication on every HSRP, VRRP and GLBP group.",
+                )
+            )
+    return tuple(findings)
+
+
+# -- ICMP redirects, unreachables and proxy ARP ------------------------------------------------
+
+
+def icmp(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Story 63: judged only where an L3 interface is up; Low when any setting is enabled."""
+    findings: list[Finding] = []
+    for device, facts in _checked_devices(data):
+        up = _has_up_l3_interface(device)
+        if isinstance(up, Unknown):
+            findings.append(_undecided(ICMP_CHECK, device, "L3 interface state", up))
+            continue
+        if not up:
+            continue
+        counts = {
+            name: _count(facts, name)
+            for name in (
+                ICMP_REDIRECTS_L3_INTERFACES,
+                ICMP_UNREACHABLES_L3_INTERFACES,
+                PROXY_ARP_L3_INTERFACES,
+            )
+        }
+        unknown = next((value for value in counts.values() if isinstance(value, Unknown)), None)
+        if isinstance(unknown, Unknown):
+            findings.append(_undecided(ICMP_CHECK, device, ICMP_REDIRECTS_L3_INTERFACES, unknown))
+            continue
+        items = [
+            (label, _total(counts, name))
+            for name, label in (
+                (ICMP_REDIRECTS_L3_INTERFACES, "ICMP redirects"),
+                (ICMP_UNREACHABLES_L3_INTERFACES, "ICMP unreachables"),
+                (PROXY_ARP_L3_INTERFACES, "proxy ARP"),
+            )
+            if _total(counts, name)
+        ]
+        if not items:
+            continue
+        listed = ", ".join(
+            f"{label} on {count} L3 " + ("interface" if count == 1 else "interfaces")
+            for label, count in items
+        )
+        findings.append(
+            _finding(
+                ICMP_CHECK,
+                device,
+                FindingLevel.LOW,
+                f"Insecure ICMP settings are enabled: {listed}.",
+                "Disable ICMP redirects, unreachables and proxy ARP on L3 interfaces.",
+            )
+        )
+    return tuple(findings)
+
+
+def _has_up_l3_interface(device: VisitedDevice) -> bool | Unknown:
+    """Whether the device has an L3 interface that is up; `Unknown` when its state was not read."""
+    interfaces = device.interfaces
+    if isinstance(interfaces, Unknown):
+        return interfaces
+    unread = False
+    for interface in interfaces:
+        if interface.admin_up is not True or interface.line_up is not True:
+            continue
+        settings = interface.ip
+        if isinstance(settings, InterfaceIp) and settings.addresses:
+            return True
+        if isinstance(settings, Unknown):
+            unread = True
+    return Unknown("an interface that is up has unread addressing") if unread else False
+
+
 HARDENING_CHECKS: Final[tuple[CheckDefinition, ...]] = (
     CheckDefinition(TELNET_CHECK, telnet),
     CheckDefinition(WEAK_SECRET_CHECK, weak_secret_types),
@@ -462,5 +787,12 @@ HARDENING_CHECKS: Final[tuple[CheckDefinition, ...]] = (
     CheckDefinition(INSECURE_MODE_CHECK, insecure_mode),
     CheckDefinition(HTTP_SERVER_CHECK, http_server),
     CheckDefinition(LEGACY_SERVICES_CHECK, legacy_services),
+    CheckDefinition(NTP_CHECK, ntp),
+    CheckDefinition(REMOTE_SYSLOG_CHECK, remote_syslog),
+    CheckDefinition(STRENGTH_CHECK, strength_check),
+    CheckDefinition(BRUTE_FORCE_CHECK, brute_force),
+    CheckDefinition(ROUTING_AUTH_CHECK, routing_authentication),
+    CheckDefinition(FHRP_AUTH_CHECK, fhrp_authentication),
+    CheckDefinition(ICMP_CHECK, icmp),
 )
-"""These eight Checks, ready to join `checks.CHECKS`."""
+"""These fifteen Checks, ready to join `checks.CHECKS`."""

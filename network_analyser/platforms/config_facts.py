@@ -16,10 +16,22 @@ from network_analyser.records import Platform
 from network_analyser.records.config_facts import (
     ENABLE_PASSWORD,
     ENABLE_SECRET,
+    FHRP_GROUPS,
+    FHRP_GROUPS_WITHOUT_AUTHENTICATION,
     HTTP_SERVER,
+    ICMP_REDIRECTS_L3_INTERFACES,
+    ICMP_UNREACHABLES_L3_INTERFACES,
     INSECURE_MODE,
     IP_SOURCE_ROUTE,
     LEGACY_SERVICES,
+    LOGIN_BLOCK_FOR,
+    NTP_AUTHENTICATED,
+    NTP_CONFIGURED,
+    NTP_MD5_AUTHENTICATION,
+    PASSWORD_STRENGTH_CHECK,
+    PROXY_ARP_L3_INTERFACES,
+    REMOTE_SYSLOG_SERVERS,
+    ROUTING_AUTHENTICATION_MISSING,
     SECRET_TYPE_0,
     SECRET_TYPE_4,
     SECRET_TYPE_5,
@@ -76,6 +88,44 @@ _LEGACY_PREFIXES: Final = (
     ("feature ftp", "FTP"),
     ("feature tftp", "TFTP"),
 )
+_NTP_SERVER: Final = re.compile(r"^ntp\s+(?:server|peer)\s+\S+(.*)$", re.IGNORECASE)
+_NTP_MASTER: Final = re.compile(r"^ntp\s+master(?:\s|$)", re.IGNORECASE)
+_NTP_KEY: Final = re.compile(r"^ntp\s+authentication-key\s+(\d+)\s+(\S+)", re.IGNORECASE)
+_NTP_TRUSTED_KEY: Final = re.compile(r"^ntp\s+trusted-key\s+(\d+)", re.IGNORECASE)
+_LOGGING_KEYWORDS: Final = frozenset(
+    {
+        "buffered",
+        "console",
+        "discriminator",
+        "event",
+        "exception",
+        "facility",
+        "file",
+        "filter",
+        "format",
+        "history",
+        "interface",
+        "level",
+        "logfile",
+        "message-counter",
+        "module",
+        "monitor",
+        "origin-id",
+        "persistent",
+        "queue-limit",
+        "rate-limit",
+        "snmp-trap",
+        "source-interface",
+        "synchronous",
+        "system-message",
+        "timestamp",
+        "trap",
+    }
+)
+_L3_ADDRESS: Final = re.compile(r"^ip\s+(?:address|unnumbered)\s+", re.IGNORECASE)
+_ROUTER_PROTOCOL: Final = re.compile(r"^router\s+(ospf|eigrp|bgp)(?:\s|$)", re.IGNORECASE)
+_FLAT_FHRP: Final = re.compile(r"^(standby|vrrp|glbp)\s+(\d+)\s+(.+)$", re.IGNORECASE)
+_BLOCK_FHRP: Final = re.compile(r"^(hsrp|vrrp)\s+(\d+)\s*$", re.IGNORECASE)
 
 
 def read_config_facts(platform: Platform, text: str) -> tuple[ConfigFact, ...]:
@@ -94,14 +144,21 @@ def read_config_facts(platform: Platform, text: str) -> tuple[ConfigFact, ...]:
         HTTP_SERVER: _http_server(lines),
         TELNET_LINES: _telnet_lines(platform, lines),
         **_snmp_facts(lines),
+        **_service_facts(platform, lines),
     }
     if platform is Platform.IOS_XE:
         facts[ENABLE_SECRET] = any(_ENABLE_SECRET.match(line.strip()) for line in lines)
         facts[ENABLE_PASSWORD] = any(_ENABLE_PASSWORD.match(line.strip()) for line in lines)
         facts[INSECURE_MODE] = any(line.strip().lower() == "system mode insecure" for line in lines)
+        facts[LOGIN_BLOCK_FOR] = any(
+            line.strip().lower().startswith("login block-for") for line in lines
+        )
     else:
         facts[SNMP_GLOBAL_ENFORCE_PRIV] = any(
             line.strip().lower() == "snmp-server globalenforcepriv" for line in lines
+        )
+        facts[PASSWORD_STRENGTH_CHECK] = not any(
+            line.strip().lower() == "no password strength-check" for line in lines
         )
     return tuple(ConfigFact(name, value) for name, value in sorted(facts.items()))
 
@@ -204,6 +261,203 @@ def _transport_permits_telnet(setting: str | None) -> bool:
         return True
     allowed = {token.lower() for token in match.group(1).split()}
     return "all" in allowed or "telnet" in allowed
+
+
+def _service_facts(platform: Platform, lines: list[str]) -> dict[str, FactValue]:
+    """NTP, remote syslog, routing authentication, FHRP and ICMP facts (#101)."""
+    return {
+        **_ntp_facts(lines),
+        REMOTE_SYSLOG_SERVERS: _remote_syslog_servers(lines),
+        ROUTING_AUTHENTICATION_MISSING: _routing_authentication_missing(lines),
+        **_fhrp_facts(lines),
+        **_icmp_facts(platform, lines),
+    }
+
+
+def _ntp_facts(lines: list[str]) -> dict[str, FactValue]:
+    """Whether NTP is configured, and whether its used key authenticates it, and how.
+
+    An NTP server or peer must name a key that is also trusted; a key line alone authenticates
+    nothing. MD5 is reported separately so the Check can name it.
+    """
+    configured = False
+    keys: dict[int, str] = {}
+    trusted: set[int] = set()
+    referenced: list[int] = []
+    for line in lines:
+        text = line.strip()
+        if _NTP_MASTER.match(text):
+            configured = True
+            continue
+        server = _NTP_SERVER.match(text)
+        if server is not None:
+            configured = True
+            key = _ntp_key_reference(server.group(1))
+            if key is not None:
+                referenced.append(key)
+            continue
+        key_line = _NTP_KEY.match(text)
+        if key_line is not None:
+            keys[int(key_line.group(1))] = key_line.group(2).lower()
+            continue
+        trusted_line = _NTP_TRUSTED_KEY.match(text)
+        if trusted_line is not None:
+            trusted.add(int(trusted_line.group(1)))
+    algorithms = {keys[key] for key in referenced if key in keys and key in trusted}
+    return {
+        NTP_CONFIGURED: configured,
+        NTP_AUTHENTICATED: bool(algorithms),
+        NTP_MD5_AUTHENTICATION: "md5" in algorithms,
+    }
+
+
+def _ntp_key_reference(tail: str) -> int | None:
+    """The key number an NTP server or peer line names, or None."""
+    tokens = tail.split()
+    for index, token in enumerate(tokens):
+        if token.lower() == "key" and index + 1 < len(tokens) and tokens[index + 1].isdigit():
+            return int(tokens[index + 1])
+    return None
+
+
+def _remote_syslog_servers(lines: list[str]) -> int:
+    """How many remote syslog servers are configured, never counting local logging."""
+    count = 0
+    for line in lines:
+        tokens = line.strip().lower().split()
+        if not tokens or tokens[0] != "logging":
+            continue
+        rest = tokens[1:]
+        if not rest:
+            continue
+        if rest[0] in {"host", "server"}:
+            count += int(bool(rest[1:]))
+        elif rest[0] not in _LOGGING_KEYWORDS:
+            count += 1
+    return count
+
+
+def _routing_authentication_missing(lines: list[str]) -> tuple[str, ...]:
+    """The routing protocols configured with no authentication, by fixed keyword."""
+    configured: set[str] = set()
+    authenticated: set[str] = set()
+    for line in lines:
+        text = line.strip()
+        protocol = _ROUTER_PROTOCOL.match(text)
+        if protocol is not None:
+            configured.add(protocol.group(1).upper())
+            continue
+        tokens = text.lower().split()
+        if _ospf_authenticated(tokens):
+            authenticated.add("OSPF")
+        if _eigrp_authenticated(tokens):
+            authenticated.add("EIGRP")
+        if tokens[:1] == ["neighbor"] and "password" in tokens[1:]:
+            authenticated.add("BGP")
+    return tuple(sorted(configured - authenticated))
+
+
+def _ospf_authenticated(tokens: list[str]) -> bool:
+    """Whether an OSPF line turns authentication on, in an area, a virtual link or an interface."""
+    if tokens[:1] == ["area"] and "authentication" in tokens[2:]:
+        return True
+    if tokens[:3] != ["ip", "ospf", "authentication"]:
+        return False
+    return not tokens[3:] or tokens[3] != "null"
+
+
+def _eigrp_authenticated(tokens: list[str]) -> bool:
+    """Whether an EIGRP line turns authentication on, in the router or on an interface."""
+    if tokens[:2] in (["authentication", "mode"], ["authentication", "key-chain"]):
+        return True
+    return tokens[:3] in (
+        ["ip", "authentication", "mode"],
+        ["ip", "authentication", "key-chain"],
+    )
+
+
+def _fhrp_facts(lines: list[str]) -> dict[str, FactValue]:
+    """How many FHRP groups are configured, and how many have no authentication."""
+    groups: dict[tuple[str, int], list[bool]] = {}
+    for _, body in _interface_blocks(lines):
+        current: tuple[str, int] | None = None
+        current_indent = -1
+        for indent, text in body:
+            block = _BLOCK_FHRP.match(text)
+            if block is not None:
+                current = (block.group(1).upper(), int(block.group(2)))
+                groups.setdefault(current, [False, False])
+                current_indent = indent
+                continue
+            flat = _FLAT_FHRP.match(text)
+            if flat is not None:
+                key = (flat.group(1).upper(), int(flat.group(2)))
+                state = groups.setdefault(key, [False, False])
+                command = flat.group(3).lower()
+                if command.startswith("ip "):
+                    state[0] = True
+                elif command.startswith("authentication"):
+                    state[1] = True
+                current = None
+                continue
+            if current is not None and indent > current_indent:
+                command = text.lower()
+                if command.startswith(("ip ", "address ")):
+                    groups[current][0] = True
+                elif command.startswith("authentication"):
+                    groups[current][1] = True
+            else:
+                current = None
+    configured = [state for state in groups.values() if state[0]]
+    return {
+        FHRP_GROUPS: len(configured),
+        FHRP_GROUPS_WITHOUT_AUTHENTICATION: sum(
+            1 for _, authenticated in configured if not authenticated
+        ),
+    }
+
+
+def _icmp_facts(platform: Platform, lines: list[str]) -> dict[str, FactValue]:
+    """How many L3 interfaces have each insecure ICMP setting, by the Platform's default."""
+    redirects = unreachables = proxy_arp = 0
+    for _, body in _interface_blocks(lines):
+        commands = {text.lower() for _, text in body}
+        if not any(_L3_ADDRESS.match(text) for _, text in body):
+            continue
+        redirects += int("no ip redirects" not in commands)
+        unreachables += int("no ip unreachables" not in commands)
+        if platform is Platform.NX_OS:
+            proxy_arp += int("ip proxy-arp" in commands)
+        else:
+            proxy_arp += int("no ip proxy-arp" not in commands)
+    return {
+        ICMP_REDIRECTS_L3_INTERFACES: redirects,
+        ICMP_UNREACHABLES_L3_INTERFACES: unreachables,
+        PROXY_ARP_L3_INTERFACES: proxy_arp,
+    }
+
+
+def _interface_blocks(lines: list[str]) -> list[tuple[str, list[tuple[int, str]]]]:
+    """Every top-level `interface` block, as its header and (indent, stripped) settings."""
+    blocks: list[tuple[str, list[tuple[int, str]]]] = []
+    header: str | None = None
+    body: list[tuple[int, str]] = []
+    for raw in lines:
+        if not raw.strip() or raw.lstrip().startswith("!"):
+            continue
+        text = raw.strip()
+        if not raw[:1].isspace():
+            if header is not None:
+                blocks.append((header, body))
+                header, body = None, []
+            if text.lower().startswith("interface "):
+                header = text
+            continue
+        if header is not None:
+            body.append((len(raw) - len(raw.lstrip()), text))
+    if header is not None:
+        blocks.append((header, body))
+    return blocks
 
 
 def _snmp_facts(lines: list[str]) -> dict[str, FactValue]:

@@ -285,6 +285,87 @@ HARDENING_CANARIES = (
     "CANARY-cfg-96-nxos-auth",
 )
 
+# Running configs with the NTP, syslog, routing, FHRP and ICMP facts (#101). Every key,
+# key-string and password carries a canary, so a test can prove none of it reaches a fact,
+# a record or a Finding.
+SERVICE_CANARIES = (
+    "CANARY-cfg-101-a1b2-ntp-md5",
+    "CANARY-cfg-101-a1b2-ntp-sha",
+    "CANARY-cfg-101-a1b2-fhrp",
+    "CANARY-cfg-101-a1b2-bgp",
+)
+
+IOS_XE_SERVICES_CONFIG = """\
+Building configuration...
+
+Current configuration : 2048 bytes
+!
+version 17.9
+hostname sw-a
+!
+ntp authentication-key 1 md5 CANARY-cfg-101-a1b2-ntp-md5
+ntp authenticate
+ntp trusted-key 1
+ntp server 192.0.2.10 key 1
+!
+logging host 192.0.2.20
+logging buffered 64000
+logging trap warnings
+!
+router ospf 1
+ network 192.0.2.0 0.0.0.255 area 0
+ neighbor 192.0.2.2
+!
+router bgp 65000
+ neighbor 192.0.2.3 password 7 CANARY-cfg-101-a1b2-bgp
+!
+interface Vlan10
+ description to sw-b
+ ip address 192.0.2.1 255.255.255.0
+ standby 1 ip 192.0.2.254
+ standby 1 authentication md5 key-string CANARY-cfg-101-a1b2-fhrp
+!
+interface Vlan20
+ ip address 198.51.100.1 255.255.255.0
+ no ip redirects
+ no ip unreachables
+ no ip proxy-arp
+!
+interface GigabitEthernet1/0/1
+ description access port
+ switchport
+!
+end
+"""
+
+NXOS_SERVICES_CONFIG = """\
+!Command: show running-config
+!Running configuration last done at: Wed Nov 18 10:15:30 2026
+
+version 9.3(8) Bios:version
+hostname nx-a
+feature ospf
+feature hsrp
+no password strength-check
+logging server 192.0.2.20
+ntp authentication-key 1 sha256 CANARY-cfg-101-a1b2-ntp-sha
+ntp trusted-key 1
+ntp server 192.0.2.10 key 1
+router ospf 1
+  router-id 192.0.2.1
+
+interface Vlan10
+  no shutdown
+  ip address 192.0.2.1/24
+  ip proxy-arp
+  hsrp 1
+    ip 192.0.2.254
+    authentication md5 key-string CANARY-cfg-101-a1b2-fhrp
+
+interface Ethernet1/1
+  ip address 198.51.100.1/24
+"""
+
 IOS_XE_HARDENING_CONFIG = """\
 Building configuration...
 
