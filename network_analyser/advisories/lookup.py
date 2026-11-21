@@ -3,10 +3,11 @@
 One request per distinct question. EoX takes 20 values per call and Software Suggestion 10;
 openVuln takes one release at a time, and the compatible list one chassis PID at a time, paged
 (#127). Every value is de-duplicated again here, and every value
-is checked against its pattern before a Session is made. A value out of pattern refuses the
-whole lookup with nothing sent: the questions are built from pattern-checked device data
-(ticket #104), so one that arrives here is a bug or an attack, and either way it must not
-leave the PC (story 13).
+is checked against its pattern before a Session is made. A value out of pattern is dropped
+on its own and never sent, and the rest of the lookup is still asked: the questions are built
+from pattern-checked device data (ticket #104), so one that arrives here is a bug or an
+attack, and either way it must not leave the PC (story 13, #130). Only when no value is left
+is the call refused whole, with nothing sent.
 
 `check_api_key` is the same token request on its own, for `cisco-key set` (ticket #103).
 """
@@ -19,6 +20,7 @@ from network_analyser.advisories.patterns import (
     is_safe_pid,
     is_safe_platform_alias,
     is_safe_release,
+    wire_pid,
 )
 from network_analyser.advisories.proxy import ProxyConfig
 from network_analyser.advisories.replies import (
@@ -62,6 +64,9 @@ EOX_BATCH_SIZE: Final = 20
 SUGGESTION_BATCH_SIZE: Final = 10
 """Cisco's Software Suggestion limit: 10 base PIDs per call (story 18)."""
 
+EOX_BY_PID: Final = "EOXByProductID"
+EOX_BY_RELEASE: Final = "EOXBySWReleaseString"
+
 EOX_MAX_PAGES: Final = 20
 """The most pages one EoX batch may take: a reply naming more is refused, not chased."""
 
@@ -96,10 +101,11 @@ def ask_cisco(  # noqa: PLR0913 (the one Run call, every dependency explicit)
     `SourceUnavailable`, so a rejected key never reads as "nothing found".
     """
     distinct = _distinct(questions)
-    if not _all_safe(distinct):
-        return _refused(distinct)
     if _is_empty(distinct):
         return _nothing_asked()
+    sendable = _sendable(distinct)
+    if _is_empty(sendable):
+        return _refused(distinct)
     session = Session(
         client_id,
         client_secret,
@@ -111,13 +117,25 @@ def ask_cisco(  # noqa: PLR0913 (the one Run call, every dependency explicit)
     result = session.token()
     if result.outcome is not TokenOutcome.OK:
         reason = session.token_reason or UNAVAILABLE
-        return _unavailable(distinct, reason, session.tally())
+        return _unavailable(sendable, reason, session.tally())
     return CiscoAnswers(
-        advisories=tuple(_advisory(session, question) for question in distinct.releases),
-        compatible=_compatible(session, distinct.compatible_pids),
-        hardware_eox=_eox(session, "EOXByProductID", distinct.hardware_pids),
-        software_eox=_eox(session, "EOXBySWReleaseString", distinct.software_releases),
-        suggestions=_suggestions(session, distinct.suggestion_pids),
+        advisories=tuple(_advisory(session, question) for question in sendable.releases),
+        compatible=(
+            _all_refused(distinct.compatible_pids, sendable.compatible_pids)
+            or _compatible(session, sendable.compatible_pids)
+        ),
+        hardware_eox=(
+            _all_refused(distinct.hardware_pids, sendable.hardware_pids)
+            or _eox(session, EOX_BY_PID, sendable.hardware_pids)
+        ),
+        software_eox=(
+            _all_refused(distinct.software_releases, sendable.software_releases)
+            or _eox(session, EOX_BY_RELEASE, sendable.software_releases)
+        ),
+        suggestions=(
+            _all_refused(distinct.suggestion_pids, sendable.suggestion_pids)
+            or _suggestions(session, sendable.suggestion_pids)
+        ),
         tally=session.tally(),
     )
 
@@ -163,7 +181,8 @@ def _eox(session: Session, kind: str, values: Sequence[str]) -> EoxAnswer | Sour
     for batch in _batches(values, EOX_BATCH_SIZE):
         page = 1
         while True:
-            path = f"/supporttools/eox/rest/5/{kind}/{page}/{','.join(batch)}"
+            wire = ",".join(wire_pid(value) if kind == EOX_BY_PID else value for value in batch)
+            path = f"/supporttools/eox/rest/5/{kind}/{page}/{wire}"
             call = session.get(CiscoEndpoint.EOX, path, values=len(batch))
             if call.outcome is not CallOutcome.OK or call.response is None:
                 return SourceUnavailable(call.reason or UNAVAILABLE)
@@ -196,7 +215,8 @@ def _compatible(session: Session, values: Sequence[str]) -> CompatibleAnswers | 
         releases: list[CompatibleRelease] = []
         while True:
             path = (
-                f"/software/suggestion/v2/suggestions/compatible/productId/{pid}?pageIndex={page}"
+                "/software/suggestion/v2/suggestions/compatible/productId/"
+                f"{wire_pid(pid)}?pageIndex={page}"
             )
             call = session.get(
                 CiscoEndpoint.COMPATIBLE,
@@ -230,7 +250,8 @@ def _suggestions(session: Session, values: Sequence[str]) -> SuggestionsAnswer |
     answers: list[SuggestionAnswer] = []
     unanswered: list[SuggestionUnanswered] = []
     for batch in _batches(values, SUGGESTION_BATCH_SIZE):
-        path = f"/software/suggestion/v2/suggestions/releases/productIds/{','.join(batch)}"
+        wire = ",".join(wire_pid(pid) for pid in batch)
+        path = f"/software/suggestion/v2/suggestions/releases/productIds/{wire}"
         call = session.get(CiscoEndpoint.SUGGESTION, path, values=len(batch))
         if call.outcome is not CallOutcome.OK or call.response is None:
             return SourceUnavailable(call.reason or UNAVAILABLE)
@@ -269,14 +290,29 @@ def _distinct_values(values: Iterable[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(values))
 
 
-def _all_safe(questions: LookupQuestions) -> bool:
-    return (
-        all(_release_is_safe(question) for question in questions.releases)
-        and all(is_safe_pid(pid) for pid in questions.hardware_pids)
-        and all(is_safe_release(release) for release in questions.software_releases)
-        and all(is_safe_pid(pid) for pid in questions.suggestion_pids)
-        and all(is_safe_pid(pid) for pid in questions.compatible_pids)
+def _sendable(questions: LookupQuestions) -> LookupQuestions:
+    """Return the questions with every value out of pattern removed, and nothing else changed.
+
+    Each value is judged alone: one odd PID or release is dropped, never sent and never
+    echoed, and the others are still asked (#130).
+    """
+    return LookupQuestions(
+        releases=tuple(question for question in questions.releases if _release_is_safe(question)),
+        hardware_pids=tuple(pid for pid in questions.hardware_pids if is_safe_pid(pid)),
+        software_releases=tuple(
+            release for release in questions.software_releases if is_safe_release(release)
+        ),
+        suggestion_pids=tuple(pid for pid in questions.suggestion_pids if is_safe_pid(pid)),
+        compatible_pids=tuple(pid for pid in questions.compatible_pids if is_safe_pid(pid)),
     )
+
+
+def _all_refused(asked: Sequence[str], sendable: Sequence[str]) -> SourceUnavailable | None:
+    """Say so when a source was asked about values and none of them could be sent.
+
+    An empty answer would read as "Cisco named nothing", so the source says why it has none.
+    """
+    return SourceUnavailable(REFUSED) if asked and not sendable else None
 
 
 def _release_is_safe(question: ReleaseQuestion) -> bool:

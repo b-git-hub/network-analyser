@@ -46,3 +46,10 @@ Decided on [Latest Release and Upgrade Target, given what Cisco provides](https:
 - **What is sent** also includes a **Nexus series alias** (such as `NEXUS9000`), worked out from the model, as openVuln's `platformAlias` on NX-OS queries. It reveals less than the chassis PID, which is already sent, and it is pattern-checked like every other value.
 - **Software Suggestion** is asked for the Latest Release through its compatible-releases call, which takes **one chassis PID per call** and is paged, at most 20 pages per PID. The "10 PIDs per Suggestion call" batch applies only to the Suggested-releases call.
 - **`currentRelease` is never sent.** It would pair a model with the release it runs, and every value goes out on its own.
+
+## Amendment (2026-11-22)
+
+Decided on [one PID and release pattern for analysis and advisories](https://github.com/b-git-hub/network-analyser/issues/130). The decision is unchanged; two points of wording change.
+
+- **One value, one pattern, one refusal.** `analysis` and `advisories` read the same patterns (`records.lookup_values`). A value that does not match is dropped on its own and is never sent; the rest of the lookup is still asked, and the device whose PID was dropped reads "could not check" (the Suggested Release Check says the PID was not sent). The call is refused whole only when no value is left.
+- **A licence-suffixed PID** such as `ISR4451-X/K9` is a PID. One `/` and a short suffix are allowed in the value, and that `/` is the only character written percent-encoded (`%2F`) in a request path. Any other `%`, `/`, `?`, `&`, `#`, `..`, control character or non-ASCII character fails the pattern.
