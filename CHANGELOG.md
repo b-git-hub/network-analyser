@@ -10,6 +10,28 @@ The release workflow publishes a version's entry as its release notes, so every 
 
 The workflow adds the system requirements, the unsigned-build warning, the download check, the sizes and the install steps itself.
 
+## [0.3.0] - 2026-11-21
+
+### Breaking changes
+
+- `topology.json` is now format version 3: every Visited Device carries its advice record, including the count of Advisories its Upgrade Target does not clear, and the Upgrade Target is each Advisory's first fix above the running release rather than the newest fix in the Train. A 0.2.0 `render` would draw a partial target as if it cleared every Advisory, so it refuses a 0.3.0 Run folder; render an old Run folder with its own version. The 0.3.0 `render` still reads format versions 1 and 2 (#124; story 43).
+
+### Allow-list and Device Role
+
+None.
+
+### Changed
+
+- **Release order and Trains follow Cisco's numbering** (#123): a plain release sorts before its lettered or special build, and that sorts before the next release, so `17.12.7 < 17.12.7a < 17.12.7b < 17.12.8`, `26.1.2 < 26.1.2s1 < 26.1.3` and `10.6(3) < 10.6(3s) < 10.6(4)`. One sort key serves IOS-XE, NX-OS and classic IOS. A release's Train is its first two numbers (`17.12`, `10.4`); a classic IOS Train keeps its Train letter (`15.2E`), and an NX-OS release with an `I<n>` segment keeps that segment (`7.0(3)I7`, not `7.0`). The Consistency Checks, the Upgrade Target and the Latest Release all use this one rule.
+- **The Upgrade Target is the first release that clears the Advisories** (#124): each Critical and High Advisory's fix is the lowest first-fixed release in the device's Train that is above the running release, and the target is the highest of those. Fixes at or below the running release count as no fix in the Train, and the tool still never picks another Train. When some Advisories have no fix in the Train, the target says how many it leaves open — "does not clear N Advisories: no fix in Train T"; when none is cleared it reads "no fix in Train T"; with no Critical/High Advisories it reads "no Critical/High Advisories". Each Advisory Finding's "first fixed in Train T" line uses the same per-Advisory rule, so the Finding and the target agree.
+- **NX-OS devices get an Upgrade Target** (#126): it comes from each Advisory's `platforms[].firstFixes`, taken from the one entry whose name matches the device's own Nexus series, under the same per-Advisory rule and not-cleared count as IOS-XE. An unnamed entry is ignored, and no series, no matching entry or two matching entries give `not available` rather than a guess. Cisco's `platforms[].name` text is used for the Nexus 9000, 5000, 7000 and 3000 series; the Nexus 3000 mapping is an inference from Cisco's naming, and the Nexus 7700 and 2000 texts could not be confirmed, so those two series stay `not available`.
+- **The Latest Release is Cisco's compatible list, not only its Suggested releases** (#127): it is the highest release, by version order, that the compatible-releases call lists for the device's chassis PID, shown both in the device's Train and overall with Cisco's lifecycle code beside each (for example `26.2.1 (ED)`). Every listed release counts, whatever its lifecycle or build, and dates are never used. A device running above everything listed reads "running release is newer than Cisco's list"; an unknown, rejected or unanswered PID, the 20-page cap or an outage reads `not available`, and the page cap is not a Needs-attention line. The Suggested Release Check and its call are unchanged, and no per-OS list such as `OS_data` is used.
+- **Every surface shows the same advice** (#124, #127): the Findings report's Upgrade Target callout names the partial target and the count it leaves open, and its Latest Release reads "Latest Release in Train: X (LC); overall: Y (LC)"; the Map tag adds "(no fix in Train)" whenever an Advisory is left open, with the legend explaining the combined tag; the Findings tab's Advisory detail pane and the Run report show the same values; and `topology.json` carries them, so `render` redraws every surface the same way. No surface layout changed.
+
+### Security
+
+- **The new lookup sends less, and proves it** (ADR 0007 amendment, 2026-11-21): the compatible-releases call sends one de-duplicated chassis PID per call, paged, and the NX-OS series alias joins the values that are pattern-checked before they are sent. `currentRelease` is never sent, so Cisco is never told which release a model runs. The Audit log counts calls, values and pages per endpoint and never records the PIDs or the alias themselves.
+
 ## [0.2.0] - 2026-11-21
 
 ### Breaking changes
