@@ -8,10 +8,10 @@ when a source it needs was unavailable (story 10), and then the reason is record
 New Checks are added to `CHECKS`; nothing else in `analysis` needs to change.
 """
 
-from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Final
 
+from network_analyser.analysis.definition import CheckDefinition
+from network_analyser.analysis.hardening import HARDENING_CHECKS
 from network_analyser.analysis.ids import finding_id
 from network_analyser.records.analysis import AnalysisInput
 from network_analyser.records.topology import (
@@ -31,19 +31,6 @@ MODEL_DRIFT_CHECK: Check = Check(
     CheckType.CONSISTENCY,
 )
 """Story 70: one network-wide Low Finding per model running more than one release."""
-
-
-@dataclass(frozen=True, slots=True)
-class CheckDefinition:
-    """One shipped Check and the function that raises its Findings.
-
-    Attributes:
-        check: its stable identity, shown on every Finding it raises.
-        run: returns every Finding it raises for the Run.
-    """
-
-    check: Check
-    run: Callable[[AnalysisInput], tuple[Finding, ...]]
 
 
 def model_drift(data: AnalysisInput) -> tuple[Finding, ...]:
@@ -100,5 +87,8 @@ def _name(device: VisitedDevice) -> str:
     return device.hostname if isinstance(device.hostname, str) else device.id
 
 
-CHECKS: tuple[CheckDefinition, ...] = (CheckDefinition(MODEL_DRIFT_CHECK, model_drift),)
+CHECKS: tuple[CheckDefinition, ...] = (
+    CheckDefinition(MODEL_DRIFT_CHECK, model_drift),
+    *HARDENING_CHECKS,
+)
 """Every shipped Check. Order does not matter: results are sorted by Check id."""

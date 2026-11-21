@@ -120,7 +120,7 @@ def save_topology(
     ride the same file. Returns False, after a fixed warning, if the file could not be written.
     """
     built = topology.build(records, scope=scope)
-    results = run_analysis.analysed(built)
+    results = run_analysis.analysed(built, records)
     built = dataclasses.replace(
         built,
         findings=results.findings,

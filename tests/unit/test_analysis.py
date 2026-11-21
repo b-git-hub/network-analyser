@@ -40,6 +40,16 @@ B = "192.0.2.2"
 C = "192.0.2.3"
 D = "192.0.2.4"
 MODEL = "C9300-48P"
+HARDENING_CHECKS = (
+    "hardening-enable-secret",
+    "hardening-http-server",
+    "hardening-insecure-mode",
+    "hardening-legacy-services",
+    "hardening-snmp-v1-v2c",
+    "hardening-snmp-v3-priv",
+    "hardening-telnet",
+    "hardening-weak-secret-types",
+)
 
 
 def _device(
@@ -151,7 +161,10 @@ def test_unvisited_devices_get_no_analysis() -> None:
 def test_every_shipped_check_runs_and_one_advice_record_exists_per_visited_device() -> None:
     results = _results(_device(A, "S1", "sw-a"), _device(B, "S2", "sw-b"))
 
-    assert [run.check.id for run in results.checks] == ["consistency-model-drift"]
+    assert [run.check.id for run in results.checks] == [
+        "consistency-model-drift",
+        *HARDENING_CHECKS,
+    ]
     assert all(run.ran for run in results.checks)
     assert all(run.reason is None for run in results.checks)
     assert [advice.device for advice in results.advice] == ["dev-S1", "dev-S2"]
@@ -170,7 +183,10 @@ def test_a_source_unavailable_says_why_and_raises_no_per_device_findings() -> No
     assert advice.latest_release_in_train == "not available"
     assert advice.latest_release == "not available"
     assert advice.upcoming_eox == ()
-    assert results.findings == ()
+    # A Cisco outage raises no Advisory or Consistency Finding; the hardening Checks still
+    # run, and with no config facts each says it could not decide rather than passing.
+    assert all(finding.check.type is CheckType.CONFIGURATION for finding in results.findings)
+    assert all("Could not decide" in finding.what_was_found for finding in results.findings)
 
 
 def test_cisco_answers_are_either_an_answer_or_unavailable() -> None:
@@ -281,7 +297,10 @@ def test_the_results_fit_topology_json_as_optional_fields() -> None:
     assert advice[0]["upgrade_target"] == "not available"
     checks = analysis_record["checks"]
     assert isinstance(checks, list)
-    assert [item["check"]["id"] for item in checks] == ["consistency-model-drift"]
+    assert [item["check"]["id"] for item in checks] == [
+        "consistency-model-drift",
+        *HARDENING_CHECKS,
+    ]
     assert checks[0]["ran"] is True
 
 

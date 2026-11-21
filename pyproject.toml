@@ -83,6 +83,9 @@ ignore = [
 # The one file that makes HTTP requests: the fenced transport (#95). The arch tests still
 # keep environment reads, exception text and file writes out of it.
 "network_analyser/advisories/transport.py" = ["TID251"]
+# The published config-fact names are named for what they count ("secret_type_5") but hold
+# only a name, never a secret (#96).
+"network_analyser/records/config_facts.py" = ["S105"]
 "tests/**" = [
     "S101",    # assert is how pytest checks
     "S105",    # synthetic CANARY values are named like secrets on purpose
