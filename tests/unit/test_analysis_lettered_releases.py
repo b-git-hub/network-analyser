@@ -35,7 +35,8 @@ from network_analyser.records.topology import (
     FindingLevel,
 )
 from network_analyser.records.unknown import Unknown
-from tests.support.topology_records import visited
+from tests.support.analysis_records import collected_of
+from tests.support.topology_records import chassis_inventory, visited
 
 XE_MODEL = "C9300-48P"
 CLASSIC_MODEL = "WS-C2960X-48FPD-L"
@@ -57,10 +58,17 @@ LETTERED = [
 
 
 def _device(platform: Platform, model: str, release: str, serial: str = "S1") -> DeviceRecord:
-    record = visited("192.0.2.1", serial, "sw-a", platform=platform)
+    """A device as the real readers record it: a Nexus's PID is in its inventory (#134).
+
+    For NX-OS `model` is the chassis PID; its `show version` model has no series prefix.
+    """
+    nexus = platform is Platform.NX_OS
+    inventory = chassis_inventory(model) if nexus else None
+    record = visited("192.0.2.1", serial, "sw-a", platform=platform, inventory=inventory)
     version = record.version
     assert version is not None
-    return replace(record, version=replace(version, model=model, software_version=release))
+    shown = model.removeprefix("N9K-") if nexus else model
+    return replace(record, version=replace(version, model=shown, software_version=release))
 
 
 def _advisory(train: str, fix: str, *, series: str | None) -> AdvisoryAnswer:
@@ -90,13 +98,16 @@ def _analyse(
     return analysis.analyse(
         AnalysisInput(
             topology=topology.build((device,)),
+            collected=collected_of(device),
             answers=CiscoAnswers(advisories=answers, compatible=compatible),
         )
     )
 
 
 def _question_release(device: DeviceRecord) -> tuple[OsType, str, str | None]:
-    questions = analysis.lookup_questions(AnalysisInput(topology=topology.build((device,))))
+    questions = analysis.lookup_questions(
+        AnalysisInput(topology=topology.build((device,)), collected=collected_of(device))
+    )
     (question,) = questions.releases
     return question.os_type, question.release, question.hardware_family
 
