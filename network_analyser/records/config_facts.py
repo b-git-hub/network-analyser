@@ -19,10 +19,22 @@ from network_analyser.records.unknown import Unknown
 __all__ = [
     "ENABLE_PASSWORD",
     "ENABLE_SECRET",
+    "FHRP_GROUPS",
+    "FHRP_GROUPS_WITHOUT_AUTHENTICATION",
     "HTTP_SERVER",
+    "ICMP_REDIRECTS_L3_INTERFACES",
+    "ICMP_UNREACHABLES_L3_INTERFACES",
     "INSECURE_MODE",
     "IP_SOURCE_ROUTE",
     "LEGACY_SERVICES",
+    "LOGIN_BLOCK_FOR",
+    "NTP_AUTHENTICATED",
+    "NTP_CONFIGURED",
+    "NTP_MD5_AUTHENTICATION",
+    "PASSWORD_STRENGTH_CHECK",
+    "PROXY_ARP_L3_INTERFACES",
+    "REMOTE_SYSLOG_SERVERS",
+    "ROUTING_AUTHENTICATION_MISSING",
     "SECRET_TYPE_0",
     "SECRET_TYPE_4",
     "SECRET_TYPE_5",
@@ -93,6 +105,30 @@ SNMP_V3_GROUPS_WITHOUT_PRIV: Final = "snmp_v3_groups_without_priv"
 """How many SNMPv3 groups are configured below the `priv` security level."""
 SNMP_GLOBAL_ENFORCE_PRIV: Final = "snmp_global_enforce_priv"
 """True when `snmp-server globalEnforcePriv` is set (NX-OS only)."""
+NTP_CONFIGURED: Final = "ntp_configured"
+"""True when an NTP server, peer or master is configured."""
+NTP_AUTHENTICATED: Final = "ntp_authenticated"
+"""True when a configured NTP server or peer uses a trusted authentication key."""
+NTP_MD5_AUTHENTICATION: Final = "ntp_md5_authentication"
+"""True when the authentication key NTP uses is MD5."""
+REMOTE_SYSLOG_SERVERS: Final = "remote_syslog_servers"
+"""How many remote syslog servers are configured."""
+PASSWORD_STRENGTH_CHECK: Final = "password_strength_check"
+"""True when NX-OS password strength-check is on, its default; False with `no ...`."""
+LOGIN_BLOCK_FOR: Final = "login_block_for"
+"""True when `login block-for` brute-force protection is configured (IOS/IOS-XE only)."""
+ROUTING_AUTHENTICATION_MISSING: Final = "routing_authentication_missing"
+"""The routing protocols configured with no authentication, by fixed keyword."""
+FHRP_GROUPS: Final = "fhrp_groups"
+"""How many HSRP, VRRP or GLBP groups are configured with an address."""
+FHRP_GROUPS_WITHOUT_AUTHENTICATION: Final = "fhrp_groups_without_authentication"
+"""How many configured FHRP groups have no authentication."""
+ICMP_REDIRECTS_L3_INTERFACES: Final = "icmp_redirects_l3_interfaces"
+"""How many L3 interfaces have ICMP redirects enabled."""
+ICMP_UNREACHABLES_L3_INTERFACES: Final = "icmp_unreachables_l3_interfaces"
+"""How many L3 interfaces have ICMP unreachables enabled."""
+PROXY_ARP_L3_INTERFACES: Final = "proxy_arp_l3_interfaces"
+"""How many L3 interfaces have proxy ARP enabled, by each Platform's own default."""
 
 type FactValue = bool | int | str | tuple[str, ...] | Unknown
 """One config fact's value. It may be `Unknown` when the fact could not be read."""

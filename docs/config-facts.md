@@ -40,6 +40,18 @@ The facts ride `DeviceRecord.config_facts`; the cli puts them in `AnalysisInput.
 | `snmp_v3_users_without_priv` | `int` | both | How many of them have no privacy protocol. |
 | `snmp_v3_groups_without_priv` | `int` | both | SNMPv3 groups configured below the `priv` security level. |
 | `snmp_global_enforce_priv` | `bool` | NX-OS | `snmp-server globalEnforcePriv` is set. |
+| `ntp_configured` | `bool` | both | An NTP server, peer or master is configured. |
+| `ntp_authenticated` | `bool` | both | A configured server or peer uses an authentication key that is also trusted. |
+| `ntp_md5_authentication` | `bool` | both | The key NTP uses is MD5. |
+| `remote_syslog_servers` | `int` | both | Remote syslog servers configured; local logging commands never count. |
+| `password_strength_check` | `bool` | NX-OS | `no password strength-check` turns it off; its absence means on, the default. |
+| `login_block_for` | `bool` | IOS/IOS-XE | `login block-for` brute-force protection is configured. |
+| `routing_authentication_missing` | `tuple[str, ...]` | both | The routing protocols configured with no authentication, by keyword (`OSPF`, `EIGRP`, `BGP`). |
+| `fhrp_groups` | `int` | both | HSRP, VRRP or GLBP groups configured with an address. |
+| `fhrp_groups_without_authentication` | `int` | both | How many of those have no authentication. |
+| `icmp_redirects_l3_interfaces` | `int` | both | L3 interfaces with ICMP redirects enabled. |
+| `icmp_unreachables_l3_interfaces` | `int` | both | L3 interfaces with ICMP unreachables enabled. |
+| `proxy_arp_l3_interfaces` | `int` | both | L3 interfaces with proxy ARP enabled, by each Platform's own default (IOS on, NX-OS off). |
 
 ## The Checks that read them (#96)
 
@@ -54,4 +66,16 @@ The facts ride `DeviceRecord.config_facts`; the cli puts them in `AnalysisInput.
 | `hardening-http-server` | High | `http_server` |
 | `hardening-legacy-services` | High | `ip_source_route`, `legacy_services` |
 
-A fact that was not read makes the Check raise a Low "could not decide" Finding, never a silent pass (story 6). Later batches ([#100](https://github.com/b-git-hub/network-analyser/issues/100), [#101](https://github.com/b-git-hub/network-analyser/issues/101), [#102](https://github.com/b-git-hub/network-analyser/issues/102)) add their own facts alongside these and use the same names for any they share.
+## The Checks that read the service facts (#101)
+
+| Check id | Level | Facts | Gate |
+|---|---|---|---|
+| `hardening-ntp` | Medium | `ntp_configured`, `ntp_authenticated`, `ntp_md5_authentication` | Always runs; authentication is read only when NTP is configured. |
+| `hardening-remote-syslog` | Medium | `remote_syslog_servers` | Always runs. |
+| `hardening-strength-check` | Medium | `password_strength_check` | NX-OS only. |
+| `hardening-brute-force` | Medium | `login_block_for` | IOS/IOS-XE, classic IOS included. |
+| `hardening-routing-authentication` | Medium | `routing_authentication_missing` | Only where the device has a live OSPF, EIGRP or BGP neighbour; each protocol is judged on its own. |
+| `hardening-fhrp-authentication` | Medium | `fhrp_groups`, `fhrp_groups_without_authentication` | Only configured groups. |
+| `hardening-icmp` | Low | `icmp_redirects_l3_interfaces`, `icmp_unreachables_l3_interfaces`, `proxy_arp_l3_interfaces` | Only where an L3 interface is up. |
+
+A fact that was not read makes the Check raise a Low "could not decide" Finding, never a silent pass (story 6). Later batches ([#100](https://github.com/b-git-hub/network-analyser/issues/100), [#102](https://github.com/b-git-hub/network-analyser/issues/102)) add their own facts alongside these and use the same names for any they share.
