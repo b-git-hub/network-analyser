@@ -20,6 +20,9 @@ A dated, historical record kept by the coordinating (chief-of-staff) session and
 - [operator-wants-cml-build](operator-wants-cml-build.md): 2026-11-18 standing instruction to finish a CML-testable Windows build unattended.
 - [delivery-one-draft-pr](delivery-one-draft-pr.md): spec #37 ships as one draft PR from the integration branch.
 
+## Releases
+- [release-0.2.0-2026-11-21](release-0.2.0-2026-11-21.md): release 0.2.0 (2026-11-21): version, changelog, lab Device Role and checklist, and the gates it passed.
+
 ## Reference snapshots
 - [config-facts](../config-facts.md): the secret-free config-fact vocabulary and the Checks that read it, for #96 and #100 (2026-11-21).
 - [spec-37-notes/architecture](spec-37-notes/architecture.md): module map, records, file formats, CLI (2026-11-18).

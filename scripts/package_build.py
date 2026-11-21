@@ -1,7 +1,7 @@
 """Zip the one-folder build and write SHA256SUMS.txt (ticket #44, decision #32).
 
     python -m scripts.package_build --build-dir dist/network-analyser --dist-dir dist
-        --version 0.1.0
+        --version 0.2.0
 
 The zip holds the build folder's contents at its root, so it unzips straight into
 the per-version folder under `%LOCALAPPDATA%/Programs/NetworkAnalyser/` (decision #32
