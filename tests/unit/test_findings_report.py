@@ -133,6 +133,8 @@ def _advised(  # noqa: PLR0913 (each part of the advice, by name)
     upgrade_target: str | None = "17.12.8",
     latest_release: str | None = "17.12.10",
     latest_in_train: str | None = "17.12.10",
+    latest_release_lifecycle: str | None = None,
+    latest_in_train_lifecycle: str | None = None,
     train: str | None = "17.12",
     **fields: object,
 ) -> object:
@@ -146,6 +148,8 @@ def _advised(  # noqa: PLR0913 (each part of the advice, by name)
             "upgrade_target": upgrade_target,
             "latest_release": latest_release,
             "latest_in_train": latest_in_train,
+            "latest_release_lifecycle": latest_release_lifecycle,
+            "latest_in_train_lifecycle": latest_in_train_lifecycle,
             "train": train,
         },
         **fields,
@@ -252,9 +256,52 @@ def test_the_upgrade_target_callout_and_the_latest_release_lead_the_sheet() -> N
 
     sheet = page[page.index('id="dev-S1"', page.index("</table>")) :]
     assert "Upgrade to 17.12.8 or later" in sheet
-    assert "Latest Release 17.12.10" in sheet
-    assert "latest in Train 17.12: 17.12.10" in sheet
+    assert "Latest Release in Train: 17.12.10; overall: 17.12.10" in sheet
     assert sheet.index("Upgrade to 17.12.8 or later") < sheet.index("</details>")
+
+
+def test_the_latest_release_shows_both_values_with_their_lifecycle_codes() -> None:
+    data = document(
+        [
+            _advised(
+                "dev-S1",
+                "sw-a",
+                "192.0.2.1",
+                latest_release="26.2.1",
+                latest_in_train="17.12.8",
+                latest_release_lifecycle="ED",
+                latest_in_train_lifecycle="MD",
+            )
+        ],
+        findings=[_advisory(ADVISORY_ID, "High", "dev-S1")],
+    )
+
+    page = _page(data)
+
+    assert "Latest Release in Train: 17.12.8 (MD); overall: 26.2.1 (ED)" in page
+
+
+def test_a_hostile_lifecycle_code_and_the_newer_text_are_escaped_and_shown() -> None:
+    data = document(
+        [
+            _advised(
+                "dev-S1",
+                "sw-a",
+                "192.0.2.1",
+                latest_release="running release is newer than Cisco's list",
+                latest_in_train="running release is newer than Cisco's list",
+                latest_release_lifecycle=HOSTILE,
+                latest_in_train_lifecycle="MD",
+            )
+        ],
+        findings=[_advisory(ADVISORY_ID, "High", "dev-S1")],
+    )
+
+    page = _page(data)
+
+    assert "running release is newer than Cisco's list" in page
+    assert "&lt;/script&gt;" in page
+    assert HOSTILE not in page
 
 
 @pytest.mark.parametrize(

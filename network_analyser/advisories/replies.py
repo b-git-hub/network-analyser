@@ -16,6 +16,10 @@ from typing import Any, Final
 from network_analyser.records.cisco import (
     AdvisoriesAnswer,
     CiscoAdvisory,
+    CiscoPlatform,
+    CompatibleAnswer,
+    CompatibleRelease,
+    CompatibleUnanswered,
     EoxAnswer,
     EoxRecord,
     EoxUnanswered,
@@ -34,6 +38,7 @@ _CODE = re.compile(r"[A-Z][A-Z0-9_]{1,63}")
 _ERROR_KEY = re.compile(r"(?:SSA_ERR|S3)_[A-Za-z0-9_]{1,60}")
 _DATE_LIMIT: Final = 40
 _ID_LIMIT: Final = 96
+_LIFECYCLE_LIMIT: Final = 16
 _TITLE_LIMIT: Final = 300
 
 
@@ -119,6 +124,52 @@ def suggestion_answer(body: bytes) -> SuggestionsAnswer | SourceUnavailable:
     return SuggestionsAnswer(answers=tuple(answers), unanswered=tuple(unanswered))
 
 
+def compatible_answer(  # noqa: PLR0911 (one return per reply shape, each named)
+    product_id: str, body: bytes
+) -> CompatibleAnswer | CompatibleUnanswered | SourceUnavailable:
+    """Return the compatible releases for `product_id`, or why the reply cannot be used.
+
+    The entries sit under `suggestions`, each with `releaseFormat1`, `isSuggested`,
+    `releaseTrain` and `releaseLifeCycle`. A reply naming Cisco's error code is `unanswered`
+    for that one PID, never an outage of the source (#127).
+    """
+    document = _document(body)
+    if document is None:
+        return SourceUnavailable(NOT_JSON)
+    entries = document.get("suggestions")
+    if not isinstance(entries, list):
+        code = _reply_error(document)
+        if code is not None:
+            return CompatibleUnanswered(product_id=product_id, reason=code)
+        return SourceUnavailable(NOT_UNDERSTOOD)
+    releases: list[CompatibleRelease] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return SourceUnavailable(NOT_UNDERSTOOD)
+        code = _reply_error(entry)
+        if code is not None:
+            return CompatibleUnanswered(product_id=product_id, reason=code)
+        release = _compatible_release(entry)
+        if release is None:
+            return SourceUnavailable(NOT_UNDERSTOOD)
+        releases.append(release)
+    return CompatibleAnswer(product_id=product_id, releases=tuple(releases))
+
+
+def compatible_last_page(body: bytes) -> int:
+    """Return the last `pageIndex` Cisco's compatible reply names; 1 when it does not say."""
+    document = _document(body)
+    record = document.get("paginationResponseRecord") if document is not None else None
+    value = record.get("lastIndex") if isinstance(record, dict) else None
+    if isinstance(value, bool):
+        return 1
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, str) and value.isdigit() and int(value) > 0:
+        return int(value)
+    return 1
+
+
 def eox_last_page(body: bytes) -> int:
     """Return the last page Cisco's EoX reply says there is; 1 when it does not say."""
     document = _document(body)
@@ -155,6 +206,9 @@ def _advisory(entry: object) -> CiscoAdvisory | None:
     advisory_id = _optional_text(entry.get("advisoryId"))
     if advisory_id is None:
         return None
+    platforms = _platforms(entry.get("platforms"))
+    if platforms is None:
+        return None
     return CiscoAdvisory(
         advisory_id=advisory_id,
         title=_optional_text(entry.get("advisoryTitle")) or advisory_id,
@@ -164,7 +218,53 @@ def _advisory(entry: object) -> CiscoAdvisory | None:
         first_published=_optional_text(entry.get("firstPublished")) or "",
         last_updated=_optional_text(entry.get("lastUpdated")) or "",
         first_fixed=_texts(entry.get("firstFixed")),
+        platforms=platforms,
     )
+
+
+def _platforms(value: object) -> tuple[CiscoPlatform, ...] | None:
+    """The named `platforms[]` entries and their first fixes; None when the shape is odd.
+
+    NX-OS replies give first fixes per platform rather than per Advisory (#126). An entry with
+    no name is ignored, as Cisco's 2026 replies carry one (#120): it can never be a device's
+    series. A malformed entry makes the whole reply not understood, as everywhere else.
+    """
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        return None
+    platforms: list[CiscoPlatform] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            return None
+        raw_name = entry.get("name")
+        if raw_name is not None and not isinstance(raw_name, str):
+            return None
+        name = _optional_text(raw_name, limit=_ID_LIMIT)
+        if name is None:
+            continue
+        first_fixed = _platform_fixes(entry.get("firstFixes"))
+        if first_fixed is None:
+            return None
+        platforms.append(CiscoPlatform(name=name, first_fixed=first_fixed))
+    return tuple(platforms)
+
+
+def _platform_fixes(value: object) -> tuple[str, ...] | None:
+    """The releases in one platform's `firstFixes[]`; None when the shape is odd."""
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        return None
+    fixes: list[str] = []
+    for item in value:
+        if not isinstance(item, dict):
+            return None
+        name = _optional_text(item.get("name"), limit=_ID_LIMIT)
+        if name is None:
+            return None
+        fixes.append(name)
+    return tuple(fixes)
 
 
 def _eox_record(entry: dict[str, Any]) -> EoxRecord | None:
@@ -220,6 +320,21 @@ def _suggested_releases(entry: dict[str, Any]) -> tuple[SuggestedRelease, ...] |
             )
         )
     return tuple(releases)
+
+
+def _compatible_release(entry: dict[str, Any]) -> CompatibleRelease | None:
+    """One entry of a compatible list, or None when it names no release."""
+    release = _optional_text(entry.get("releaseFormat1")) or _optional_text(
+        entry.get("releaseFormat2")
+    )
+    if release is None:
+        return None
+    return CompatibleRelease(
+        release=release,
+        suggested=_suggested(entry.get("isSuggested")),
+        train=_optional_text(entry.get("releaseTrain")),
+        lifecycle=_optional_text(entry.get("releaseLifeCycle"), limit=_LIFECYCLE_LIMIT),
+    )
 
 
 def _reply_error(entry: dict[str, Any]) -> str | None:

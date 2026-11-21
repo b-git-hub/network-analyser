@@ -42,7 +42,7 @@ def test_the_document_starts_with_a_single_integer_format_version() -> None:
     document = _document()
 
     assert next(iter(document)) == "format_version"
-    assert document["format_version"] == topology.FORMAT_VERSION == 2
+    assert document["format_version"] == topology.FORMAT_VERSION == 3
 
 
 def test_the_document_is_plain_json_and_holds_no_username() -> None:
@@ -168,7 +168,7 @@ def test_a_finding_carries_its_level_check_advice_and_source() -> None:
     assert finding["source"] == "config"
     assert finding["cisco_detail"] is None
     assert finding["also_flagged_by_cisco"] is False
-    assert document["format_version"] == 2
+    assert document["format_version"] == 3
 
 
 def test_an_advisory_detail_is_written_as_its_own_object() -> None:

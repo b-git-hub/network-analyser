@@ -287,7 +287,13 @@ def test_the_analysis_audit_event_is_counts_only(
     ]
     assert analysis["findings_by_check"]
     assert analysis["token_outcome"] == "ok"
-    assert len(analysis["endpoints"]) == 4
+    assert len(analysis["endpoints"]) == 5
+    compatible = next(
+        endpoint
+        for endpoint in analysis["endpoints"]
+        if endpoint[0] == "Software Suggestion (compatible)"
+    )
+    assert len(compatible) == 5  # endpoint, calls, values, retries, pages
     written = (folder / "audit.log").read_text(encoding="utf-8")
     for secret in (CLIENT_ID, CLIENT_SECRET, TOKEN, PASS):
         assert secret not in written
@@ -427,3 +433,30 @@ def test_the_key_file_is_not_read_when_lookups_are_off(
     got = run(*FLAGS, typed=later_run())
 
     assert got.code == ExitCode.CLEAN, got.err
+
+
+def test_a_compatible_page_cap_is_not_available_and_adds_no_attention_line(
+    run: Runner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _store_key()
+    fake = _serve(monkeypatch, _fake())
+    fake.compatible = {"C9300-48P": []}
+    fake.compatible_last_page = {"C9300-48P": 25}
+
+    got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
+
+    assert got.code == ExitCode.CLEAN, got.err
+    assert "did not run:" not in got.out
+    document = _topology(_run_folder())
+    advice = document["devices"][0]["advice"]
+    assert advice["latest_release"] == "not available"
+    assert advice["latest_in_train"] == "not available"
+    analysis = next(line for line in _audit(_run_folder()) if line["event"] == "analysis")
+    compatible = next(
+        endpoint
+        for endpoint in analysis["endpoints"]
+        if endpoint[0] == "Software Suggestion (compatible)"
+    )
+    assert compatible[4] == 20
+    assert "C9300-48P" not in json.dumps(analysis)

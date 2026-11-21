@@ -12,11 +12,12 @@ from network_analyser.records.analysis import (
     AdvisoryAnswer,
     AnalysisInput,
     CiscoAnswers,
+    CompatibleRelease,
+    CompatibleReleases,
     FixedRelease,
     OsType,
     ReleaseAdvisories,
     SourceUnavailable,
-    SuggestedReleases,
 )
 from network_analyser.records.device import DeviceRecord
 from network_analyser.records.platform import Platform
@@ -105,12 +106,12 @@ def _answer(
 def _results(
     *records: DeviceRecord,
     answers: Iterable[ReleaseAdvisories] = (),
-    suggestions: tuple[SuggestedReleases, ...] | SourceUnavailable = (),
+    compatible: tuple[CompatibleReleases, ...] | SourceUnavailable = (),
 ) -> AnalysisResults:
     return analysis.analyse(
         AnalysisInput(
             topology=topology.build(records),
-            answers=CiscoAnswers(advisories=tuple(answers), suggestions=suggestions),
+            answers=CiscoAnswers(advisories=tuple(answers), compatible=compatible),
         )
     )
 
@@ -447,14 +448,15 @@ def test_the_nxos_upgrade_target_is_not_available_rather_than_guessed() -> None:
 
 def test_the_latest_release_is_advice_beside_the_target_not_a_finding() -> None:
     results = _results(
-        _device(A, "S1", "sw-a"),
+        _device(A, "S1", "sw-a", release="17.9.4a"),
         answers=(_answer(OsType.IOS_XE, "17.9.4a", _advisory()),),
-        suggestions=(
-            SuggestedReleases(
+        compatible=(
+            CompatibleReleases(
                 pid=MODEL,
-                releases=("17.9.12",),
-                latest_release_in_train="17.9.12",
-                latest_release="17.12.6",
+                releases=(
+                    CompatibleRelease("17.9.12", "MD"),
+                    CompatibleRelease("17.12.6", "ED"),
+                ),
             ),
         ),
     )
@@ -462,21 +464,23 @@ def test_the_latest_release_is_advice_beside_the_target_not_a_finding() -> None:
     (advice,) = results.advice
     assert advice.upgrade_target == "17.9.5"
     assert advice.latest_release_in_train == "17.9.12"
+    assert advice.latest_in_train_lifecycle == "MD"
     assert advice.latest_release == "17.12.6"
+    assert advice.latest_release_lifecycle == "ED"
     assert all("17.12.6" not in finding.what_was_found for finding in results.findings)
     assert all(finding.check.type is CheckType.ADVISORY for finding in _advisory_findings(results))
 
 
-def test_latest_release_is_not_available_when_the_suggestion_source_gives_none() -> None:
+def test_latest_release_is_not_available_when_the_compatible_source_gives_none() -> None:
     answered = _results(
-        _device(A, "S1", "sw-a"),
+        _device(A, "S1", "sw-a", release="17.9.4a"),
         answers=(_answer(OsType.IOS_XE, "17.9.4a", _advisory()),),
-        suggestions=(SuggestedReleases(pid=MODEL),),
+        compatible=(CompatibleReleases(pid=MODEL),),
     )
     missing = _results(
-        _device(B, "S2", "sw-b"),
+        _device(B, "S2", "sw-b", release="17.9.4a"),
         answers=(_answer(OsType.IOS_XE, "17.9.4a", _advisory()),),
-        suggestions=SourceUnavailable("Software Suggestion could not be reached"),
+        compatible=SourceUnavailable("Software Suggestion could not be reached"),
     )
 
     for results in (answered, missing):
