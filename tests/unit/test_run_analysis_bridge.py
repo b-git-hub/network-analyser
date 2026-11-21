@@ -211,3 +211,30 @@ def test_an_nxos_release_is_sent_with_the_hardware_family_it_was_matched_on() ->
     )
     assert isinstance(answers.advisories, tuple)
     assert answers.advisories[0].hardware_family == "NEXUS9000"
+
+
+def test_an_nxos_i_series_release_keeps_its_own_train() -> None:
+    question = ReleaseQuestion(CiscoOsType.NX_OS, "7.0(3)I7(9)", "NEXUS9000")
+    advisory = CiscoAdvisory(
+        advisory_id="cisco-sa-test-123",
+        title="Synthetic advisory",
+        sir="High",
+        cvss_base_score=8.6,
+        cves=("CVE-2026-0001",),
+        first_published="2026-01-01T00:00:00",
+        last_updated="2026-02-01T00:00:00",
+        first_fixed=("7.0(3)I7(10)",),
+    )
+    asked = LookupQuestions(
+        releases=(question,),
+        hardware_pids=(),
+        software_releases=(),
+        suggestion_pids=(),
+    )
+    replies = replace(_replies(), advisories=(AdvisoriesAnswer(question, (advisory,)),))
+
+    answers = run_analysis.analysis_answers(replies, asked)
+
+    assert isinstance(answers.advisories, tuple)
+    (release,) = answers.advisories
+    assert release.advisories[0].first_fixed == (FixedRelease("7.0(3)I7", "7.0(3)I7(10)"),)
