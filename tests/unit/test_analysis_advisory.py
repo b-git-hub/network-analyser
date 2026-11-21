@@ -572,6 +572,13 @@ def test_every_advisory_check_runs_when_the_source_answers() -> None:
     assert [run.check.id for run in results.checks] == [
         "advisory-could-not-check",
         "advisory-openvuln",
+        "config-cisco-insecure-list",
+        "config-copp-applied",
+        "config-device-role-out-of-date",
+        "config-guest-shell",
+        "config-ntp-synchronised",
+        "config-snmpv3-user-crypto",
+        "config-ssh-key-size",
         "consistency-bundle-mode",
         "consistency-model-drift",
         "consistency-stack-mismatch",

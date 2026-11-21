@@ -180,6 +180,13 @@ def test_every_shipped_check_runs_and_one_advice_record_exists_per_visited_devic
     assert [run.check.id for run in results.checks] == [
         "advisory-could-not-check",
         "advisory-openvuln",
+        "config-cisco-insecure-list",
+        "config-copp-applied",
+        "config-device-role-out-of-date",
+        "config-guest-shell",
+        "config-ntp-synchronised",
+        "config-snmpv3-user-crypto",
+        "config-ssh-key-size",
         "consistency-bundle-mode",
         "consistency-model-drift",
         "consistency-stack-mismatch",
@@ -210,8 +217,14 @@ def test_every_shipped_check_runs_and_one_advice_record_exists_per_visited_devic
         "lifecycle-software-eox",
         "lifecycle-suggested-release",
     ]
-    assert all(run.ran for run in results.checks)
-    assert all(run.reason is None for run in results.checks)
+    assert all(run.reason is None for run in results.checks if run.ran)
+    assert {run.check.id for run in results.checks if not run.ran} == {
+        "config-cisco-insecure-list",
+        "config-copp-applied",
+        "config-ntp-synchronised",
+        "config-snmpv3-user-crypto",
+        "config-ssh-key-size",
+    }
     assert [advice.device for advice in results.advice] == ["dev-S1", "dev-S2"]
 
 
@@ -345,6 +358,13 @@ def test_the_results_fit_topology_json_as_optional_fields() -> None:
     assert [item["check"]["id"] for item in checks] == [
         "advisory-could-not-check",
         "advisory-openvuln",
+        "config-cisco-insecure-list",
+        "config-copp-applied",
+        "config-device-role-out-of-date",
+        "config-guest-shell",
+        "config-ntp-synchronised",
+        "config-snmpv3-user-crypto",
+        "config-ssh-key-size",
         "consistency-bundle-mode",
         "consistency-model-drift",
         "consistency-stack-mismatch",
@@ -375,9 +395,13 @@ def test_the_results_fit_topology_json_as_optional_fields() -> None:
         "lifecycle-software-eox",
         "lifecycle-suggested-release",
     ]
-    assert checks[3]["ran"] is True
-    assert checks[5]["ran"] is False
-    assert "17.9" in checks[5]["reason"]
+    drift = next(item for item in checks if item["check"]["id"] == "consistency-model-drift")
+    assert drift["ran"] is True
+    train = next(
+        item for item in checks if item["check"]["id"] == "consistency-standard-support-train"
+    )
+    assert train["ran"] is False
+    assert "17.9" in train["reason"]
 
 
 def test_the_advice_shape_accepts_an_advisory_answer() -> None:

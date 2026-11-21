@@ -11,9 +11,9 @@ Nothing here keeps or quotes the replies (#30 section 8).
 A denied command can also mean the device's Device Role predates it (#97, story 80): the
 Role was generated from an older allow-list, so the view refuses the new command. Both
 Platforms report a denied command as `<command>: denied`; `outdated_role` turns those into
-one record naming the Checks that could not run, and the platform module supplies the
-command-to-Check map. It is the hook ticket #102 attaches its Check ids to; until the
-`analysis` module's Finding record lands (#93), the record carries its own fixed level text.
+one record naming the Check ids that could not run, and the platform module supplies the
+command-to-Check map. `analysis.role` turns that record into the one Medium Finding per
+device (#102).
 """
 
 from collections.abc import Callable, Mapping
@@ -66,21 +66,20 @@ DEVICE_ROLE_CHECK: Final = "Device Role out of date"
 DEVICE_ROLE_OUT_OF_DATE: Final = "Device Role is out of date"
 """The Finding's own opening words (story 80, and the Finding order in story 108)."""
 DEVICE_ROLE_LEVEL: Final = "Medium"
-"""Its level (spec #92, Levels). Replaced by #93's level value once that record lands."""
-_ROLE_POINTER: Final = "Re-apply the Device Role printed by role-snippet."
+"""Its level (spec #92, Levels). `analysis.role` now raises the Finding itself (#102)."""
 
 
 @dataclass(frozen=True, slots=True)
 class DeviceRoleOutOfDate:
     """One device's Device Role stopped some Checks because it predates their commands.
 
-    The shape story 80 asks for, kept here until #93's Finding record lands: #102 turns it
-    into one Medium Finding per device, naming every Check and pointing at `role-snippet`.
+    This is the collection side's record; `analysis.role` turns it into one Medium Finding per
+    device, naming every Check and pointing at `role-snippet` (story 80; #102).
 
     Attributes:
         commands: the refused allow-listed commands, in collection order.
-        checks: the Checks those commands would have fed, in the same order, without
-            duplicates. Their names are the ones #102 ships; #102 may replace them with ids.
+        checks: the stable Check ids those commands would have fed, in the same order, without
+            duplicates (#102's final ids, from the Platform's map).
     """
 
     commands: tuple[str, ...]
@@ -90,16 +89,6 @@ class DeviceRoleOutOfDate:
     def count(self) -> int:
         """How many Checks could not run."""
         return len(self.checks)
-
-    @property
-    def summary(self) -> str:
-        """The Finding's one line: what stopped, and what the operator should do."""
-        noun = "Check" if self.count == 1 else "Checks"
-        named = ", ".join(self.checks)
-        return (
-            f"{DEVICE_ROLE_OUT_OF_DATE}: {self.count} {noun} could not run ({named}). "
-            f"{_ROLE_POINTER}"
-        )
 
 
 def denied_commands(collected: Collected) -> tuple[str, ...]:
