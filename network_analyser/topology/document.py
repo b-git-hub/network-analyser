@@ -19,7 +19,7 @@ from typing import Final
 from network_analyser.records.topology import Topology
 from network_analyser.records.unknown import Unknown
 
-FORMAT_VERSION: Final = 1
+FORMAT_VERSION: Final = 2
 
 type Json = str | int | bool | list[Json] | dict[str, Json] | None
 

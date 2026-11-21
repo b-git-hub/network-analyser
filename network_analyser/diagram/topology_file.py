@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final
 
-KNOWN_FORMAT_VERSION: Final = 1
+KNOWN_FORMAT_VERSION: Final = 2
 NOT_RECORDED: Final = "not recorded in this topology.json"
 
 type Plain = str | int | float | bool | tuple[Plain, ...] | Mapping[str, Plain] | None
@@ -184,9 +184,12 @@ _ADVISORY_DETAIL: dict[str, _Schema] = {
     "published": LEAF,
     "updated": LEAF,
     "first_fixed": LEAF,
+    "status": LEAF,
+    "fixed_line": LEAF,
     "hardware_family_not_confirmed": LEAF,
 }
 _EOX_ITEM: dict[str, _Schema] = {
+    "kind": LEAF,
     "name": LEAF,
     "last_date_of_support": LEAF,
     "end_of_security_support": LEAF,
@@ -195,6 +198,7 @@ _EOX_ITEM: dict[str, _Schema] = {
     "replacement": LEAF,
 }
 _CISCO_DETAIL: dict[str, _Schema] = {
+    "kind": LEAF,
     **_ADVISORY_DETAIL,
     "items": [_EOX_ITEM],
 }

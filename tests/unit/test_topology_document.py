@@ -7,9 +7,15 @@ from typing import Any
 from network_analyser import topology
 from network_analyser.records.collected import ALL_VLANS, Reading, SwitchportMode, Vlan
 from network_analyser.records.topology import (
+    ADVISORY_FIXED_LINE,
+    ADVISORY_STATUS,
     AdvisoryDetail,
     Check,
     CheckType,
+    CiscoDetailKind,
+    EoxDetail,
+    EoxItem,
+    EoxKind,
     Finding,
     FindingLevel,
 )
@@ -36,7 +42,7 @@ def test_the_document_starts_with_a_single_integer_format_version() -> None:
     document = _document()
 
     assert next(iter(document)) == "format_version"
-    assert document["format_version"] == topology.FORMAT_VERSION == 1
+    assert document["format_version"] == topology.FORMAT_VERSION == 2
 
 
 def test_the_document_is_plain_json_and_holds_no_username() -> None:
@@ -161,14 +167,15 @@ def test_a_finding_carries_its_level_check_advice_and_source() -> None:
     assert finding["source"] == "config"
     assert finding["cisco_detail"] is None
     assert finding["also_flagged_by_cisco"] is False
-    assert document["format_version"] == 1  # an older render drops keys it does not know
+    assert document["format_version"] == 2
 
 
 def test_an_advisory_detail_is_written_as_its_own_object() -> None:
     detail = AdvisoryDetail(
+        kind=CiscoDetailKind.ADVISORY,
         id="cisco-sa-example-abc123",
         title="Cisco IOS XE Software Example Vulnerability",
-        sir="High",
+        sir=FindingLevel.HIGH,
         cvss="8.6",
         cves=("CVE-2099-0001",),
         published="2026-01-02T16:00:00",
@@ -195,6 +202,7 @@ def test_an_advisory_detail_is_written_as_its_own_object() -> None:
 
     (written,) = document["findings"]
     assert written["cisco_detail"] == {
+        "kind": "Advisory",
         "id": "cisco-sa-example-abc123",
         "title": "Cisco IOS XE Software Example Vulnerability",
         "sir": "High",
@@ -203,8 +211,96 @@ def test_an_advisory_detail_is_written_as_its_own_object() -> None:
         "published": "2026-01-02T16:00:00",
         "updated": "2026-02-03T16:00:00",
         "first_fixed": "17.9.10",
+        "status": ADVISORY_STATUS,
+        "fixed_line": ADVISORY_FIXED_LINE,
         "hardware_family_not_confirmed": True,
     }
     assert written["also_flagged_by_cisco"] is True
     assert written["kind"] is None
     assert written["summary"] == "Affected release 17.9.4"
+
+
+def test_an_advisory_finding_s_level_equals_its_sir_detail_level() -> None:
+    detail = AdvisoryDetail(
+        kind=CiscoDetailKind.ADVISORY,
+        id="cisco-sa-example-abc123",
+        title="Example",
+        sir=FindingLevel.CRITICAL,
+        cvss="9.8",
+        cves=("CVE-2099-0001",),
+        published="2026-01-02T16:00:00",
+        updated="2026-02-03T16:00:00",
+        first_fixed="17.9.10",
+    )
+    finding = Finding(
+        id="finding-0123456789ab",
+        devices=(),
+        items=(),
+        evidence=(),
+        level=detail.sir,
+        check=Check("advisory-cisco-sa-example-abc123", "Example", CheckType.ADVISORY),
+        what_was_found="Affected release",
+        what_to_do="Upgrade.",
+        source="Cisco openVuln",
+        summary="Affected release",
+        cisco_detail=detail,
+    )
+
+    assert finding.cisco_detail is detail
+    assert finding.level is detail.sir
+    assert detail.sir is FindingLevel.CRITICAL
+
+
+def test_an_eox_detail_is_written_with_its_discriminator_and_item_kinds() -> None:
+    detail = EoxDetail(
+        kind=CiscoDetailKind.EOX,
+        items=(
+            EoxItem(
+                kind=EoxKind.HARDWARE,
+                name="C9300-48P",
+                last_date_of_support="2026-06-01",
+                replacement="C9300-48P",
+            ),
+            EoxItem(kind=EoxKind.SOFTWARE, name="17.9.4", end_of_sw_maintenance="2025-09-01"),
+        ),
+    )
+    finding = Finding(
+        id="finding-0123456789ab",
+        devices=(),
+        items=(),
+        evidence=(),
+        level=FindingLevel.MEDIUM,
+        check=Check("lifecycle-eox", "End of life", CheckType.LIFECYCLE),
+        what_was_found="hardware and software past their support dates",
+        what_to_do="Plan replacements.",
+        source="Cisco EoX",
+        summary="hardware and software past their support dates",
+        cisco_detail=detail,
+    )
+
+    document: Any = topology.to_document(replace(topology.build(()), findings=(finding,)))
+
+    (written,) = document["findings"]
+    assert written["cisco_detail"] == {
+        "kind": "EoX",
+        "items": [
+            {
+                "kind": "hardware",
+                "name": "C9300-48P",
+                "last_date_of_support": "2026-06-01",
+                "end_of_security_support": None,
+                "end_of_sw_maintenance": None,
+                "end_of_sale": None,
+                "replacement": "C9300-48P",
+            },
+            {
+                "kind": "software",
+                "name": "17.9.4",
+                "last_date_of_support": None,
+                "end_of_security_support": None,
+                "end_of_sw_maintenance": "2025-09-01",
+                "end_of_sale": None,
+                "replacement": None,
+            },
+        ],
+    }
