@@ -7,7 +7,7 @@ It makes the handful of read-only calls ticket #148 lists (the token request, th
 openVuln, Software EoX and Software Suggestion) and prints ONE summary block for the operator
 to paste back onto the ticket. The summary holds only:
 
-- field names (a name that is not a plain identifier shows as its length),
+- field names, only from the fixed `KNOWN_FIELDS` list (any other key shows as its length),
 - JSON types, string lengths, array and object sizes, and counts,
 - HTTP status codes, and Cisco error codes only from the fixed `ALLOWED_CODES` list (any other
   error string shows as `<unrecognised code, length N>`),
@@ -77,7 +77,7 @@ from network_analyser.cli.run_folder import (
     hold_instance_lock,
 )
 from network_analyser.cli.trust_folder import check_trust_folder
-from network_analyser.credentials import SecretScan
+from network_analyser.credentials import Secret, SecretScan
 from network_analyser.records.cisco import CiscoEndpoint, CiscoOsType, TokenOutcome
 
 SAMPLE_PID: Final = "SYNTH-PID-1"
@@ -154,7 +154,80 @@ _NO_CHECK_FILE: Final = "no Backup Passphrase has been set yet: the first Run se
 _NO_KEY: Final = "No Cisco API key is stored. Add one with `network-analyser cisco-key set`."
 _CODE_KEYS: Final = frozenset({"errorCode", "ErrorCode", "ErrorID", "error", "code"})
 _CODE_KEY_PATTERN: Final = re.compile(r"(?:SSA_ERR|S3)_[A-Za-z0-9_]{1,60}", re.ASCII)
-_FIELD_NAME: Final = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,39}", re.ASCII)
+KNOWN_FIELDS: Final = frozenset(
+    {
+        # What ticket #148 asks about.
+        "releaseFormat1",
+        "releaseFormat2",
+        "relDispName",
+        "releaseDate",
+        "platforms",
+        "name",
+        "isSuggested",
+        # What `advisories/replies.py` reads from openVuln, Software EoX and Suggestion.
+        "advisories",
+        "advisoryId",
+        "advisoryTitle",
+        "sir",
+        "cvssBaseScore",
+        "cves",
+        "firstPublished",
+        "lastUpdated",
+        "firstFixed",
+        "firstFixes",
+        "EOXRecord",
+        "EOXInputValue",
+        "EOXInputType",
+        "EOLProductID",
+        "EOXMigrationDetails",
+        "ProductIDDescription",
+        "ProductBulletinNumber",
+        "LinkToProductBulletinURL",
+        "EndOfSaleDate",
+        "EndOfSWMaintenanceReleases",
+        "EndOfSecurityVulSupportDate",
+        "LastDateOfSupport",
+        "MigrationProductId",
+        "MigrationProductInfoURL",
+        "value",
+        "dateFormat",
+        "PaginationResponseRecord",
+        "LastIndex",
+        "PageIndex",
+        "paginationResponseRecord",
+        "lastIndex",
+        "pageIndex",
+        "suggestions",
+        "suggestedReleases",
+        "releases",
+        "productList",
+        "products",
+        "product",
+        "basePID",
+        "productName",
+        "release",
+        "releaseTrain",
+        "trainDispName",
+        "releaseLifeCycle",
+        # Error shapes.
+        "errorDetailsResponse",
+        "errorCode",
+        "ErrorCode",
+        "ErrorID",
+        "ErrorDescription",
+        "EOXError",
+        "error",
+        "errorMessage",
+        "code",
+    }
+)
+"""The only JSON keys the summary may print: Cisco's documented field names.
+
+A reply is untrusted text. A key can be a PID, a release or an estate-specific string, and the
+summary is pasted onto a public issue, so any key not listed here shows as
+`<field name, length N>`, whatever it looks like. To learn a new field's name, add it here
+deliberately and run again.
+"""
 _RELEASE_FIELDS: Final = ("releaseFormat1", "releaseFormat2", "relDispName")
 _MASHERY_CODE: Final = "X-Mashery-Error-Code"
 _MAX_DEPTH: Final = 8
@@ -634,7 +707,7 @@ class _Stat:
 
 
 def _field_name(key: str) -> str:
-    return key if _FIELD_NAME.fullmatch(key) else f"<field name, length {len(key)}>"
+    return key if key in KNOWN_FIELDS else f"<field name, length {len(key)}>"
 
 
 def _walk(value: object, path: str, stats: dict[str, _Stat], depth: int) -> None:
@@ -783,6 +856,9 @@ def _run(
 ) -> int:
     inputs = Inputs(pid=args.pid, release=args.release, release_os=CiscoOsType(args.release_os))
     proxy = ProxyConfig.explicit(args.proxy) if args.proxy else ProxyConfig()
+    for value in (args.pid, args.release):
+        if value is not None:
+            scan.watch(Secret(value))
     data = find_data_folder()
     with hold_instance_lock(data):
         check_trust_folder(data)

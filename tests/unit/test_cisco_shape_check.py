@@ -10,6 +10,7 @@ import ast
 import io
 import json
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -38,8 +39,13 @@ CANARY_CODE = "CANARY-148-CODE"
 OPERATOR_RELEASE = "87.65.43a"
 RELEASE_VALUE = "76.54.32b"
 DATE_VALUE = "2031-02-03"
+PLAIN_KEY = "CANARY148PID01"
+"""A key that is a plain identifier: only an allow-list keeps it out of the summary."""
+CODE_SHAPED_KEY = "SSA_ERR_CANARY148"
 EVERY_CANARY = (
     "CANARY-148",
+    PLAIN_KEY,
+    CODE_SHAPED_KEY,
     CANARY_PID,
     OPERATOR_RELEASE,
     RELEASE_VALUE,
@@ -85,6 +91,7 @@ def _canary_cisco() -> FakeCisco:
         "isSuggested": "Y",
         "platforms": [{"name": "Nexus 7700"}, {"name": CANARY_TEXT}],
         CANARY_KEY: CANARY_TEXT,
+        PLAIN_KEY: {OPERATOR_RELEASE: [1, 2], CODE_SHAPED_KEY: CANARY_TEXT},
     }
     fake.suggestions[CANARY_PID] = [entry]
     fake.compatible[CANARY_PID] = [entry]
@@ -116,6 +123,28 @@ def test_the_summary_never_holds_a_value_from_a_reply_or_an_input() -> None:
     for canary in EVERY_CANARY:
         assert canary not in summary
     assert summary.isascii()
+
+
+def test_a_key_on_the_allow_list_still_prints_so_the_summary_answers_the_ticket() -> None:
+    summary = collect_summary(_session(_canary_cisco()), _everything())
+
+    for path in (
+        r"\$\.suggestions\[\]\.suggestions\[\]\.releaseFormat1: string",
+        r"\$\.suggestions\[\]\.suggestions\[\]\.relDispName: string",
+        r"\$\.suggestions\[\]\.suggestions\[\]\.platforms\[\]\.name: string",
+        r"\$\.suggestions\[\]\.product\.basePID: string",
+        r"\$\.EOXRecord\[\]\.EOXInputValue: string",
+        r"\$\.PaginationResponseRecord\.LastIndex: integer",
+    ):
+        assert re.search(path, summary), path
+
+
+def test_a_plain_identifier_key_that_is_not_on_the_allow_list_shows_only_its_length() -> None:
+    summary = collect_summary(_session(_canary_cisco()), _everything())
+
+    assert PLAIN_KEY not in summary
+    assert CODE_SHAPED_KEY not in summary
+    assert f"<field name, length {len(PLAIN_KEY)}>" in summary
 
 
 def test_the_summary_says_what_shapes_came_back() -> None:
@@ -333,6 +362,23 @@ def test_the_key_is_unlocked_with_the_passphrase_and_nothing_secret_is_shown_or_
     for canary in (CLIENT_ID, CLIENT_SECRET, TOKEN, PASS):
         assert _files_holding(local, canary) == []
         assert _files_holding(Path.cwd(), canary) == []
+
+
+def test_the_operator_values_are_in_the_secret_scan_so_a_printed_line_with_one_is_blocked(
+    operator: Operator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    operator.store_key()
+    leaky = f"a line that wrongly holds {CANARY_PID} and {OPERATOR_RELEASE}"
+    monkeypatch.setattr(cisco_shape_check, "collect_summary", lambda _session, _inputs: leaky)
+
+    code, out, err = operator.run(
+        "--pid", CANARY_PID, "--release", OPERATOR_RELEASE, answers=typed(PASS)
+    )
+
+    assert code == 0, err
+    assert CANARY_PID not in out + err
+    assert OPERATOR_RELEASE not in out + err
+    assert "[blocked]" in out
 
 
 def test_a_wrong_passphrase_stops_before_anything_is_sent(operator: Operator) -> None:
