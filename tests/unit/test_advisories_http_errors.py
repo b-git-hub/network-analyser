@@ -190,7 +190,7 @@ def test_an_unknown_403_code_is_one_calls_failure_and_never_a_rejected_key() -> 
     assert uses(answers)[CiscoEndpoint.OPENVULN].retries == 0
 
 
-def test_a_400_on_eox_names_the_http_status_not_a_rejected_key() -> None:
+def test_a_400_on_a_one_pid_eox_call_is_that_pids_answer_not_a_rejected_key() -> None:
     fake = FakeCisco(suggestions={"C9300-48P": [{"relDispName": "17.9.5", "isSuggested": "Y"}]})
     fake.scripted.append(("/supporttools", HttpResponse(status=400, body=b"")))
 
@@ -199,7 +199,10 @@ def test_a_400_on_eox_names_the_http_status_not_a_rejected_key() -> None:
         questions(releases=(), hardware_pids=("C9300-48P",), suggestion_pids=("C9300-48P",)),
     )
 
-    assert answers.hardware_eox == SourceUnavailable("Cisco returned HTTP 400")
+    assert isinstance(answers.hardware_eox, EoxAnswer)
+    assert answers.hardware_eox.records == ()
+    (unanswered,) = answers.hardware_eox.unanswered
+    assert (unanswered.input_value, unanswered.reason) == ("C9300-48P", "HTTP 400")
     assert isinstance(answers.suggestions, SuggestionsAnswer)
 
 

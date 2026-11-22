@@ -111,8 +111,48 @@ def test_nxos_show_version_gives_hostname_model_version_and_serial() -> None:
     facts = platforms.read_version(Platform.NX_OS, device_text.NXOS_SHOW_VERSION)
 
     assert facts == VersionFacts(
-        hostname="nx-a", model="C9300v", software_version="9.3(8)", serials=("TEST0000N01",)
+        hostname="nx-a",
+        model="C9300v",
+        software_version="9.3(8)",
+        serials=("TEST0000N01",),
+        hardware_series="Nexus9000",
     )
+
+
+def test_nxos_show_version_gives_the_nexus_series_the_hardware_line_names() -> None:
+    text = "  cisco Nexus3000 C3048TP Chassis\n"
+
+    facts = platforms.read_version(Platform.NX_OS, text)
+
+    assert facts.hardware_series == "Nexus3000"
+
+
+def test_the_same_nexus_series_named_twice_is_unambiguous() -> None:
+    text = "  cisco Nexus9000 C9300v Chassis\n  cisco Nexus9000 C93180YC-EX Chassis\n"
+
+    facts = platforms.read_version(Platform.NX_OS, text)
+
+    assert facts.hardware_series == "Nexus9000"
+
+
+def test_two_different_nexus_series_in_show_version_are_ambiguous() -> None:
+    text = "  cisco Nexus9000 C9300v Chassis\n  cisco Nexus3000 C3048TP Chassis\n"
+
+    facts = platforms.read_version(Platform.NX_OS, text)
+
+    assert facts.hardware_series is None
+
+
+def test_a_series_name_with_a_space_is_not_a_nexus_token() -> None:
+    facts = platforms.read_version(Platform.NX_OS, "  cisco Nexus 9000 Chassis\n")
+
+    assert facts.hardware_series is None
+
+
+def test_a_non_nexus_platform_names_no_nexus_series() -> None:
+    facts = platforms.read_version(Platform.IOS_XE, device_text.IOS_XE_SHOW_VERSION)
+
+    assert facts.hardware_series is None
 
 
 def test_facts_missing_from_show_version_are_unknown_never_empty() -> None:

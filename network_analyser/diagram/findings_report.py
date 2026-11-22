@@ -260,12 +260,15 @@ def _target_callout(advice: DeviceAdvice) -> tuple[str, str]:
     """The callout for a recorded Upgrade Target: a release, or its fixed "no fix" text.
 
     A target that does not clear every Advisory says so, and names the Train the rest need
-    (#124, story 23).
+    (#124, story 23). `not available` is shown as it is, never turned into an upgrade
+    instruction: it means the fix could not be worked out (#136).
     """
     target = advice.upgrade_target
     if target is None:
         return ("no-fix", _no_fix(advice))
     lowered = target.lower()
+    if lowered == NOT_AVAILABLE:
+        return ("could-not-check", NOT_AVAILABLE)
     if lowered.startswith("no fix"):
         return ("no-fix", target)
     if lowered.startswith("no critical"):
@@ -323,7 +326,7 @@ def _advisory_row(
     detail = _advisory_detail(finding) or {}
     first_fixed = _string(detail.get("first_fixed"), strict=True)
     if first_fixed is None:
-        first_fixed = f"no fix in Train {train}" if train else "no fix in its Train"
+        first_fixed = _first_fixed_text(detail, train)
     return (
         _level(finding, redact),
         _advisory_link(detail, redact),
@@ -332,6 +335,13 @@ def _advisory_row(
         _text(", ".join(_strings(detail.get("cves"))) or NOT_RECORDED, redact),
         _text(first_fixed, redact),
     )
+
+
+def _first_fixed_text(detail: Mapping[str, Plain], train: str | None) -> str:
+    """The First fixed cell when Cisco named no release: unknown, or none in the Train (#136)."""
+    if detail.get("fix_unresolved") is True:
+        return NOT_AVAILABLE
+    return f"no fix in Train {train}" if train else "no fix in its Train"
 
 
 def _advisory_link(detail: Mapping[str, Plain], redact: Callable[[str], str]) -> str:

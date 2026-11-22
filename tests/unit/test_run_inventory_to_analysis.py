@@ -141,6 +141,26 @@ def test_a_stack_with_a_supervisor_and_a_line_card_raises_hardware_eox_at_the_wo
     assert LINE_CARD in asked
 
 
+def test_a_pid_cisco_has_no_record_for_reaches_the_run_report_as_a_could_not_check(
+    run: Runner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _store_key()
+    _with_replies(run)
+    fake = _eox_fake()
+    del fake.eox_pid[LINE_CARD]  # Cisco answers with its "no record" entry for this PID
+    _serve(monkeypatch, fake)
+
+    got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
+
+    assert got.code == ExitCode.CLEAN, got.err
+    document = _topology(_run_folder())
+    finding = _finding(document, "lifecycle-hardware-eox-could-not-check")
+    assert finding["level"] == "Low"
+    assert LINE_CARD in finding["what_was_found"]
+    assert "SSA_ERR_026" in finding["what_was_found"]
+    assert _check_run(document, "lifecycle-hardware-eox-could-not-check")["ran"] is True
+
+
 def test_optics_psus_and_fans_never_reach_cisco(
     run: Runner, monkeypatch: pytest.MonkeyPatch
 ) -> None:

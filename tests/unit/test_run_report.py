@@ -16,6 +16,10 @@ import pytest
 from network_analyser import discovery, topology
 from network_analyser.analysis.advisory import COULD_NOT_CHECK_CHECK, NEWER_THAN_LIST
 from network_analyser.analysis.catalogue import ROLE_CHECK
+from network_analyser.analysis.lifecycle import (
+    HARDWARE_EOX_COULD_NOT_CHECK_CHECK,
+    SOFTWARE_EOX_COULD_NOT_CHECK_CHECK,
+)
 from network_analyser.cli import ExitCode, summary
 from network_analyser.credentials import Secret, SecretScan
 from network_analyser.records.backup import BackupRecord, BackupResults
@@ -457,6 +461,42 @@ def _section(page: str, ident: str) -> str:
 def test_the_analysis_check_ids_match_the_ones_analysis_raises() -> None:
     assert ROLE_CHECK.id == report_page.DEVICE_ROLE_CHECK_ID
     assert COULD_NOT_CHECK_CHECK.id == report_page.COULD_NOT_CHECK_CHECK_ID
+    assert (
+        HARDWARE_EOX_COULD_NOT_CHECK_CHECK.id == report_page.HARDWARE_EOX_COULD_NOT_CHECK_CHECK_ID
+    )
+    assert (
+        SOFTWARE_EOX_COULD_NOT_CHECK_CHECK.id == report_page.SOFTWARE_EOX_COULD_NOT_CHECK_CHECK_ID
+    )
+
+
+def test_needs_attention_lists_an_eox_could_not_check_for_its_device() -> None:
+    page = report_page.render_run_report(
+        _analysis_report(
+            _check_finding(
+                HARDWARE_EOX_COULD_NOT_CHECK_CHECK.id,
+                FindingLevel.LOW,
+                name="Hardware EoX could not check",
+                what_was_found=(
+                    "Could not check the hardware's end-of-life dates: Cisco EoX has no record "
+                    "for PID C9300-48P (SSA_ERR_026)."
+                ),
+            ),
+            _check_finding(
+                SOFTWARE_EOX_COULD_NOT_CHECK_CHECK.id,
+                FindingLevel.LOW,
+                name="Software EoX could not check",
+                what_was_found=(
+                    "Could not check the release's end-of-life dates: the release is not readable."
+                ),
+            ),
+        ),
+        SecretScan(),
+    )
+
+    attention = _section(page, "attention")
+    assert "sw-a: Could not check the hardware" in attention
+    assert "SSA_ERR_026" in attention
+    assert "sw-a: Could not check the release" in attention
 
 
 def test_the_summary_gives_the_finding_total_and_each_level_count() -> None:
@@ -649,6 +689,16 @@ def test_each_devices_upgrade_target_comes_from_the_advice_record() -> None:
     )
     assert "Upgrade to 17.12.9 or later" in page
     assert "Upgrade to 17.12.9 or later (does not clear" not in page
+
+
+def test_an_unresolved_upgrade_target_reads_not_available_not_an_upgrade() -> None:
+    base = _analysis_report()
+    advice = (dataclasses.replace(_advice("dev-S1", "not available", not_cleared=0), train="9.3"),)
+    built = dataclasses.replace(base.topology, analysis=AnalysisSummary(advice=advice, checks=()))
+    page = report_page.render_run_report(dataclasses.replace(base, topology=built), SecretScan())
+
+    assert "Upgrade to not available" not in page
+    assert "<td>not available</td>" in _section(page, "visited")
 
 
 def _advice(device: str, target: str, *, not_cleared: int) -> DeviceAdvice:

@@ -214,7 +214,9 @@ def test_every_shipped_check_runs_and_one_advice_record_exists_per_visited_devic
         "hardening-vty-access-class",
         "hardening-weak-secret-types",
         "lifecycle-hardware-eox",
+        "lifecycle-hardware-eox-could-not-check",
         "lifecycle-software-eox",
+        "lifecycle-software-eox-could-not-check",
         "lifecycle-suggested-release",
     ]
     assert all(run.reason is None for run in results.checks if run.ran)
@@ -395,7 +397,9 @@ def test_the_results_fit_topology_json_as_optional_fields() -> None:
         "hardening-vty-access-class",
         "hardening-weak-secret-types",
         "lifecycle-hardware-eox",
+        "lifecycle-hardware-eox-could-not-check",
         "lifecycle-software-eox",
+        "lifecycle-software-eox-could-not-check",
         "lifecycle-suggested-release",
     ]
     drift = next(item for item in checks if item["check"]["id"] == "consistency-model-drift")

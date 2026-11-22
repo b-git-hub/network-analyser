@@ -401,6 +401,33 @@ def test_an_advisory_with_no_fix_names_the_train() -> None:
     assert "no fix in Train 17.12" in page
 
 
+def test_an_unresolved_series_reads_not_available_and_never_upgrades_to_it() -> None:
+    """A fix Cisco's `platforms[]` cannot resolve is unknown, not absent (#136)."""
+    detail = _advisory_detail(first_fixed=None, fix_unresolved=True)
+    data = document(
+        [
+            _advised(
+                "dev-S1",
+                "sw-a",
+                "192.0.2.1",
+                release="9.3(10)",
+                outcome="1 Advisory matches",
+                upgrade_target="not available",
+                train="9.3",
+            )
+        ],
+        findings=[_advisory(ADVISORY_ID, "High", "dev-S1", detail=detail)],
+    )
+
+    page = _page(data)
+
+    assert '<p class="callout could-not-check"><b>not available</b></p>' in page
+    assert "Upgrade to not available" not in page
+    assert "no fix in Train" not in page
+    details = page[page.index("<details>") : page.index("</details>")]
+    assert "<td>not available</td>" in details
+
+
 def test_an_advisory_id_that_does_not_pass_the_pattern_is_not_a_link() -> None:
     hostile = 'cisco-sa-x"><script>alert(1)</script>'
     detail = _advisory_detail(ident=hostile)

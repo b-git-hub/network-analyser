@@ -75,6 +75,10 @@ class VersionFacts:
     model: str | Unknown
     software_version: str | Unknown
     serials: tuple[str, ...] | Unknown
+    """Every chassis serial: one per stack member, in the order shown."""
+    hardware_series: str | None = None
+    """The Nexus hardware series token `show version` names, such as `Nexus9000`; None when it
+    names none, names more than one, or the Platform prints no such token (#159)."""
     router_operating_mode: str | None = None
 
 
