@@ -120,6 +120,16 @@ def test_one_low_finding_per_model_running_more_than_one_release() -> None:
     assert finding.items == ()
 
 
+def test_drift_counts_one_release_printed_two_ways_as_one_release() -> None:
+    """`17.9.4` and `17.09.04` are the same IOS-XE release, so they are not drift (#150)."""
+    results = _results(
+        _device(A, "S1", "sw-a", release="17.9.4"),
+        _device(B, "S2", "sw-b", release="17.09.04"),
+    )
+
+    assert _model_drift(results) == []
+
+
 def test_a_model_on_one_release_raises_nothing() -> None:
     results = _results(_device(A, "S1", "sw-a"), _device(B, "S2", "sw-b"))
 

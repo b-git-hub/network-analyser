@@ -394,6 +394,26 @@ def test_an_advisory_id_outside_the_pattern_gets_no_link() -> None:
     assert "<img" not in page
 
 
+def test_an_advisory_id_with_a_dot_or_an_underscore_gets_no_link() -> None:
+    """#78 allows letters, digits and hyphens after `cisco-sa-`, so these get no href (#150)."""
+    data = _topology()
+    data["findings"] = [  # type: ignore[index]
+        _finding(
+            "finding-odd",
+            "High",
+            "advisory-odd",
+            "Odd",
+            "Advisory",
+            devices=("dev-S1",),
+            cisco_detail=_advisory_detail(ident="cisco-sa-example.a_b"),
+        )
+    ]
+
+    (advisory,) = _tab(data)["levels"][0]["checks"]
+
+    assert advisory["advisory"]["href"] is None
+
+
 def test_advice_this_file_does_not_hold_reads_as_not_available() -> None:
     data = _topology()
     data["devices"][0].pop("advice")  # type: ignore[index]

@@ -213,6 +213,17 @@ def test_a_critical_and_a_high_advisory_each_raise_one_full_finding() -> None:
     assert advice.advisory_outcome.text == "2 Advisories match"
 
 
+def test_an_advisory_id_outside_the_cisco_sa_pattern_gets_no_stable_check() -> None:
+    """#78's pattern is `cisco-sa-[a-z0-9-]+`: a dot or underscore is not a Cisco id (#150)."""
+    odd = _advisory("cisco-sa-example.a_b", sir=FindingLevel.HIGH, title="Odd id")
+    results = _results(_device(A, "S1", "sw-a"), answers=(_answer(OsType.IOS_XE, "17.9.4a", odd),))
+
+    (finding,) = _advisory_findings(results)
+
+    assert finding.check.id == "advisory-unnamed"
+    assert finding.check.name == "Odd id"
+
+
 def test_one_finding_per_advisory_even_though_it_names_many_cves() -> None:
     advisory = _advisory(cves=("CVE-2026-0001", "CVE-2026-0002", "CVE-2026-0003"))
     results = _results(

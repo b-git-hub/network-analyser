@@ -11,6 +11,7 @@ import ssl
 import pytest
 import truststore
 
+from network_analyser._winsys import WindowsProxy
 from network_analyser.advisories import transport
 from network_analyser.advisories.proxy import ProxyConfig, ProxyMode, ProxyNotUsable, resolve_proxy
 from network_analyser.advisories.transport import (
@@ -35,16 +36,30 @@ def request(**overrides: object) -> HttpRequest:
     return HttpRequest(**fields)  # type: ignore[arg-type]  # test data fills the fields
 
 
+def test_a_request_repr_never_shows_a_header_or_a_body() -> None:
+    """A header carries the Basic value and the bearer token, and a body may carry one too."""
+    canary = "CANARY-150-basic"
+    made = request(headers=(("Authorization", f"Basic {canary}"),), body=b"CANARY-150-body")
+
+    shown = repr(made)
+
+    assert canary not in shown
+    assert "CANARY-150-body" not in shown
+    assert shown.startswith("HttpRequest(")
+
+
 def transport_with(
     monkeypatch: pytest.MonkeyPatch,
     opener: FakeOpener,
     *,
     proxy: ProxyConfig | None = None,
     system: str | None = None,
+    pac: str | None = None,
 ) -> HttpsTransport:
     """Return the real transport with `open_https` faked and Windows' setting injected."""
     monkeypatch.setattr(transport, "open_https", opener)
-    return HttpsTransport(proxy=proxy or ProxyConfig.direct(), system_proxy=lambda: system)
+    setting = WindowsProxy(server=system, script=pac) if system or pac else None
+    return HttpsTransport(proxy=proxy or ProxyConfig.direct(), system_proxy=lambda: setting)
 
 
 def test_a_request_to_another_host_is_refused_before_any_connection(
@@ -214,6 +229,22 @@ def test_a_proxy_setting_the_tool_cannot_use_stops_the_run(
     assert opener.opened == []
 
 
+def test_a_windows_pac_script_stops_the_run_before_any_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opener = FakeOpener(connection=FakeConnection(response=FakeResponse(200)))
+    fenced = transport_with(
+        monkeypatch, opener, proxy=ProxyConfig(), pac="http://wpad.example/wpad.dat"
+    )
+
+    reply = fenced(request())
+
+    assert isinstance(reply, TransportFailed)
+    assert "PAC script" in reply.reason
+    assert reply.retryable is False
+    assert opener.opened == []
+
+
 def test_a_proxy_setting_with_a_password_is_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -230,11 +261,37 @@ def test_a_proxy_setting_with_a_password_is_refused(
 
 
 def test_the_https_entry_wins_in_a_windows_per_scheme_setting() -> None:
-    target = resolve_proxy(ProxyConfig(), system=lambda: "http=a.example:1;https=b.example:2")
+    target = resolve_proxy(
+        ProxyConfig(), system=lambda: WindowsProxy(server="http=a.example:1;https=b.example:2")
+    )
 
     assert not isinstance(target, ProxyNotUsable)
     assert target is not None
     assert (target.host, target.port) == ("b.example", 2)
+
+
+def test_a_windows_pac_script_alone_is_refused_rather_than_ignored() -> None:
+    """A PAC script names the proxy only when Windows runs it, and the tool never runs one."""
+    target = resolve_proxy(
+        ProxyConfig(), system=lambda: WindowsProxy(script="http://wpad.example/wpad.dat")
+    )
+
+    assert isinstance(target, ProxyNotUsable)
+    assert "PAC script" in target.reason
+
+
+def test_a_windows_fixed_proxy_is_used_beside_a_pac_script() -> None:
+    """A fixed ProxyServer is the setting the tool can honour, so it wins over a PAC script."""
+    target = resolve_proxy(
+        ProxyConfig(),
+        system=lambda: WindowsProxy(
+            server="proxy.example:8080", script="http://wpad.example/wpad.dat"
+        ),
+    )
+
+    assert not isinstance(target, ProxyNotUsable)
+    assert target is not None
+    assert (target.host, target.port) == ("proxy.example", 8080)
 
 
 @pytest.mark.parametrize(
@@ -254,7 +311,10 @@ def test_an_explicit_proxy_must_be_a_host_and_port(text: str) -> None:
 
 def test_direct_is_its_own_mode() -> None:
     assert ProxyConfig.direct().mode is ProxyMode.DIRECT
-    assert resolve_proxy(ProxyConfig.direct(), system=lambda: "proxy.example:1") is None
+    assert (
+        resolve_proxy(ProxyConfig.direct(), system=lambda: WindowsProxy(server="proxy.example:1"))
+        is None
+    )
 
 
 @pytest.mark.parametrize(

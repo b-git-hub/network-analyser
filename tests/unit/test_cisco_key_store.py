@@ -156,6 +156,47 @@ def test_a_file_too_big_to_be_a_key_is_none(tmp_path: Path) -> None:
     assert unlock_key_file(path, old) is None
 
 
+def test_an_unreadable_key_file_has_its_own_reason(tmp_path: Path) -> None:
+    """A sharing violation or an oversized file is not a wrong passphrase (#150)."""
+    old, _ = _passphrases(tmp_path)
+    path = tmp_path / "cisco-key.age"
+    path.write_bytes(b"x" * (64 * 1024 + 1))
+
+    opened = backup_store.open_key_file(path, old)
+
+    assert opened.key is None
+    assert opened.problem == backup_store.KEY_FILE_UNREADABLE
+
+
+def test_a_wrong_passphrase_has_no_unreadable_reason(tmp_path: Path) -> None:
+    old, _ = _passphrases(tmp_path)
+    path = _store(tmp_path, old)
+    _, wrong = _passphrases(tmp_path / "other")
+
+    opened = backup_store.open_key_file(path, wrong)
+
+    assert opened.key is None
+    assert opened.problem is None
+
+
+def test_a_key_file_held_open_by_another_program_has_its_own_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old, _ = _passphrases(tmp_path)
+    path = _store(tmp_path, old)
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        msg = "held open by another program"
+        raise PermissionError(msg)
+
+    monkeypatch.setattr(Path, "open", refuse)
+
+    opened = backup_store.open_key_file(path, old)
+
+    assert opened.key is None
+    assert opened.problem == backup_store.KEY_FILE_UNREADABLE
+
+
 def test_the_key_never_shows_its_value_in_repr_or_str(tmp_path: Path) -> None:
     old, _ = _passphrases(tmp_path)
     key = unlock_key_file(_store(tmp_path, old), old)

@@ -16,11 +16,11 @@ from typing import Any
 
 import pytest
 
-from network_analyser import backup_store, device_gateway
+from network_analyser import analysis, backup_store, device_gateway
 from network_analyser.advisories import HttpResponse, TransportFailed
 from network_analyser.cli import ExitCode, run_end
 from network_analyser.credentials import CredentialSets, Secret, SecretScan
-from network_analyser.records.analysis import CiscoAnswers, SourceUnavailable
+from network_analyser.records.analysis import AnalysisInput, CiscoAnswers, SourceUnavailable
 from network_analyser.records.device import DeviceRecord
 from network_analyser.records.identity import Alias
 from tests.support import fake_age
@@ -466,6 +466,23 @@ def test_a_key_locked_with_another_passphrase_is_reported_once(
     assert got.out.count(backup_store.KEY_LOCKED_ELSEWHERE) == 1
 
 
+def test_an_unreadable_key_file_has_its_own_needs_attention_line(
+    run: Runner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An oversized or held-open file is not a wrong passphrase, and says which it is (#150)."""
+    data = data_folder()
+    backup_store.create_check_file(data.check_file, Secret(PASS))
+    data.cisco_key_file.write_bytes(b"x" * (64 * 1024 + 1))
+    fake = _serve(monkeypatch, _fake())
+
+    got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
+
+    assert got.code == ExitCode.NEEDS_ATTENTION
+    assert fake.requests == []
+    assert got.out.count(backup_store.KEY_FILE_UNREADABLE) == 1
+    assert backup_store.KEY_LOCKED_ELSEWHERE not in got.out
+
+
 def test_the_run_report_carries_the_run_end_attention(
     run: Runner,
 ) -> None:
@@ -489,6 +506,29 @@ def test_a_recorded_run_time_is_utc(
     when = _topology(_run_folder())["cisco_lookups"]["when"]
     assert when.endswith("+00:00")
     assert datetime.fromisoformat(when).tzinfo is not None
+
+
+def test_a_run_pins_one_reference_date_on_the_operator_local_day(
+    run: Runner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every Lifecycle Check judges EoX dates against the day the Run started, once (#150)."""
+    _store_key()
+    _serve(monkeypatch, _fake())
+    seen: list[AnalysisInput] = []
+    real = analysis.analyse
+
+    def spy(data: AnalysisInput) -> object:
+        seen.append(data)
+        return real(data)
+
+    monkeypatch.setattr(analysis, "analyse", spy)
+
+    got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
+
+    assert got.code == ExitCode.CLEAN, got.err
+    (data,) = seen
+    assert data.as_of is not None
+    assert data.as_of.date() == datetime.now().astimezone().date()
 
 
 def test_the_proxy_flag_reaches_the_online_transport(
@@ -527,7 +567,7 @@ def test_the_key_file_is_not_read_when_lookups_are_off(
     def fail(*_args: object, **_kwargs: object) -> None:
         pytest.fail("the key file must not be opened with lookups off")
 
-    monkeypatch.setattr(backup_store, "unlock_key_file", fail)
+    monkeypatch.setattr(backup_store, "open_key_file", fail)
 
     got = run(*FLAGS, typed=later_run())
 

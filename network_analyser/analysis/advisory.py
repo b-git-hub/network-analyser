@@ -73,8 +73,12 @@ _SOURCE: Final = "Cisco openVuln"
 _FLAGGED: Final = frozenset({FindingLevel.CRITICAL, FindingLevel.HIGH})
 _NOT_READ: Final = "show version not read"
 """The fixed reason `topology` gives a device whose `show version` was never read."""
-_ADVISORY_ID: Final = re.compile(r"cisco-sa-[A-Za-z0-9._-]{1,160}")
-"""What an Advisory id must match to keep a Check's stable id safe (story 51)."""
+_ADVISORY_ID: Final = re.compile(r"cisco-sa-[A-Za-z0-9-]{1,160}")
+"""What an Advisory id must match to keep a Check's stable id safe (story 51).
+
+#78 allows letters, digits and hyphens after `cisco-sa-` (case-insensitive); a dot or
+underscore is not part of a Cisco id, so such an id gets the shared `advisory-unnamed` Check
+(#150)."""
 _LIFECYCLE: Final = re.compile(r"[A-Z][A-Z0-9]{1,7}")
 """Cisco's lifecycle code shape: two to eight upper-case letters or digits, such as `ED`."""
 NEWER_THAN_LIST: Final = "running release is newer than Cisco's list"
