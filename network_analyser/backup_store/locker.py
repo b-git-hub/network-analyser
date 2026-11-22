@@ -33,6 +33,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Final
 
+from network_analyser._winsys import retry_rename
 from network_analyser.backup_store.check_file import BackupPassphrase
 from network_analyser.credentials import SecretScan
 from network_analyser.records.backup import BackupCapture, BackupRecord, BackupResults
@@ -299,4 +300,5 @@ def _write_new(folder: Path, name: str, locked: bytes) -> None:
         os.close(handle)
     if final.exists():  # one worker and the single-instance lock: nothing else writes here
         raise FileExistsError(name)
-    temporary.rename(final)  # on Windows, a rename never replaces a file either
+    # On Windows, a rename never replaces a file either.
+    retry_rename(lambda: temporary.rename(final))

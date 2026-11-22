@@ -7,6 +7,7 @@ from enum import Enum, unique
 from ipaddress import IPv4Address
 from pathlib import Path
 
+from network_analyser._winsys import retry_rename
 from network_analyser.records import HostKey, HostKeyCheck, HostKeyVerdict
 from network_analyser.trust_store import openssh
 
@@ -122,7 +123,11 @@ class TrustStore:
         return [entry for entry in (*self._entries, *self._preloaded) if entry.names(host)]
 
     def _write(self, text: str) -> None:
-        """Replace the Trust Store with `text`: temp file, flush to disk, then rename."""
+        """Replace the Trust Store with `text`: temp file, flush to disk, then rename.
+
+        Windows can refuse the rename for a moment while another process holds the new file
+        (#158); `retry_rename` waits a bounded time, and a refusal that outlasts it raises.
+        """
         self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         temporary = self._path.with_name(f"{self._path.name}.tmp-{secrets.token_hex(8)}")
         handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -131,7 +136,7 @@ class TrustStore:
             os.fsync(handle)
         finally:
             os.close(handle)
-        temporary.replace(self._path)
+        retry_rename(lambda: temporary.replace(self._path))
         self._text = text
         self._entries, _ = openssh.parse(text)
 

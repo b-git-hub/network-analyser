@@ -11,6 +11,8 @@ from collections.abc import Callable
 from typing import Any
 
 from network_analyser import diagram
+from network_analyser.analysis.advisory import NEWER_THAN_LIST
+from network_analyser.diagram import findings
 from tests.support.topology_documents import (
     device,
     document,
@@ -344,6 +346,9 @@ def test_an_advisory_pane_has_cisco_detail_the_fixed_line_and_affected_devices()
             "release": "17.12.4",
             "upgrade_target": "17.12.8",
             "latest_release": "17.12.10",
+            "latest_in_train": "17.12.10",
+            "latest_in_train_lifecycle": None,
+            "latest_release_lifecycle": None,
             "not_cleared": 0,
         },
         {
@@ -353,6 +358,9 @@ def test_an_advisory_pane_has_cisco_detail_the_fixed_line_and_affected_devices()
             "release": "17.12.4",
             "upgrade_target": "17.12.8",
             "latest_release": "17.12.10",
+            "latest_in_train": "17.12.10",
+            "latest_in_train_lifecycle": None,
+            "latest_release_lifecycle": None,
             "not_cleared": 0,
         },
     ]
@@ -412,6 +420,132 @@ def test_advice_this_file_does_not_hold_reads_as_not_available() -> None:
         "no fix in Train",
         "not available",
     )
+
+
+def test_the_advisory_pane_shows_both_latest_releases_with_their_lifecycle_codes() -> None:
+    data = document(
+        [
+            _advised(
+                "dev-S1",
+                "sw-a",
+                "192.0.2.1",
+                latest_in_train="17.12.8",
+                latest_release="26.2.1",
+                latest_in_train_lifecycle="MD",
+                latest_release_lifecycle="ED",
+            )
+        ],
+        findings=[
+            _finding(
+                "finding-adv",
+                "High",
+                "adv-x",
+                "Advisory X",
+                "Advisory",
+                devices=("dev-S1",),
+                cisco_detail=_advisory_detail(),
+            )
+        ],
+    )
+
+    (advisory,) = _tab(data)["levels"][0]["checks"]
+    (row,) = advisory["advisory"]["devices"]
+
+    assert (
+        row["latest_in_train"],
+        row["latest_in_train_lifecycle"],
+        row["latest_release"],
+        row["latest_release_lifecycle"],
+    ) == ("17.12.8", "MD", "26.2.1", "ED")
+    script = _script(_page(data))
+    assert "Latest Release" in script
+    assert "In Train:" in script
+    assert "overall:" in script
+
+
+def test_a_hostile_lifecycle_code_and_release_stay_escaped_data_in_the_pane() -> None:
+    data = document(
+        [
+            _advised(
+                "dev-S1",
+                "sw-a",
+                "192.0.2.1",
+                latest_in_train=HOSTILE,
+                latest_release=HOSTILE,
+                latest_in_train_lifecycle=HOSTILE,
+                latest_release_lifecycle=HOSTILE,
+            )
+        ],
+        findings=[
+            _finding(
+                "finding-adv",
+                "High",
+                "adv-x",
+                "Advisory X",
+                "Advisory",
+                devices=("dev-S1",),
+                cisco_detail=_advisory_detail(),
+            )
+        ],
+    )
+
+    page = _page(data)
+
+    assert "<img" not in page
+    assert page.count("</script>") == 2
+    (advisory,) = _tab(data)["levels"][0]["checks"]
+    (row,) = advisory["advisory"]["devices"]
+    assert (row["latest_release"], row["latest_release_lifecycle"]) == (HOSTILE, HOSTILE)
+    assert (row["latest_in_train"], row["latest_in_train_lifecycle"]) == (HOSTILE, HOSTILE)
+
+
+def test_no_lifecycle_code_beside_not_available_or_the_newer_release_text() -> None:
+    newer = "running release is newer than Cisco's list"
+    data = document(
+        [
+            _advised(
+                "dev-S1",
+                "sw-a",
+                "192.0.2.1",
+                latest_in_train="not available",
+                latest_release="not available",
+                latest_in_train_lifecycle="MD",
+                latest_release_lifecycle="ED",
+            ),
+            _advised(
+                "dev-S2",
+                "sw-b",
+                "192.0.2.2",
+                latest_in_train=newer,
+                latest_release=newer,
+                latest_in_train_lifecycle="MD",
+                latest_release_lifecycle="ED",
+            ),
+        ],
+        findings=[
+            _finding(
+                "finding-adv",
+                "High",
+                "adv-x",
+                "Advisory X",
+                "Advisory",
+                devices=("dev-S1", "dev-S2"),
+                cisco_detail=_advisory_detail(),
+            )
+        ],
+    )
+
+    (advisory,) = _tab(data)["levels"][0]["checks"]
+    first, second = advisory["advisory"]["devices"]
+
+    assert (first["latest_in_train"], first["latest_in_train_lifecycle"]) == ("not available", None)
+    assert (first["latest_release"], first["latest_release_lifecycle"]) == ("not available", None)
+    assert (second["latest_in_train"], second["latest_in_train_lifecycle"]) == (newer, None)
+    assert (second["latest_release"], second["latest_release_lifecycle"]) == (newer, None)
+
+
+def test_the_tabs_newer_release_text_matches_analysiss() -> None:
+    assert findings.NEWER_THAN_LIST == NEWER_THAN_LIST
 
 
 def test_another_check_s_pane_has_level_type_source_advice_and_where_it_was_found() -> None:

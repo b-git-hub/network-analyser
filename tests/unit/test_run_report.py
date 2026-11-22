@@ -5,6 +5,7 @@ written through the secret scan. `render` is covered in `test_render_command`.
 """
 
 import dataclasses
+import html
 import re
 from datetime import UTC, datetime
 from ipaddress import IPv4Address
@@ -13,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from network_analyser import discovery, topology
-from network_analyser.analysis.advisory import COULD_NOT_CHECK_CHECK
+from network_analyser.analysis.advisory import COULD_NOT_CHECK_CHECK, NEWER_THAN_LIST
 from network_analyser.analysis.catalogue import ROLE_CHECK
 from network_analyser.cli import ExitCode, summary
 from network_analyser.credentials import Secret, SecretScan
@@ -664,6 +665,97 @@ def _advice(device: str, target: str, *, not_cleared: int) -> DeviceAdvice:
         train="17.12",
         not_cleared=not_cleared,
     )
+
+
+def _latest_advice(
+    device: str,
+    *,
+    in_train: str = "17.12.10",
+    overall: str = "26.2.1",
+    in_train_lifecycle: str | None = None,
+    overall_lifecycle: str | None = None,
+) -> DeviceAdvice:
+    return dataclasses.replace(
+        _advice(device, "17.12.8", not_cleared=0),
+        latest_release_in_train=in_train,
+        latest_release=overall,
+        latest_in_train_lifecycle=in_train_lifecycle,
+        latest_release_lifecycle=overall_lifecycle,
+    )
+
+
+def test_the_visited_table_shows_both_latest_releases_with_their_lifecycle_codes() -> None:
+    base = _analysis_report()
+    advice = (
+        _latest_advice(
+            "dev-S1",
+            in_train="17.12.8",
+            overall="26.2.1",
+            in_train_lifecycle="MD",
+            overall_lifecycle="ED",
+        ),
+    )
+    built = dataclasses.replace(base.topology, analysis=AnalysisSummary(advice=advice, checks=()))
+
+    page = report_page.render_run_report(dataclasses.replace(base, topology=built), SecretScan())
+
+    visited = _section(page, "visited")
+    assert "<th>Latest Release</th>" in visited
+    assert "Latest Release in Train: 17.12.8 (MD); overall: 26.2.1 (ED)" in visited
+
+
+def test_a_hostile_lifecycle_code_and_release_are_escaped_in_the_visited_table() -> None:
+    base = _analysis_report()
+    advice = (
+        _latest_advice(
+            "dev-S1",
+            in_train=HOSTILE,
+            overall=HOSTILE,
+            in_train_lifecycle=HOSTILE,
+            overall_lifecycle=HOSTILE,
+        ),
+    )
+    built = dataclasses.replace(base.topology, analysis=AnalysisSummary(advice=advice, checks=()))
+
+    page = report_page.render_run_report(dataclasses.replace(base, topology=built), SecretScan())
+
+    assert _SCRIPT.search(page) is None
+    assert _URL.search(page) is None
+    assert "&lt;script&gt;" in page
+    assert HOSTILE not in page
+
+
+def test_no_lifecycle_code_beside_not_available_or_the_newer_release_text() -> None:
+    base = _analysis_report()
+    advice = (
+        _latest_advice(
+            "dev-S1",
+            in_train="not available",
+            overall="26.2.1",
+            in_train_lifecycle="MD",
+            overall_lifecycle="ED",
+        ),
+        _latest_advice(
+            "dev-S2",
+            in_train="17.12.10",
+            overall=report_page.NEWER_THAN_LIST,
+            overall_lifecycle="ED",
+        ),
+    )
+    built = dataclasses.replace(base.topology, analysis=AnalysisSummary(advice=advice, checks=()))
+
+    page = report_page.render_run_report(dataclasses.replace(base, topology=built), SecretScan())
+
+    visited = _section(page, "visited")
+    assert "Latest Release in Train: not available; overall: 26.2.1 (ED)" in visited
+    newer = html.escape(report_page.NEWER_THAN_LIST)
+    assert f"Latest Release in Train: 17.12.10; overall: {newer}" in visited
+    assert "not available (MD)" not in visited
+    assert f"{newer} (ED)" not in visited
+
+
+def test_the_run_reports_newer_release_text_matches_analysiss() -> None:
+    assert report_page.NEWER_THAN_LIST == NEWER_THAN_LIST
 
 
 def test_v1s_other_report_sections_are_unchanged() -> None:

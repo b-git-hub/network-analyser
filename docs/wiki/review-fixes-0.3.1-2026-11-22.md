@@ -30,7 +30,8 @@ defaults; IOS-XE default vty transport) and two that need lab checks (CoPP on a 
 K5; `% Invalid input`, K7 and L1).
 
 Open children at `6ce2cf9`: #136, #139, #140, #142, #143, #144, #145, #146, #147, #149,
-#150, #151, #153, #154, #155, #156, #157, #158, #159, #160, #164, #165, #166.
+#150, #151, #153, #154, #155, #156, #157, #158, #159, #160, #164, #165, #166. #167 was
+opened on 2026-11-22 for a parallel-gate temp-dir race found during Wave A.
 
 Operator decisions already recorded: #142 type 5 on IOS-XE (2026-11-21, take the
 recommendation); #145 make behaviour match ADR 0007, choosing option 3 or option 1 after
@@ -42,7 +43,9 @@ This is a **collision plan**, not a claim that every later ticket is blocked. Ti
 share files are merged in the order shown. "Wave" means the work can start; merges stay
 serial.
 
-**Wave A (disjoint files, run in parallel):** #139, #140, #143, #144, #147, #158, #159, #166.
+**Wave A (disjoint files, run in parallel):** #139, #140, #143, #144, #147, #158, #159, #166,
+plus #167 (gate temp-dir race found during Wave A). Until #167 lands, every gate sets
+`PYTEST_DEBUG_TEMPROOT` to a worktree-local path; see the gate baseline page.
 
 **Wave B (start when the named file-owner has merged):**
 
@@ -77,6 +80,21 @@ last on the integration branch.
 
 - 2026-11-22: integration branch refreshed to `6ce2cf9`; coordination, implementer, merger
   and gate-baseline pages created. Wave A worktrees opened.
+- 2026-11-22: a baseline gate run crashed at pytest session finish on the shared
+  `pytest-current` link when several gates ran at once. #167 opened and Wave A agents told to
+  set `PYTEST_DEBUG_TEMPROOT` per worktree.
+- 2026-11-22: merged #139 at `a308ac2`; gate: ruff/format/mypy pass, pytest 2978 passed, 1
+  skipped, 21 failed (all Windows baseline; #158 and #160 passed); baseline page's
+  `test_an_account_that_can_only_read_the_folder_refuses_too` corrected to `test_another_...`.
+- 2026-11-22: merged #167 at `bf22e2b`; gate: ruff/format/mypy pass, pytest 2980 passed, 1
+  skipped, 21 failed (baseline), run plain with no `PYTEST_DEBUG_TEMPROOT`; the
+  parallel-temp workaround is no longer needed from this merge commit.
+- 2026-11-22: merged #144 at `51479c7`; gate: ruff/format/mypy pass, pytest 2983 passed, 1
+  skipped, 21 failed (baseline); `change-passphrase` now leaves the change pending when
+  `cisco-key.age` was not re-locked.
+- 2026-11-22: merged #158 at `ab31b6b`; gate: ruff/format/mypy pass, pytest 2990 passed, 1
+  skipped, 21 failed (baseline); all temp-then-rename writers now share
+  `_winsys/rename.retry_rename`, so the intermittent is covered (ticket closed).
 - 2026-11-22, [#143](https://github.com/b-git-hub/network-analyser/issues/143): a Run stopped
   by Ctrl+C takes the offline path even with `--cisco-lookups on`, a Ctrl+C during the online
   step still writes every output and is reported stopped, and the key/passphrase wipes cover

@@ -21,6 +21,7 @@ from typing import Final, NoReturn, final, override
 
 import pyrage
 
+from network_analyser._winsys import retry_rename
 from network_analyser.credentials import Secret, SecretScan
 from network_analyser.credentials.secret import HELD_IN_MEMORY
 
@@ -207,7 +208,7 @@ def _write_new(path: Path, locked: bytes) -> None:
         os.fsync(handle)
     finally:
         os.close(handle)
-    temporary.replace(path)
+    retry_rename(lambda: temporary.replace(path))
 
 
 def unlock_check_file(
