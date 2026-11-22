@@ -124,6 +124,21 @@ last on the integration branch.
   #160, `MERGEABLE`) was left unmerged because it is second in this batch's order. The
   coordinator decides whether the #143 owner rebases forward onto `e625f25` and re-runs the
   gate.
+- 2026-11-22: merged #160 at `25f2f55`; gate: ruff/format/mypy pass, pytest 3005 passed, 1
+  skipped, 21 failed (baseline); security test 6's autouse fixture fakes the crash-dump
+  registry, so its result no longer depends on this PC's `LocalDumps`/`AeDebug` settings, and
+  it passed inside the full run (ticket closed). #158's intermittent also passed.
+- 2026-11-22: merged #147 at `36b09ef`; gate: ruff/format/mypy pass, pytest 3031 passed, 1
+  skipped, 21 failed (baseline); the Train classifier covers every published Train from 16.6
+  by rule and a controller-managed IOS XE SD-WAN device is never matched as IOS-XE. The
+  earlier `CHANGELOG.md` conflict was resolved by #147's owner on the branch (merge forward
+  at `d5d7001`) before this merge; nothing was resolved by the merger.
+- 2026-11-22: **#175 blocked again, not merged.** PR #175 (`ticket-143-run-end-durability`,
+  ticket #143, head `2dc5a2b`) is `CONFLICTING` on `docs/wiki/review-fixes-0.3.1-2026-11-22.md`
+  only: both sides append dated lines after the same Log tail, and the integration branch has
+  gained the #140, #166, #176 and #147 entries since its base. `git merge-tree` names no other
+  conflicting file. No merge was attempted, nothing was forced or rewritten, and no gate was
+  run. #143's owner needs to rebase forward onto this tip and re-run the gate.
 - 2026-11-22: **#175 unblocked.** The #143 owner merged `origin/build/review-fixes-0.3.1`
-  (`0214b75`) forward; only this Log conflicted, and every dated line above is kept. The
-  ticket's own tests and the #144 `change-passphrase` rule both still hold.
+  (`92e24f1`) forward; only this Log conflicted, and every dated line above is kept. The
+  ticket's own tests, the #144 `change-passphrase` rule and the #147/#160 work all still hold.
