@@ -86,7 +86,7 @@ def _add_pid(pids: set[str], item: HardwareItem) -> None:
 
 def _release_question(data: AnalysisInput, device: VisitedDevice) -> ReleaseQuestion | None:
     """The one question a device's release asks, or None when its family is not in the table."""
-    os_type = family_of(device.platform, device.software_version)
+    os_type = family_of(device.platform, device.software_version, device.router_operating_mode)
     if os_type is None or not isinstance(device.software_version, str):
         return None
     release = normalise_release(device.software_version)

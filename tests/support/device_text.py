@@ -40,6 +40,23 @@ cisco IOU-L2 (i86bi_LinuxL2) processor (revision 2.0) with 2048K/1024K bytes of 
 Processor board ID TEST0000B01
 """
 
+IOS_XE_SDWAN_SHOW_VERSION = """\
+Cisco IOS XE Software, Version 17.09.04a
+Cisco IOS Software [Cupertino], ISR Software (X86_64_LINUX_IOSD-UNIVERSALK9-M), \
+Version 17.9.4a, RELEASE SOFTWARE (fc5)
+Copyright (c) 1986-2023 by Cisco Systems, Inc.
+
+ROM: IOS-XE ROMMON
+sdw-a uptime is 1 week, 2 days, 3 hours, 4 minutes
+System returned to ROM by Reload Command
+System image file is "bootflash:packages.conf"
+
+cisco C8300-1N1S-4T2X (X86) processor with 1392536K/6147K bytes of memory.
+Processor board ID TEST0000E01
+Configuration register is 0x102
+Router operating mode: Controller-Managed
+"""
+
 NXOS_SHOW_VERSION = """\
 Cisco Nexus Operating System (NX-OS) Software
 Software
