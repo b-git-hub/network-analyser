@@ -76,11 +76,16 @@ def final_summary(
     *,
     elapsed_s: float,
     extra_attention: Sequence[str] = (),
+    stopped_by_operator: bool = False,
 ) -> str:
-    """Return the final summary block (story 87)."""
+    """Return the final summary block (story 87).
+
+    `stopped_by_operator` says the operator's Ctrl+C ended the Run's online step after every
+    device was visited, so the outcome line still says the Run was stopped (#143).
+    """
     attention = attention_items(result, backups, extra=extra_attention)
     lines = [
-        _outcome(result, len(attention), elapsed_s),
+        _outcome(result, len(attention), elapsed_s, stopped_by_operator=stopped_by_operator),
         _visited_line(result, backups),
         *_unvisited_lines(result),
     ]
@@ -161,9 +166,11 @@ def retirement_notice(event: CredentialSetRetired) -> str:
 # -- Lines ---------------------------------------------------------------------------------
 
 
-def _outcome(result: CrawlResult, attention: int, elapsed_s: float) -> str:
+def _outcome(
+    result: CrawlResult, attention: int, elapsed_s: float, *, stopped_by_operator: bool
+) -> str:
     took = _clock(elapsed_s)
-    if result.stopped == STOPPED_BY_CTRL_C:
+    if result.stopped == STOPPED_BY_CTRL_C or stopped_by_operator:
         return f"Run STOPPED by Ctrl+C after {took}. Outputs cover what was found before the stop."
     if result.stopped:
         return f"Run STOPPED after {took}: {result.stopped}."

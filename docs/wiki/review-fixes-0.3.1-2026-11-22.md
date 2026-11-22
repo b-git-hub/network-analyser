@@ -95,6 +95,13 @@ last on the integration branch.
 - 2026-11-22: merged #158 at `ab31b6b`; gate: ruff/format/mypy pass, pytest 2990 passed, 1
   skipped, 21 failed (baseline); all temp-then-rename writers now share
   `_winsys/rename.retry_rename`, so the intermittent is covered (ticket closed).
+- 2026-11-22, [#143](https://github.com/b-git-hub/network-analyser/issues/143): a Run stopped
+  by Ctrl+C takes the offline path even with `--cisco-lookups on`, a Ctrl+C during the online
+  step still writes every output and is reported stopped, and the key/passphrase wipes cover
+  every path out of the Run. **Decision recorded:** starting over (a hand-deleted check file)
+  still deletes `cisco-key.age` with `--cisco-lookups off`; story 39 (an orphaned key is a
+  secret) wins over story 9 (lookups off never touches the file). Code comment in
+  `cli/run_secrets.py`.
 - 2026-11-22: merged #140 at `4c691c4`; gate: ruff/format/mypy pass, pytest 2997 passed, 1
   skipped, 21 failed (baseline); every Cisco insecure-list entry now names a shipped Check id,
   enforced by a test that refuses stale ids.
@@ -132,3 +139,6 @@ last on the integration branch.
   gained the #140, #166, #176 and #147 entries since its base. `git merge-tree` names no other
   conflicting file. No merge was attempted, nothing was forced or rewritten, and no gate was
   run. #143's owner needs to rebase forward onto this tip and re-run the gate.
+- 2026-11-22: **#175 unblocked.** The #143 owner merged `origin/build/review-fixes-0.3.1`
+  (`92e24f1`) forward; only this Log conflicted, and every dated line above is kept. The
+  ticket's own tests, the #144 `change-passphrase` rule and the #147/#160 work all still hold.

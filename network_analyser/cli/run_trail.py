@@ -61,36 +61,42 @@ def run_with_audit_trail(  # noqa: PLR0913, PLR0917 (the Run's trail, every depe
     except run_output.AuditLogError:
         return _audit_stop()
     started = time.monotonic()
+    result: CrawlResult | None = None
+    backups: BackupResults | None = None
+    outcome: EndOutcome | None = None
     try:
         audit.record(_run_started(request, sets, folder))
         result, backups = crawl(audit)
-        visited = sum(1 for r in result.devices if r.outcome is not DeviceOutcome.UNVISITED)
-        unvisited = len(result.devices) - visited + len(result.unvisited)
-        written = backup_summary.written(backups)
-        ending = RunEnding.STOPPED if result.stopped else RunEnding.COMPLETED
         outcome = end(audit, result)
-        audit.record(RunEnded(ending, visited, unvisited, written, scan.hits))
+        ending = RunEnding.STOPPED if result.stopped or outcome.stopped else RunEnding.COMPLETED
+        audit.record(RunEnded(ending, *_counts(result, backups), scan.hits))
     except run_output.AuditLogError:
         return _audit_stop()
     except KeyboardInterrupt:
         _record_last(audit, CtrlCPressed(press=1, sessions_running=0))
-        _record_last(audit, RunEnded(RunEnding.STOPPED, 0, 0, 0, scan.hits))
+        _record_last(audit, RunEnded(RunEnding.STOPPED, *_counts(result, backups), scan.hits))
         raise
     except Exception:
-        _record_last(audit, RunEnded(RunEnding.CRASHED, 0, 0, 0, scan.hits))
+        _record_last(audit, RunEnded(RunEnding.CRASHED, *_counts(result, backups), scan.hits))
         raise
     finally:
         audit.close()
+    assert result is not None  # noqa: S101 (every other path returned or raised)
+    assert backups is not None  # noqa: S101 (every other path returned or raised)
+    assert outcome is not None  # noqa: S101 (every other path returned or raised)
     print(
         summary.final_summary(
             result,
             backups,
             elapsed_s=time.monotonic() - started,
             extra_attention=outcome.attention,
+            stopped_by_operator=outcome.stopped,
         )
     )
     return Conclusion(
-        summary.exit_code(
+        ExitCode.STOPPED
+        if outcome.stopped
+        else summary.exit_code(
             result,
             backups,
             scan_hits=scan.hits,
@@ -99,6 +105,15 @@ def run_with_audit_trail(  # noqa: PLR0913, PLR0917 (the Run's trail, every depe
         written=outcome.written,
         attempted=True,
     )
+
+
+def _counts(result: CrawlResult | None, backups: BackupResults | None) -> tuple[int, int, int]:
+    """Visited, Unvisited and Backups-written counts, or zeros before the crawl returned."""
+    if result is None or backups is None:
+        return (0, 0, 0)
+    visited = sum(1 for r in result.devices if r.outcome is not DeviceOutcome.UNVISITED)
+    unvisited = len(result.devices) - visited + len(result.unvisited)
+    return (visited, unvisited, backup_summary.written(backups))
 
 
 def _run_started(
