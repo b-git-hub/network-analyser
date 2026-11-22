@@ -366,6 +366,14 @@ def _online_fake() -> fake_cisco.FakeCisco:
                 "LastDateOfSupport": {"value": "2099-01-01"},
             }
         },
+        eox_release={
+            "17.9.4a": {
+                "EOLProductID": "17.9.4a",
+                "EOXInputValue": "17.9.4a",
+                "EOXInputType": "Software",
+                "LastDateOfSupport": {"value": "2099-01-01"},
+            }
+        },
         suggestions={
             "C9300-48P": [
                 {
@@ -413,6 +421,10 @@ def test_a_whole_online_run_keeps_every_canary_off_disk_and_renders_the_findings
         path.startswith("/software/suggestion/v2/suggestions/compatible/productId/")
         for path in fake.paths()
     ), fake.paths()
+    (software_eox_path,) = [path for path in fake.paths() if "EOXBySWReleaseString" in path]
+    assert software_eox_path == (
+        "/supporttools/eox/rest/5/EOXBySWReleaseString/1?input1=17.9.4a,IOS-XE"
+    )
     document = json.loads((folder / "topology.json").read_text(encoding="utf-8"))
     assert document["devices"][0]["advice"]["latest_release"] == "17.12.8"
     findings = (folder / "findings.html").read_text(encoding="utf-8")

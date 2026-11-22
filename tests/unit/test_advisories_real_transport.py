@@ -23,6 +23,7 @@ from network_analyser.records.cisco import (
     EoxAnswer,
     LookupQuestions,
     ReleaseQuestion,
+    SoftwareEoxQuestion,
     SuggestionsAnswer,
     TokenOutcome,
 )
@@ -163,7 +164,7 @@ def questions() -> LookupQuestions:
     return LookupQuestions(
         releases=(ReleaseQuestion(CiscoOsType.IOS_XE, RELEASE),),
         hardware_pids=(PID,),
-        software_releases=(RELEASE,),
+        software_releases=(SoftwareEoxQuestion(CiscoOsType.IOS_XE, RELEASE),),
         suggestion_pids=(PID,),
         compatible_pids=(PID,),
     )
@@ -191,6 +192,11 @@ def test_ask_cisco_runs_the_real_transport_from_the_token_to_each_parsed_answer(
     assert hardware.records[0].product_id == PID
     assert isinstance(software, EoxAnswer)
     assert software.records[0].input_value == RELEASE
+    requests = [bytes(sock.sent) for sock in fake.context.tls_sockets]
+    (software_request,) = [request for request in requests if b"EOXBySWReleaseString" in request]
+    assert software_request.split(b"\r\n", 1)[0] == (
+        b"GET /supporttools/eox/rest/5/EOXBySWReleaseString/1?input1=17.9.4a,IOS-XE HTTP/1.1"
+    )
     suggestions = answers.suggestions
     assert isinstance(suggestions, SuggestionsAnswer)
     assert suggestions.answers[0].product_id == PID
@@ -236,4 +242,10 @@ def test_the_real_transport_sends_the_token_envelope_and_the_bearer_on_every_api
         assert fake_cisco.CLIENT_ID.encode() not in request
         assert fake_cisco.CLIENT_SECRET.encode() not in request
         assert b"currentRelease" not in request
+    software_request = next(
+        request for request in api_requests if b"/EOXBySWReleaseString/" in request
+    )
+    assert software_request.split(b"\r\n", 1)[0] == (
+        b"GET /supporttools/eox/rest/5/EOXBySWReleaseString/1?input1=17.9.4a,IOS-XE HTTP/1.1"
+    )
     assert fake.sent_in_clear() == b""
