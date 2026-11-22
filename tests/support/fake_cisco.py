@@ -456,9 +456,10 @@ CISCO_REPLY = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"
 class FakeSocket:
     """A socket with scripted incoming bytes that records everything sent on it."""
 
-    def __init__(self, incoming: bytes) -> None:
-        """Hold the bytes the other end will say."""
+    def __init__(self, incoming: bytes, on_send: Callable[[bytes], bytes] | None = None) -> None:
+        """Hold the bytes the other end will say, and how to answer what this end sends."""
         self._incoming = incoming
+        self._on_send = on_send
         self.sent = bytearray()
         self.closed = False
 
@@ -469,8 +470,10 @@ class FakeSocket:
         """Accept an option."""
 
     def sendall(self, data: bytes) -> None:
-        """Record what was sent."""
+        """Record what was sent, and let the far end answer it when it is scripted to."""
         self.sent += data
+        if self._on_send is not None:
+            self._incoming += self._on_send(bytes(data))
 
     def makefile(self, *_args: object, **_kwargs: object) -> io.BytesIO:
         """Hand out the scripted incoming bytes."""
@@ -490,9 +493,10 @@ class FakeTlsContext:
     check_hostname = True
     verify_mode = ssl.CERT_REQUIRED
 
-    def __init__(self, tls_reply: bytes) -> None:
-        """Hold the bytes the far end says once the handshake is done."""
+    def __init__(self, tls_reply: bytes, on_send: Callable[[bytes], bytes] | None = None) -> None:
+        """Hold how the far end answers what arrives after the handshake."""
         self._tls_reply = tls_reply
+        self._on_send = on_send
         self.server_names: list[str | None] = []
         self.wrapped: list[FakeSocket] = []
         self.tls_sockets: list[FakeSocket] = []
@@ -501,7 +505,8 @@ class FakeTlsContext:
         """Record the name the certificate would be checked against."""
         self.server_names.append(server_hostname)
         self.wrapped.append(sock)
-        wrapped = FakeSocket(self._tls_reply)
+        reply = b"" if self._on_send is not None else self._tls_reply
+        wrapped = FakeSocket(reply, self._on_send)
         self.tls_sockets.append(wrapped)
         return wrapped
 
@@ -511,18 +516,32 @@ class FakeNetwork:
     """`socket.create_connection` and the TLS context, on in-memory sockets.
 
     `connected` is every address the code under test tried to reach, so a test can say
-    that nothing but the proxy was ever dialled.
+    that nothing but the proxy was ever dialled. `replies` answers each request by its path
+    prefix, so one test can run the real transport through the token and every API path;
+    a request that matches none is answered with `cisco_says`.
     """
 
     proxy_says: bytes = CONNECT_ESTABLISHED
     cisco_says: bytes = CISCO_REPLY
+    replies: list[tuple[str, bytes]] = field(default_factory=list)
     connected: list[tuple[str, int]] = field(default_factory=list)
     plain_sockets: list[FakeSocket] = field(default_factory=list)
     context: FakeTlsContext = field(init=False)
 
     def __post_init__(self) -> None:
         """Make the TLS context that answers as Cisco."""
-        self.context = FakeTlsContext(self.cisco_says)
+        self.context = FakeTlsContext(self.cisco_says, on_send=self._reply_for)
+
+    def _reply_for(self, request: bytes) -> bytes:
+        """Return the scripted reply for one request's path, or the default reply."""
+        try:
+            path = request.split(b"\r\n", 1)[0].split(b" ")[1].decode("latin-1")
+        except IndexError:
+            return self.cisco_says
+        return next(
+            (reply for prefix, reply in self.replies if path.startswith(prefix)),
+            self.cisco_says,
+        )
 
     def create_connection(
         self, address: tuple[str, int], _timeout: float | None = None, *_args: object

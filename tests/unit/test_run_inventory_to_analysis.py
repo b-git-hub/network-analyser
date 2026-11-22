@@ -191,6 +191,11 @@ def test_software_suggestion_is_asked_about_the_chassis_pid_only(
     for path in suggestion_paths:
         assert SUPERVISOR not in path
         assert LINE_CARD not in path
+    compatible_paths = [path for path in fake.paths() if "/compatible/productId/" in path]
+    assert compatible_paths
+    for path in compatible_paths:
+        assert SUPERVISOR not in path, "a supervisor PID reached the compatible list (#149)"
+        assert LINE_CARD not in path, "a line-card PID reached the compatible list (#149)"
     assert any(SUPERVISOR in path for path in fake.paths() if "/eox/" in path)
 
 

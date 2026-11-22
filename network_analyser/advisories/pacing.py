@@ -17,6 +17,12 @@ from typing import Final
 from network_analyser.advisories.numbers import whole_number
 from network_analyser.records.cisco import CiscoEndpoint
 
+monotonic: Final = time.monotonic
+"""The default clock, named here so a test can inject its own with `monkeypatch` (#149)."""
+
+sleep: Final = time.sleep
+"""The default wait, named here for the same reason: a test never waits for real (#149)."""
+
 OPENVULN_INTERVAL_S: Final = 2.0
 """30 calls a minute (story 19)."""
 
@@ -53,12 +59,16 @@ class Pacer:
     def __init__(
         self,
         *,
-        clock: Callable[[], float] = time.monotonic,
-        wait: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] | None = None,
+        wait: Callable[[float], None] | None = None,
     ) -> None:
-        """Use `clock` for time and `wait` to pause; tests replace both, so none waits."""
-        self._clock = clock
-        self._wait = wait
+        """Use `clock` for time and `wait` to pause; tests replace both, so none waits.
+
+        The defaults are read when the `Pacer` is made, never bound at import, so the Run's
+        own online step picks up the clock a test injects (#149).
+        """
+        self._clock = monotonic if clock is None else clock
+        self._wait = sleep if wait is None else wait
         self._last: dict[CiscoEndpoint, float] = {}
         self.waits: list[float] = []
 

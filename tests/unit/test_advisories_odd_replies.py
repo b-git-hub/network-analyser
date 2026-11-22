@@ -180,6 +180,26 @@ def test_an_ascii_retry_after_is_still_honoured() -> None:
     assert isinstance(answers.advisories[0], AdvisoriesAnswer)
 
 
+def test_a_malformed_200_body_can_be_planted_at_the_fake_and_is_not_understood() -> None:
+    """The fake carries a status, headers and any body, so a malformed shape can be planted."""
+    fake = FakeCisco()
+    fake.scripted.append(
+        (
+            "/security",
+            HttpResponse(
+                status=200,
+                headers=(("Content-Type", "application/json"),),
+                body=b'{"advisories": "not a list"}',
+            ),
+        )
+    )
+
+    answers, _ = lookup(fake, LookupQuestions(releases=(release_question(),)))
+
+    assert answers.advisories == (SourceUnavailable("Cisco's reply was not understood"),)
+    assert answers.tally.token.outcome is TokenOutcome.OK
+
+
 def test_a_reply_that_cannot_be_parsed_makes_only_its_own_source_not_understood(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
