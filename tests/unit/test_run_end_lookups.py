@@ -502,3 +502,57 @@ def test_a_compatible_page_cap_is_not_available_and_adds_no_attention_line(
     )
     assert compatible[4] == 20
     assert "C9300-48P" not in json.dumps(analysis)
+
+
+def test_a_token_that_expires_mid_run_keeps_the_answers_and_does_not_blame_the_key(
+    run: Runner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _store_key()
+    fake = _serve(monkeypatch, _fake())
+    fake.scripted.append(("/supporttools", _status(401)))
+
+    got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
+
+    assert got.code == ExitCode.NEEDS_ATTENTION
+    lines = [line for line in got.out.splitlines() if "stopped early" in line]
+    assert len(lines) == 1, got.out
+    assert "Cisco's token expired" in lines[0]
+    assert "cisco-key set" not in got.out
+    assert REJECTED not in got.out
+    assert "did not run:" not in got.out
+    assert fake.token_calls() == 1  # the one-token rule held: no second token was asked for
+    assert (Path(_run_folder()) / "backups").is_dir()
+    document = _topology(_run_folder())
+    assert any(finding["check"]["type"] == "Advisory" for finding in document["findings"])
+    analysis = next(line for line in _audit(_run_folder()) if line["event"] == "analysis")
+    assert analysis["token_outcome"] == "ok"
+    openvuln = next(item for item in analysis["endpoints"] if item[0] == "openVuln")
+    assert openvuln[1] >= 1  # the calls that went out are still counted
+
+
+def test_a_failure_nobody_expected_still_records_what_was_sent(
+    run: Runner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _store_key()
+    fake = _serve(monkeypatch, _fake())
+
+    def explode(request: object) -> None:
+        if getattr(request, "path", "").startswith("/supporttools"):
+            raise RuntimeError
+
+    fake.on_request = explode
+
+    got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
+
+    assert "Cisco lookups did not finish" in got.err
+    assert (Path(_run_folder()) / "backups").is_dir()
+    analysis = next(line for line in _audit(_run_folder()) if line["event"] == "analysis")
+    assert analysis["token_outcome"] == "ok"
+    by_name = {item[0]: item for item in analysis["endpoints"]}
+    assert by_name["openVuln"][1] >= 1
+    assert by_name["EoX"][1] == 1
+    written = (_run_folder() / "audit.log").read_text(encoding="utf-8")
+    for secret in (CLIENT_ID, CLIENT_SECRET, TOKEN, PASS):
+        assert secret not in written

@@ -16,7 +16,8 @@ from network_analyser.cli import run_analysis
 from network_analyser.records import Platform
 from network_analyser.records.analysis import AnalysisInput, OsType
 from network_analyser.records.device import DeviceRecord
-from tests.support.topology_records import visited
+from tests.support.analysis_records import collected_of
+from tests.support.topology_records import chassis_inventory, visited
 
 SWITCH = "C9300-48P"
 ISR_4K = "ISR4451-X/K9"
@@ -25,45 +26,46 @@ VIRTUAL = "C9300v"
 NEXUS_VIRTUAL = "N9K-C9300v"
 
 
-def device(
+def device(  # noqa: PLR0913 (every device field the Check reads, by name)
     address: str,
     hostname: str,
     *,
     model: str,
     release: str,
     platform: Platform = Platform.IOS_XE,
+    chassis: str | None = None,
 ) -> DeviceRecord:
-    record = visited(address, f"SN-{hostname}", hostname, platform=platform)
+    inventory = chassis_inventory(chassis) if chassis is not None else None
+    record = visited(address, f"SN-{hostname}", hostname, platform=platform, inventory=inventory)
     version = record.version
     assert version is not None
     return replace(record, version=replace(version, model=model, software_version=release))
 
 
 def estate() -> AnalysisInput:
-    return AnalysisInput(
-        topology=topology.build(
-            [
-                device("192.0.2.1", "sw-a", model=SWITCH, release="17.9.4a"),
-                device("192.0.2.2", "rtr-a", model=ISR_4K, release="16.9.3"),
-                device("192.0.2.3", "rtr-b", model=ISR_G2, release="15.7(3)M9"),
-                device("192.0.2.4", "sw-b", model=VIRTUAL, release="17.12.1"),
-                device(
-                    "192.0.2.5",
-                    "nx-a",
-                    model=NEXUS_VIRTUAL,
-                    release="9.3(10)",
-                    platform=Platform.NX_OS,
-                ),
-                device(
-                    "192.0.2.6",
-                    "nx-b",
-                    model="N9K-C93180YC-FX",
-                    release="7.0(3)I7(9)",
-                    platform=Platform.NX_OS,
-                ),
-            ]
-        )
-    )
+    records = [
+        device("192.0.2.1", "sw-a", model=SWITCH, release="17.9.4a"),
+        device("192.0.2.2", "rtr-a", model=ISR_4K, release="16.9.3"),
+        device("192.0.2.3", "rtr-b", model=ISR_G2, release="15.7(3)M9"),
+        device("192.0.2.4", "sw-b", model=VIRTUAL, release="17.12.1"),
+        device(
+            "192.0.2.5",
+            "nx-a",
+            model="C9300v",
+            chassis=NEXUS_VIRTUAL,
+            release="9.3(10)",
+            platform=Platform.NX_OS,
+        ),
+        device(
+            "192.0.2.6",
+            "nx-b",
+            model="C93180YC-FX",
+            chassis="N9K-C93180YC-FX",
+            release="7.0(3)I7(9)",
+            platform=Platform.NX_OS,
+        ),
+    ]
+    return AnalysisInput(topology=topology.build(records), collected=collected_of(*records))
 
 
 def test_every_pid_analysis_asks_for_passes_the_advisories_pattern() -> None:

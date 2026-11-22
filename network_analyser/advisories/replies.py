@@ -13,6 +13,7 @@ import json
 import re
 from typing import Any, Final
 
+from network_analyser.advisories.numbers import last_page
 from network_analyser.records.cisco import (
     AdvisoriesAnswer,
     CiscoAdvisory,
@@ -190,32 +191,26 @@ def compatible_error_answer(product_id: str, status: int, body: bytes) -> Compat
     return CompatibleUnanswered(product_id=product_id, reason=code or f"HTTP {status}")
 
 
-def compatible_last_page(body: bytes) -> int:
-    """Return the last `pageIndex` Cisco's compatible reply names; 1 when it does not say."""
+def compatible_last_page(body: bytes, *, ceiling: int) -> int:
+    """Return the last `pageIndex` Cisco's compatible reply names, at most `ceiling`.
+
+    1 when the reply names none or names something that is not a page number (#133).
+    """
     document = _document(body)
     record = document.get("paginationResponseRecord") if document is not None else None
     value = record.get("lastIndex") if isinstance(record, dict) else None
-    if isinstance(value, bool):
-        return 1
-    if isinstance(value, int) and value > 0:
-        return value
-    if isinstance(value, str) and value.isdigit() and int(value) > 0:
-        return int(value)
-    return 1
+    return last_page(value, ceiling=ceiling)
 
 
-def eox_last_page(body: bytes) -> int:
-    """Return the last page Cisco's EoX reply says there is; 1 when it does not say."""
+def eox_last_page(body: bytes, *, ceiling: int) -> int:
+    """Return the last page Cisco's EoX reply says there is, at most `ceiling`.
+
+    1 when the reply names none or names something that is not a page number (#133).
+    """
     document = _document(body)
     record = document.get("PaginationResponseRecord") if document is not None else None
     value = record.get("LastIndex") if isinstance(record, dict) else None
-    if isinstance(value, bool):
-        return 1
-    if isinstance(value, int) and value > 0:
-        return value
-    if isinstance(value, str) and value.isdigit() and int(value) > 0:
-        return int(value)
-    return 1
+    return last_page(value, ceiling=ceiling)
 
 
 def _document(body: bytes) -> dict[str, Any] | None:

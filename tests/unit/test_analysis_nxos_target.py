@@ -31,10 +31,12 @@ from network_analyser.records.topology import (
     FindingLevel,
 )
 from network_analyser.records.unknown import Unknown
-from tests.support.topology_records import visited
+from tests.support.analysis_records import collected_of
+from tests.support.topology_records import chassis_inventory, visited
 
 A = "192.0.2.1"
-MODEL = "N9K-C93180YC-FX"
+MODEL = "C93180YC-FX"
+CHASSIS = "N9K-C93180YC-FX"
 RUNNING = "10.4(3)"
 TRAIN = "10.4"
 SERIES = "NEXUS9000"
@@ -47,11 +49,12 @@ SECOND = "cisco-sa-nxos-0002"
 THIRD = "cisco-sa-nxos-0003"
 
 
-def _device(*, model: str | Unknown = MODEL, release: str = RUNNING) -> DeviceRecord:
-    record = visited(A, "S1", "sw-a", platform=Platform.NX_OS)
+def _device(*, chassis: str | Unknown = CHASSIS, release: str = RUNNING) -> DeviceRecord:
+    inventory = chassis_inventory(chassis) if isinstance(chassis, str) else chassis
+    record = visited(A, "S1", "sw-a", platform=Platform.NX_OS, inventory=inventory)
     version = record.version
     assert version is not None
-    return replace(record, version=replace(version, model=model, software_version=release))
+    return replace(record, version=replace(version, model=MODEL, software_version=release))
 
 
 def _fix(release: str, train: str = TRAIN) -> FixedRelease:
@@ -83,13 +86,15 @@ def _advisory(
 
 def _results(
     *advisories: AdvisoryAnswer,
-    model: str | Unknown = MODEL,
+    chassis: str | Unknown = CHASSIS,
     release: str = RUNNING,
     family: str | None = SERIES,
 ) -> AnalysisResults:
+    record = _device(chassis=chassis, release=release)
     return analysis.analyse(
         AnalysisInput(
-            topology=topology.build((_device(model=model, release=release),)),
+            topology=topology.build((record,)),
+            collected=collected_of(record),
             answers=CiscoAnswers(
                 advisories=(
                     ReleaseAdvisories(
@@ -150,7 +155,7 @@ def test_an_unnamed_platform_entry_is_ignored() -> None:
 
 
 @pytest.mark.parametrize(
-    ("model", "family", "series"),
+    ("chassis", "family", "series"),
     [
         ("N3K-C3064PQ-10GE", "NEXUS3000", NEXUS3000),
         ("N5K-C5548UP", "NEXUS5000", NEXUS5000),
@@ -159,20 +164,20 @@ def test_an_unnamed_platform_entry_is_ignored() -> None:
     ],
 )
 def test_each_nexus_series_matches_ciscos_platform_name(
-    model: str, family: str, series: str
+    chassis: str, family: str, series: str
 ) -> None:
     results = _results(
-        _advisory(FIRST, _platform(series, _fix("10.4(5)"))), model=model, family=family
+        _advisory(FIRST, _platform(series, _fix("10.4(5)"))), chassis=chassis, family=family
     )
 
     (advice,) = results.advice
     assert advice.upgrade_target == "10.4(5)"
 
 
-def test_no_series_worked_out_from_the_model_is_not_available() -> None:
+def test_no_series_worked_out_from_the_chassis_pid_is_not_available() -> None:
     results = _results(
         _advisory(FIRST, _platform(NEXUS9000, _fix("10.4(5)"))),
-        model=Unknown("model not found in show version"),
+        chassis=Unknown("show inventory | json: denied"),
         family=None,
     )
 

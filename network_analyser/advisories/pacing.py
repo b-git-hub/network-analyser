@@ -12,6 +12,7 @@ import time
 from collections.abc import Callable
 from typing import Final
 
+from network_analyser.advisories.numbers import whole_number
 from network_analyser.records.cisco import CiscoEndpoint
 
 OPENVULN_INTERVAL_S: Final = 2.0
@@ -52,6 +53,10 @@ class Pacer:
         self._last: dict[CiscoEndpoint, float] = {}
         self.waits: list[float] = []
 
+    def now(self) -> float:
+        """Return the clock's time, so the token's life is measured on the same clock."""
+        return self._clock()
+
     def ready(self, endpoint: CiscoEndpoint) -> None:
         """Wait until `endpoint` may be called again."""
         interval = INTERVAL_S[endpoint]
@@ -75,9 +80,10 @@ class Pacer:
 def retry_delay(retry_after: str | None) -> float | None:
     """Return how long to wait before the one retry, or None when it would be too long.
 
-    Cisco's `Retry-After` is whole seconds; anything else is treated as absent.
+    Cisco's `Retry-After` is whole seconds in ASCII digits; anything else, however odd, is
+    treated as absent and never raises (#133).
     """
-    if retry_after is None or not retry_after.strip().isdigit():
+    seconds = None if retry_after is None else whole_number(retry_after.strip())
+    if seconds is None:
         return DEFAULT_RETRY_WAIT_S
-    seconds = int(retry_after.strip())
     return None if seconds > MAX_RETRY_WAIT_S else float(seconds)
