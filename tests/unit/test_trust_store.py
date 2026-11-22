@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from network_analyser import trust_store
+from network_analyser import _winsys, trust_store
 from network_analyser.records import HostKey, HostKeyVerdict, MalformedHostKeyError
 from network_analyser.run_output.data_folder import locate_data_folder
 
@@ -430,6 +430,59 @@ def test_new_keys_from_parallel_visits_are_all_kept(tmp_path: Path) -> None:
     assert [
         reloaded.check(ip, 22, synthetic_key(filler=int(ip) % 256)).verdict for ip in devices
     ] == ([HostKeyVerdict.KNOWN] * 40)
+
+
+def test_a_rename_refused_twice_by_windows_still_saves_the_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "known_hosts"
+    store = trust_store.load(path)
+    monkeypatch.setattr(_winsys.rename, "SLEEP", lambda _seconds: None)
+    real_replace = Path.replace
+    refusals = 0
+
+    def flaky_replace(self: Path, target: Path) -> Path:
+        nonlocal refusals
+        refusals += 1
+        if refusals <= 2:
+            raise PermissionError(13, "the process cannot access the file")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", flaky_replace)
+
+    store.password_sent(store.check(DEVICE, 22, synthetic_key()))
+
+    assert refusals == 3
+    assert trust_store.load(path).check(DEVICE, 22, synthetic_key()).verdict is (
+        HostKeyVerdict.KNOWN
+    )
+    assert sorted(p.name for p in path.parent.iterdir()) == ["known_hosts"]
+
+
+def test_a_rename_always_refused_leaves_the_store_and_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "known_hosts"
+    _trusted_store(path, synthetic_key(filler=1))
+    before = path.read_bytes()
+    store = trust_store.load(path)
+    monkeypatch.setattr(_winsys.rename, "SLEEP", lambda _seconds: None)
+    attempts = 0
+
+    def never(_self: Path, _target: Path) -> Path:
+        nonlocal attempts
+        attempts += 1
+        raise PermissionError(13, "the process cannot access the file")
+
+    monkeypatch.setattr(Path, "replace", never)
+
+    with pytest.raises(PermissionError):
+        store.password_sent(store.check(OTHER_DEVICE, 22, synthetic_key(filler=2)))
+
+    assert attempts > 1
+    assert path.read_bytes() == before
+    assert store.check(DEVICE, 22, synthetic_key(filler=1)).verdict is HostKeyVerdict.KNOWN
+    assert store.check(OTHER_DEVICE, 22, synthetic_key(filler=2)).verdict is HostKeyVerdict.NEW
 
 
 def test_a_key_whose_blob_names_another_type_is_refused() -> None:
