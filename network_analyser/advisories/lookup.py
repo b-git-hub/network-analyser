@@ -12,7 +12,7 @@ is the call refused whole, with nothing sent.
 `check_api_key` is the same token request on its own, for `cisco-key set` (ticket #103).
 """
 
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import Final
 
 from network_analyser.advisories.pacing import Pacer
@@ -24,6 +24,7 @@ from network_analyser.advisories.patterns import (
 )
 from network_analyser.advisories.proxy import ProxyConfig
 from network_analyser.advisories.replies import (
+    NOT_UNDERSTOOD,
     advisories_answer,
     advisories_error_answer,
     compatible_answer,
@@ -33,7 +34,7 @@ from network_analyser.advisories.replies import (
     eox_last_page,
     suggestion_answer,
 )
-from network_analyser.advisories.session import REJECTED, Call, CallOutcome, Session
+from network_analyser.advisories.session import TOKEN_EXPIRED, Call, CallOutcome, Session
 from network_analyser.advisories.transport import Transport
 from network_analyser.credentials import Secret, SecretScan
 from network_analyser.records.cisco import (
@@ -84,6 +85,40 @@ REFUSED: Final = "Cisco was not asked: a lookup value did not match its safe pat
 UNAVAILABLE: Final = "Cisco did not answer"
 """Fixed text for a call that brought back nothing at all."""
 
+_UNREADABLE: Final = (
+    ValueError,
+    TypeError,
+    ArithmeticError,
+    LookupError,
+    AttributeError,
+    RecursionError,
+)
+"""What reading one odd reply can raise; only that reply's source is then not understood."""
+
+
+class LookupInterrupted(Exception):  # noqa: N818 (a stop, not an error: it carries the counts)
+    """The lookup stopped on something unexpected, after some calls were already made.
+
+    Attributes:
+        tally: what was sent before it stopped, as counts only, so the Audit log still proves
+            what left the PC (#133).
+    """
+
+    def __init__(self, tally: CiscoCallTally) -> None:
+        """Hold the counts; the cause is chained, and never shown."""
+        super().__init__("Cisco lookups did not finish")
+        self.tally = tally
+
+
+def _understood[**P, T](
+    read: Callable[P, T], *args: P.args, **kwargs: P.kwargs
+) -> T | SourceUnavailable:
+    """Return `read(...)`, or the fixed "not understood" when the reply cannot be read (#133)."""
+    try:
+        return read(*args, **kwargs)
+    except _UNREADABLE:
+        return SourceUnavailable(NOT_UNDERSTOOD)
+
 
 def ask_cisco(  # noqa: PLR0913 (the one Run call, every dependency explicit)
     questions: LookupQuestions,
@@ -100,7 +135,10 @@ def ask_cisco(  # noqa: PLR0913 (the one Run call, every dependency explicit)
     `transport` is the test seam (the real fenced HTTPS transport by default). `scan` is the
     Run's secret scan: the client ID, the secret and the token join it as soon as they exist.
     An auth rejection stops all further calls, and every source still to be asked is
-    `SourceUnavailable`, so a rejected key never reads as "nothing found".
+    `SourceUnavailable`, so a rejected key never reads as "nothing found". A token that runs out
+    does the same with its own fixed reason, and keeps every answer already received (#133). A reply
+    that cannot be read makes only its own source "not understood"; anything unexpected raises
+    `LookupInterrupted` with the counts of what was sent.
     """
     distinct = _distinct(questions)
     if _is_empty(distinct):
@@ -116,6 +154,15 @@ def ask_cisco(  # noqa: PLR0913 (the one Run call, every dependency explicit)
         pacer=pacer,
         scan=scan,
     )
+    try:
+        return _answers(session, distinct, sendable)
+    except Exception as error:
+        raise LookupInterrupted(session.tally()) from error
+
+
+def _answers(
+    session: Session, distinct: LookupQuestions, sendable: LookupQuestions
+) -> CiscoAnswers:
     result = session.token()
     if result.outcome is not TokenOutcome.OK:
         reason = session.token_reason or UNAVAILABLE
@@ -167,19 +214,19 @@ def check_api_key(  # noqa: PLR0913 (the token-only check, every dependency expl
 
 
 def _advisory(session: Session, question: ReleaseQuestion) -> AdvisoriesAnswer | SourceUnavailable:
-    if session.auth_rejected:
-        return SourceUnavailable(REJECTED)
+    if (stop := session.stop_reason) is not None:
+        return SourceUnavailable(stop)
     call = session.get(CiscoEndpoint.OPENVULN, _advisory_path(question), values=1)
     if call.outcome is CallOutcome.OK and call.response is not None:
-        return advisories_answer(question, call.response.body)
+        return _understood(advisories_answer, question, call.response.body)
     if call.outcome is CallOutcome.CALL_FAILED and call.response is not None:
         return advisories_error_answer(question, call.response.status, call.response.body)
     return SourceUnavailable(call.reason or UNAVAILABLE)
 
 
 def _eox(session: Session, kind: str, values: Sequence[str]) -> EoxAnswer | SourceUnavailable:
-    if session.auth_rejected:
-        return SourceUnavailable(REJECTED)
+    if (stop := session.stop_reason) is not None:
+        return SourceUnavailable(stop)
     records: list[EoxRecord] = []
     unanswered: list[EoxUnanswered] = []
     for batch in _batches(values, EOX_BATCH_SIZE):
@@ -187,15 +234,17 @@ def _eox(session: Session, kind: str, values: Sequence[str]) -> EoxAnswer | Sour
         while True:
             wire = ",".join(wire_pid(value) if kind == EOX_BY_PID else value for value in batch)
             path = f"/supporttools/eox/rest/5/{kind}/{page}/{wire}"
-            call = session.get(CiscoEndpoint.EOX, path, values=len(batch))
+            call = session.get(
+                CiscoEndpoint.EOX, path, values=len(batch) if page == 1 else 0, pages=1
+            )
             if call.outcome is not CallOutcome.OK or call.response is None:
                 return SourceUnavailable(call.reason or UNAVAILABLE)
-            answer = eox_answer(call.response.body)
+            answer = _understood(eox_answer, call.response.body)
             if isinstance(answer, SourceUnavailable):
                 return answer
             records.extend(answer.records)
             unanswered.extend(answer.unanswered)
-            last = eox_last_page(call.response.body)
+            last = eox_last_page(call.response.body, ceiling=EOX_MAX_PAGES + 1)
             if last > EOX_MAX_PAGES:
                 return SourceUnavailable("Cisco's reply named too many pages")
             if page >= last:
@@ -211,48 +260,53 @@ def _compatible(session: Session, values: Sequence[str]) -> CompatibleAnswers | 
     and a long `Retry-After` are each `unanswered` for that PID alone (#131). At the page cap
     the PID's answer is `unanswered: page cap`, so a list that never ends cannot make a Run
     page forever. Only an auth rejection, a token failure or no connection at all makes the
-    whole source `SourceUnavailable`.
+    whole source `SourceUnavailable`. A token that expired part-way keeps every PID already
+    answered and leaves the PID it stopped on, and every PID after it, `unanswered` (#133).
     """
-    if session.auth_rejected:
-        return SourceUnavailable(REJECTED)
+    if (stop := session.stop_reason) is not None:
+        return SourceUnavailable(stop)
     answers: list[CompatibleAnswer] = []
     unanswered: list[CompatibleUnanswered] = []
-    for pid in values:
-        page = 1
-        releases: list[CompatibleRelease] = []
-        while True:
-            path = (
-                "/software/suggestion/v2/suggestions/compatible/productId/"
-                f"{wire_pid(pid)}?pageIndex={page}"
+    for index, pid in enumerate(values):
+        result = _compatible_pid(session, pid)
+        if isinstance(result, CompatibleAnswer):
+            answers.append(result)
+        elif isinstance(result, CompatibleUnanswered):
+            unanswered.append(result)
+        elif result.outcome is CallOutcome.TOKEN_EXPIRED:
+            unanswered.extend(
+                CompatibleUnanswered(product_id=left, reason=TOKEN_EXPIRED)
+                for left in values[index:]
             )
-            call = session.get(
-                CiscoEndpoint.COMPATIBLE,
-                path,
-                values=1 if page == 1 else 0,
-                pages=1,
-            )
-            if call.outcome is not CallOutcome.OK or call.response is None:
-                if _fails_this_pid_only(call):
-                    unanswered.append(_unanswered_pid(pid, call))
-                    break
-                return SourceUnavailable(call.reason or UNAVAILABLE)
-            answer = compatible_answer(pid, call.response.body)
-            if isinstance(answer, SourceUnavailable):
-                unanswered.append(CompatibleUnanswered(product_id=pid, reason=answer.reason))
-                break
-            if isinstance(answer, CompatibleUnanswered):
-                unanswered.append(answer)
-                break
-            releases.extend(answer.releases)
-            last = compatible_last_page(call.response.body)
-            if page >= last:
-                answers.append(CompatibleAnswer(pid, tuple(releases)))
-                break
-            if page >= COMPATIBLE_MAX_PAGES:
-                unanswered.append(CompatibleUnanswered(product_id=pid, reason=PAGE_CAP))
-                break
-            page += 1
+            break
+        else:
+            return SourceUnavailable(result.reason or UNAVAILABLE)
     return CompatibleAnswers(answers=tuple(answers), unanswered=tuple(unanswered))
+
+
+def _compatible_pid(session: Session, pid: str) -> CompatibleAnswer | CompatibleUnanswered | Call:
+    """Ask for one chassis PID's pages; a `Call` comes back only when the whole source fails."""
+    releases: list[CompatibleRelease] = []
+    for page in range(1, COMPATIBLE_MAX_PAGES + 1):
+        path = (
+            "/software/suggestion/v2/suggestions/compatible/productId/"
+            f"{wire_pid(pid)}?pageIndex={page}"
+        )
+        call = session.get(CiscoEndpoint.COMPATIBLE, path, values=1 if page == 1 else 0, pages=1)
+        if call.outcome is not CallOutcome.OK or call.response is None:
+            if _fails_this_pid_only(call):
+                return _unanswered_pid(pid, call)
+            return call
+        answer = _understood(compatible_answer, pid, call.response.body)
+        if isinstance(answer, SourceUnavailable):
+            return CompatibleUnanswered(product_id=pid, reason=answer.reason)
+        if isinstance(answer, CompatibleUnanswered):
+            return answer
+        releases.extend(answer.releases)
+        last = compatible_last_page(call.response.body, ceiling=COMPATIBLE_MAX_PAGES + 1)
+        if page >= last:
+            return CompatibleAnswer(pid, tuple(releases))
+    return CompatibleUnanswered(product_id=pid, reason=PAGE_CAP)
 
 
 def _fails_this_pid_only(call: Call) -> bool:
@@ -274,8 +328,8 @@ def _unanswered_pid(pid: str, call: Call) -> CompatibleUnanswered:
 
 
 def _suggestions(session: Session, values: Sequence[str]) -> SuggestionsAnswer | SourceUnavailable:
-    if session.auth_rejected:
-        return SourceUnavailable(REJECTED)
+    if (stop := session.stop_reason) is not None:
+        return SourceUnavailable(stop)
     answers: list[SuggestionAnswer] = []
     unanswered: list[SuggestionUnanswered] = []
     for batch in _batches(values, SUGGESTION_BATCH_SIZE):
@@ -284,7 +338,7 @@ def _suggestions(session: Session, values: Sequence[str]) -> SuggestionsAnswer |
         call = session.get(CiscoEndpoint.SUGGESTION, path, values=len(batch))
         if call.outcome is not CallOutcome.OK or call.response is None:
             return SourceUnavailable(call.reason or UNAVAILABLE)
-        answer = suggestion_answer(call.response.body)
+        answer = _understood(suggestion_answer, call.response.body)
         if isinstance(answer, SourceUnavailable):
             return answer
         answers.extend(answer.answers)
