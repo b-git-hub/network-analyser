@@ -217,6 +217,8 @@ def check_api_key(  # noqa: PLR0913 (the token-only check, every dependency expl
 def _advisory(session: Session, question: ReleaseQuestion) -> AdvisoriesAnswer | SourceUnavailable:
     if (stop := session.stop_reason) is not None:
         return SourceUnavailable(stop)
+    if (refusing := session.source_stopped(CiscoEndpoint.OPENVULN)) is not None:
+        return AdvisoriesAnswer(question=question, advisories=(), unavailable=refusing)
     call = session.get(CiscoEndpoint.OPENVULN, _advisory_path(question), values=1)
     if call.outcome is CallOutcome.OK and call.response is not None:
         return _understood(advisories_answer, question, call.response.body)
@@ -231,17 +233,31 @@ def _eox(session: Session, kind: str, values: Sequence[str]) -> EoxAnswer | Sour
     A batch Cisco refuses with a 4xx that is not an auth failure is asked again one value at a
     time (#153), within the same Session and its pacing, so one bad value never costs its
     batch's others the answer. Only a value whose own call still fails is `unanswered`; the
-    values that answer are kept. An auth rejection, a token failure, no reply at all or a reply
-    that cannot be read makes the whole source `SourceUnavailable`, as #131 and #133 decided.
+    values that answer are kept. A source the breaker stopped is not asked again: every value
+    still to ask is `unanswered` with its fixed reason (#154). An auth rejection, a token
+    failure, no reply at all or a reply that cannot be read makes the whole source
+    `SourceUnavailable`, as #131 and #133 decided.
     """
     if (stop := session.stop_reason) is not None:
         return SourceUnavailable(stop)
     records: list[EoxRecord] = []
     unanswered: list[EoxUnanswered] = []
-    for batch in _batches(values, EOX_BATCH_SIZE):
+    batches = tuple(_batches(values, EOX_BATCH_SIZE))
+    for index, batch in enumerate(batches):
+        if (refusing := session.source_stopped(CiscoEndpoint.EOX)) is not None:
+            unanswered.extend(
+                EoxUnanswered(value, refusing) for rest in batches[index:] for value in rest
+            )
+            break
         answer = _eox_batch(session, kind, batch)
         if isinstance(answer, SourceUnavailable):
-            return answer
+            if (stopped := session.source_stopped(CiscoEndpoint.EOX)) is None:
+                return answer
+            unanswered.extend(EoxUnanswered(value, answer.reason) for value in batch)
+            unanswered.extend(
+                EoxUnanswered(value, stopped) for rest in batches[index + 1 :] for value in rest
+            )
+            break
         records.extend(answer.records)
         unanswered.extend(answer.unanswered)
     return EoxAnswer(records=tuple(records), unanswered=tuple(unanswered))
@@ -279,15 +295,26 @@ def _eox_batch(
 def _eox_values_one_at_a_time(
     session: Session, kind: str, batch: tuple[str, ...]
 ) -> EoxAnswer | SourceUnavailable:
-    """Ask each value of a refused batch on its own, keeping every value that answers (#153)."""
+    """Ask each value of a refused batch on its own, keeping every value that answers (#153).
+
+    A source the breaker stopped is not asked again: the values still to ask are `unanswered`
+    with its fixed reason (#154).
+    """
     records: list[EoxRecord] = []
     unanswered: list[EoxUnanswered] = []
-    for value in batch:
+    for index, value in enumerate(batch):
         if (stop := session.stop_reason) is not None:
             return SourceUnavailable(stop)
+        if (refusing := session.source_stopped(CiscoEndpoint.EOX)) is not None:
+            unanswered.extend(EoxUnanswered(left, refusing) for left in batch[index:])
+            break
         answer = _eox_batch(session, kind, (value,))
         if isinstance(answer, SourceUnavailable):
-            return answer
+            if (stopped := session.source_stopped(CiscoEndpoint.EOX)) is None:
+                return answer
+            unanswered.append(EoxUnanswered(value, answer.reason))
+            unanswered.extend(EoxUnanswered(left, stopped) for left in batch[index + 1 :])
+            break
         records.extend(answer.records)
         unanswered.extend(answer.unanswered)
     return EoxAnswer(records=tuple(records), unanswered=tuple(unanswered))
@@ -311,13 +338,20 @@ def _compatible(session: Session, values: Sequence[str]) -> CompatibleAnswers | 
     the PID's answer is `unanswered: page cap`, so a list that never ends cannot make a Run
     page forever. Only an auth rejection, a token failure or no connection at all makes the
     whole source `SourceUnavailable`. A token that expired part-way keeps every PID already
-    answered and leaves the PID it stopped on, and every PID after it, `unanswered` (#133).
+    answered and leaves the PID it stopped on, and every PID after it, `unanswered` (#133). A
+    source the breaker stopped is not asked again: the PIDs still to ask are `unanswered` with
+    its fixed reason (#154).
     """
     if (stop := session.stop_reason) is not None:
         return SourceUnavailable(stop)
     answers: list[CompatibleAnswer] = []
     unanswered: list[CompatibleUnanswered] = []
     for index, pid in enumerate(values):
+        if (refusing := session.source_stopped(CiscoEndpoint.COMPATIBLE)) is not None:
+            unanswered.extend(
+                CompatibleUnanswered(product_id=left, reason=refusing) for left in values[index:]
+            )
+            break
         result = _compatible_pid(session, pid)
         if isinstance(result, CompatibleAnswer):
             answers.append(result)
@@ -403,16 +437,31 @@ def _suggestions(session: Session, values: Sequence[str]) -> SuggestionsAnswer |
 
     As for EoX, a 4xx that is not an auth failure is retried one PID at a time, and only a PID
     whose own call still fails is `unanswered`; an auth rejection, a token failure, no reply or
-    an unreadable reply makes the whole source `SourceUnavailable`.
+    an unreadable reply makes the whole source `SourceUnavailable`. A source the breaker stopped
+    is not asked again: the PIDs still to ask are `unanswered` with its fixed reason (#154).
     """
     if (stop := session.stop_reason) is not None:
         return SourceUnavailable(stop)
     answers: list[SuggestionAnswer] = []
     unanswered: list[SuggestionUnanswered] = []
-    for batch in _batches(values, SUGGESTION_BATCH_SIZE):
+    batches = tuple(_batches(values, SUGGESTION_BATCH_SIZE))
+    for index, batch in enumerate(batches):
+        if (refusing := session.source_stopped(CiscoEndpoint.SUGGESTION)) is not None:
+            unanswered.extend(
+                SuggestionUnanswered(value, refusing) for rest in batches[index:] for value in rest
+            )
+            break
         answer = _suggestion_batch(session, batch)
         if isinstance(answer, SourceUnavailable):
-            return answer
+            if (stopped := session.source_stopped(CiscoEndpoint.SUGGESTION)) is None:
+                return answer
+            unanswered.extend(SuggestionUnanswered(value, answer.reason) for value in batch)
+            unanswered.extend(
+                SuggestionUnanswered(value, stopped)
+                for rest in batches[index + 1 :]
+                for value in rest
+            )
+            break
         answers.extend(answer.answers)
         unanswered.extend(answer.unanswered)
     return SuggestionsAnswer(answers=tuple(answers), unanswered=tuple(unanswered))
@@ -436,15 +485,26 @@ def _suggestion_batch(
 def _suggestion_values_one_at_a_time(
     session: Session, batch: tuple[str, ...]
 ) -> SuggestionsAnswer | SourceUnavailable:
-    """Ask each PID of a refused batch on its own, keeping every PID that answers (#153)."""
+    """Ask each PID of a refused batch on its own, keeping every PID that answers (#153).
+
+    A source the breaker stopped is not asked again: the PIDs still to ask are `unanswered`
+    with its fixed reason (#154).
+    """
     answers: list[SuggestionAnswer] = []
     unanswered: list[SuggestionUnanswered] = []
-    for value in batch:
+    for index, value in enumerate(batch):
         if (stop := session.stop_reason) is not None:
             return SourceUnavailable(stop)
+        if (refusing := session.source_stopped(CiscoEndpoint.SUGGESTION)) is not None:
+            unanswered.extend(SuggestionUnanswered(left, refusing) for left in batch[index:])
+            break
         answer = _suggestion_batch(session, (value,))
         if isinstance(answer, SourceUnavailable):
-            return answer
+            if (stopped := session.source_stopped(CiscoEndpoint.SUGGESTION)) is None:
+                return answer
+            unanswered.append(SuggestionUnanswered(value, answer.reason))
+            unanswered.extend(SuggestionUnanswered(left, stopped) for left in batch[index + 1 :])
+            break
         answers.extend(answer.answers)
         unanswered.extend(answer.unanswered)
     return SuggestionsAnswer(answers=tuple(answers), unanswered=tuple(unanswered))
