@@ -10,7 +10,9 @@ Run's records into the de-duplicated, pattern-valid values `advisories` may send
 device record in them. `answers_for` asks Cisco through `advisories` with the unlocked key.
 `analysis_answers` adapts Cisco's replies (`records.cisco`) into the plain answers Analysis's
 Checks take (`records.analysis`), keeping "source unavailable: reason" as a source with no
-answers, so an outage never reads as "Cisco said none".
+answers, so an outage never reads as "Cisco said none". A failure that belongs to one
+openVuln release stays with that release, so it never costs the other releases their answers
+(#156); the source is collapsed only when every release failed or the key was rejected.
 
 `collected_from` is the show-output half of the input (#102): the Run's device records hold
 each Visited Device's `Collected`, and Analysis cannot ask a device for it later.
@@ -28,6 +30,7 @@ from typing import Final
 
 from network_analyser import advisories, analysis
 from network_analyser.advisories import ProxyConfig, Transport
+from network_analyser.advisories.session import REJECTED
 from network_analyser.analysis.releases import normalise_release, train_of
 from network_analyser.backup_store import CiscoKey
 from network_analyser.credentials import SecretScan
@@ -198,13 +201,15 @@ def answers_for(
 def analysis_answers(replies: CiscoReplies, asked: CiscoQuestions) -> CiscoAnswers:
     """Adapt Cisco's replies into the plain answers Analysis's Checks take (#104).
 
-    Each source stays whole: a `SourceUnavailable` makes the whole source unavailable, so no
-    per-device Finding can be raised from an outage (stories 118-120). `asked` is what was
+    A source that failed whole stays `SourceUnavailable`, so no per-device Finding can be
+    raised from an outage (stories 118-120), and a rejected key still stops every source
+    (#131). A failure that belongs to one openVuln release becomes that release's own
+    `unavailable` reason, so the other releases keep their answers (#156). `asked` is what was
     sent, so every PID and release asked about gets an answer record, empty when Cisco named
     nothing. Cisco's Advisory text is kept as data; whatever shows it escapes it (story 117).
     """
     return CiscoAnswers(
-        advisories=_advisories(replies.advisories),
+        advisories=_advisories(replies.advisories, asked.releases),
         eox=_eox(replies.hardware_eox, replies.software_eox, asked),
         suggestions=_suggestions(replies.suggestions, asked),
         compatible=_compatible(replies.compatible, asked),
@@ -216,11 +221,39 @@ def analysis_answers(replies: CiscoReplies, asked: CiscoQuestions) -> CiscoAnswe
 
 def _advisories(
     source: tuple[AdvisoriesAnswer | CiscoSourceUnavailable, ...],
+    asked: tuple[CiscoReleaseQuestion, ...],
 ) -> tuple[ReleaseAdvisories, ...] | SourceUnavailable:
-    unavailable = next((item for item in source if isinstance(item, CiscoSourceUnavailable)), None)
-    if unavailable is not None:
-        return SourceUnavailable(unavailable.reason)
-    return tuple(_release_answer(item) for item in source if isinstance(item, AdvisoriesAnswer))
+    """Keep a per-release failure with its release; collapse only for the whole source (#156).
+
+    A rejected key still makes the whole source unavailable, and so does a source whose every
+    release failed. A 5xx, a rate limit that survived its retry, a long `Retry-After` or an
+    unreadable 200 reply otherwise marks only the release it happened on "could not check".
+    """
+    failures = [item for item in source if isinstance(item, CiscoSourceUnavailable)]
+    if any(item.reason == REJECTED for item in failures):
+        return SourceUnavailable(REJECTED)
+    if failures and len(failures) == len(source):
+        return SourceUnavailable(failures[0].reason)
+    if failures and len(source) != len(asked):
+        # The replies no longer line up with the questions, so a failure cannot be pinned to
+        # its release; say the source is unavailable rather than blame the wrong release.
+        return SourceUnavailable(failures[0].reason)
+    return tuple(
+        _release_answer(item)
+        if isinstance(item, AdvisoriesAnswer)
+        else _unanswered_release(asked[index], item.reason)
+        for index, item in enumerate(source)
+    )
+
+
+def _unanswered_release(question: CiscoReleaseQuestion, reason: str) -> ReleaseAdvisories:
+    """One release Cisco could not answer, kept beside the releases it did answer (#156)."""
+    return ReleaseAdvisories(
+        os_type=_ANALYSIS_OS[question.os_type],
+        release=question.release,
+        hardware_family=question.platform_alias,
+        unavailable=reason,
+    )
 
 
 def _release_answer(answer: AdvisoriesAnswer) -> ReleaseAdvisories:

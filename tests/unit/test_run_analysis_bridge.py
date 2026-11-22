@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 from network_analyser import topology
+from network_analyser.advisories.replies import NOT_UNDERSTOOD
 from network_analyser.cli import run_analysis
 from network_analyser.records import Platform
 from network_analyser.records.analysis import (
@@ -40,7 +41,12 @@ from network_analyser.records.cisco import (
 from network_analyser.records.cisco import (
     SourceUnavailable as CiscoUnavailable,
 )
-from network_analyser.records.topology import EoxKind, FindingLevel, Topology
+from network_analyser.records.topology import (
+    AdvisoryOutcomeKind,
+    EoxKind,
+    FindingLevel,
+    Topology,
+)
 from tests.support.analysis_records import collected_of
 from tests.support.topology_records import chassis_inventory, visited
 
@@ -133,6 +139,13 @@ def _replies() -> CiscoAnswers:
     )
 
 
+def _answered(question: ReleaseQuestion) -> AdvisoriesAnswer:
+    """The synthetic Advisory, re-asked for another release, so a reply keeps its shape."""
+    reply = _replies().advisories[0]
+    assert isinstance(reply, AdvisoriesAnswer)
+    return AdvisoriesAnswer(question, reply.advisories)
+
+
 def test_the_questions_are_only_de_duplicated_pids_and_releases() -> None:
     asked = _asked()
 
@@ -164,6 +177,115 @@ def test_advisories_become_analysis_answers_with_cisco_s_detail() -> None:
         FixedRelease("17.9", "17.9.5"),
         FixedRelease("17.12", "17.12.2"),
     )
+
+
+def test_a_503_on_one_release_leaves_the_other_releases_answered() -> None:
+    second = ReleaseQuestion(CiscoOsType.IOS_XE, "17.12.1")
+    asked = replace(_asked(), releases=(ReleaseQuestion(CiscoOsType.IOS_XE, "17.9.4"), second))
+    replies = replace(
+        _replies(),
+        advisories=(
+            CiscoUnavailable("Cisco returned HTTP 503"),
+            _answered(second),
+        ),
+    )
+
+    answers = run_analysis.analysis_answers(replies, asked)
+
+    assert isinstance(answers.advisories, tuple)
+    failed, good = answers.advisories
+    assert (failed.release, failed.advisories, failed.unavailable) == (
+        "17.9.4",
+        (),
+        "Cisco returned HTTP 503",
+    )
+    assert good.release == "17.12.1"
+    assert good.unavailable is None
+    assert len(good.advisories) == 1
+
+
+def test_an_unreadable_200_on_one_release_leaves_the_other_releases_answered() -> None:
+    second = ReleaseQuestion(CiscoOsType.IOS_XE, "17.12.1")
+    asked = replace(_asked(), releases=(ReleaseQuestion(CiscoOsType.IOS_XE, "17.9.4"), second))
+    replies = replace(
+        _replies(),
+        advisories=(
+            CiscoUnavailable(NOT_UNDERSTOOD),
+            _answered(second),
+        ),
+    )
+
+    answers = run_analysis.analysis_answers(replies, asked)
+
+    assert isinstance(answers.advisories, tuple)
+    failed, good = answers.advisories
+    assert (failed.release, failed.advisories, failed.unavailable) == (
+        "17.9.4",
+        (),
+        NOT_UNDERSTOOD,
+    )
+    assert good.release == "17.12.1"
+    assert good.unavailable is None
+    assert len(good.advisories) == 1
+
+
+def test_every_release_failing_still_collapses_the_source() -> None:
+    second = ReleaseQuestion(CiscoOsType.IOS_XE, "17.12.1")
+    asked = replace(_asked(), releases=(ReleaseQuestion(CiscoOsType.IOS_XE, "17.9.4"), second))
+    replies = replace(
+        _replies(),
+        advisories=(
+            CiscoUnavailable("Cisco returned HTTP 503"),
+            CiscoUnavailable("Cisco returned HTTP 503"),
+        ),
+    )
+
+    answers = run_analysis.analysis_answers(replies, asked)
+
+    assert answers.advisories == SourceUnavailable("Cisco returned HTTP 503")
+
+
+def test_a_rejected_key_still_collapses_the_source_with_every_release() -> None:
+    second = ReleaseQuestion(CiscoOsType.IOS_XE, "17.12.1")
+    asked = replace(_asked(), releases=(ReleaseQuestion(CiscoOsType.IOS_XE, "17.9.4"), second))
+    replies = replace(
+        _replies(),
+        advisories=(
+            AdvisoriesAnswer(ReleaseQuestion(CiscoOsType.IOS_XE, "17.9.4"), ()),
+            CiscoUnavailable("Cisco rejected the API key"),
+        ),
+    )
+
+    answers = run_analysis.analysis_answers(replies, asked)
+
+    assert answers.advisories == SourceUnavailable("Cisco rejected the API key")
+
+
+def test_a_device_whose_own_release_had_a_503_reads_could_not_check() -> None:
+    first = visited("192.0.2.1", "TEST0000A01", hostname="sw-a")
+    second_record = visited("192.0.2.2", "TEST0000A02", hostname="sw-b")
+    version = second_record.version
+    assert version is not None
+    second = replace(second_record, version=replace(version, software_version="17.12.1"))
+    built = topology.build([first, second])
+    asked = run_analysis.lookup_questions(AnalysisInput(topology=built))
+    replies = replace(
+        _replies(),
+        advisories=tuple(
+            CiscoUnavailable("Cisco returned HTTP 503")
+            if question.release == "17.12.1"
+            else _answered(question)
+            for question in asked.releases
+        ),
+    )
+
+    answers = run_analysis.analysis_answers(replies, asked)
+    results = run_analysis.analysed(built, answers)
+    advice = {item.device: item.advisory_outcome for item in results.advice}
+    ids = {device.management_ip: device.id for device in built.devices}
+
+    assert advice[ids[first.ip]].kind is AdvisoryOutcomeKind.MATCHES
+    assert advice[ids[second.ip]].kind is AdvisoryOutcomeKind.COULD_NOT_CHECK
 
 
 def test_one_release_cisco_does_not_know_leaves_the_other_releases_answered() -> None:
