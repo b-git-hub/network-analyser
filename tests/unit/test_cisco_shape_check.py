@@ -226,6 +226,18 @@ def test_the_base_pid_without_the_licence_suffix_is_also_asked() -> None:
     assert "/software/suggestion/v2/suggestions/releases/productIds/SYNTH-PID-3" in paths
 
 
+def test_cisco_documented_sample_pair_is_asked_whatever_the_operator_gave() -> None:
+    fake = _canary_cisco()
+
+    collect_summary(_session(fake), Inputs())
+
+    assert any(
+        path == "/software/suggestion/v2/suggestions/compatible/productId/CISCO2811"
+        "?supportedHardware=CISCO3925/K9"
+        for path in fake.paths()
+    )
+
+
 def test_the_suffixed_pid_is_also_asked_in_supported_hardware_as_cisco_documents_it() -> None:
     fake = _canary_cisco()
 

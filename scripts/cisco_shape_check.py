@@ -505,6 +505,16 @@ def _suggestion_probes(inputs: Inputs) -> list[Probe]:
             f"{compatible}{SAMPLE_PID}?pageIndex=1",
             Kind.COMPATIBLE,
         ),
+        # Cisco's own documented sample pair (public, not from any estate): base CISCO2811,
+        # hardware CISCO3925/K9 in `supportedHardware`, raw slash. It tells us whether the
+        # form works at all, separately from the operator's PIDs.
+        Probe(
+            "Software Suggestion compatible list, Cisco's documented sample pair "
+            "(CISCO2811 with CISCO3925/K9 in supportedHardware, raw slash)",
+            CiscoEndpoint.COMPATIBLE,
+            f"{compatible}CISCO2811?supportedHardware=CISCO3925/K9",
+            Kind.COMPATIBLE,
+        ),
     ]
     if inputs.pid is not None:
         pid = wire_pid(inputs.pid)
