@@ -121,3 +121,8 @@ last on the integration branch.
   skipped, 21 failed (baseline); security test 6's autouse fixture fakes the crash-dump
   registry, so its result no longer depends on this PC's `LocalDumps`/`AeDebug` settings, and
   it passed inside the full run (ticket closed). #158's intermittent also passed.
+- 2026-11-22: merged #147 at `36b09ef`; gate: ruff/format/mypy pass, pytest 3031 passed, 1
+  skipped, 21 failed (baseline); the Train classifier covers every published Train from 16.6
+  by rule and a controller-managed IOS XE SD-WAN device is never matched as IOS-XE. The
+  earlier `CHANGELOG.md` conflict was resolved by #147's owner on the branch (merge forward
+  at `d5d7001`) before this merge; nothing was resolved by the merger.
