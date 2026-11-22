@@ -512,16 +512,16 @@ def _suggestion_probes(inputs: Inputs) -> list[Probe]:
             "Software Suggestion compatible list, Cisco's documented sample pair "
             "(CISCO2811 with CISCO3925/K9 in supportedHardware, raw slash)",
             CiscoEndpoint.COMPATIBLE,
-            f"{compatible}CISCO2811?supportedHardware=CISCO3925/K9",
+            f"{compatible}CISCO2811?supportedHardware=CISCO3925/K9&pageIndex=1",
             Kind.COMPATIBLE,
         ),
         # The same documented request with a hardware value that has no slash, also from
-        # Cisco's docs. If this one answers and the pair above does not, the slash is the cause.
+        # Cisco's docs. Both carry `pageIndex=1`, as every compatible call that works does.
         Probe(
             "Software Suggestion compatible list, Cisco's documented sample base with a "
             "non-slashed hardware value (CISCO2811 with HWIC-1FE in supportedHardware)",
             CiscoEndpoint.COMPATIBLE,
-            f"{compatible}CISCO2811?supportedHardware=HWIC-1FE",
+            f"{compatible}CISCO2811?supportedHardware=HWIC-1FE&pageIndex=1",
             Kind.COMPATIBLE,
         ),
     ]

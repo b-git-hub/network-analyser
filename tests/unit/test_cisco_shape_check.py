@@ -233,7 +233,7 @@ def test_cisco_documented_sample_pair_is_asked_whatever_the_operator_gave() -> N
 
     assert any(
         path == "/software/suggestion/v2/suggestions/compatible/productId/CISCO2811"
-        "?supportedHardware=CISCO3925/K9"
+        "?supportedHardware=CISCO3925/K9&pageIndex=1"
         for path in fake.paths()
     )
 
@@ -245,7 +245,7 @@ def test_cisco_documented_non_slashed_hardware_is_asked_for_comparison() -> None
 
     assert any(
         path == "/software/suggestion/v2/suggestions/compatible/productId/CISCO2811"
-        "?supportedHardware=HWIC-1FE"
+        "?supportedHardware=HWIC-1FE&pageIndex=1"
         for path in fake.paths()
     )
 
