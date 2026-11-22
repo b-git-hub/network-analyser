@@ -40,9 +40,12 @@ from network_analyser.records.analysis import (
     CompatibleReleases,
     ConfigFacts,
     DeviceCollected,
+    DeviceInventory,
     EoxAnswers,
     FixedRelease,
     HardwareEox,
+    HardwareItem,
+    HardwareKind,
     OsType,
     ReleaseAdvisories,
     SoftwareEox,
@@ -70,6 +73,7 @@ from network_analyser.records.cisco import (
 from network_analyser.records.cisco import (
     SourceUnavailable as CiscoSourceUnavailable,
 )
+from network_analyser.records.collected import InventoryItem, InventoryKind, Reading
 from network_analyser.records.device import DeviceRecord
 from network_analyser.records.topology import (
     ADVISORY_STATUS,
@@ -80,7 +84,9 @@ from network_analyser.records.topology import (
     EoxKind,
     FindingLevel,
     Topology,
+    VisitedDevice,
 )
+from network_analyser.records.unknown import Unknown
 from network_analyser.topology.devices import known_devices
 
 LOOKUPS_DID_NOT_RUN: Final = "Cisco lookups did not run"
@@ -117,7 +123,7 @@ def lookup_questions(data: AnalysisInput) -> CiscoQuestions:
         releases=releases,
         hardware_pids=asked.pids,
         software_releases=tuple(question.release for question in asked.releases),
-        suggestion_pids=asked.pids,
+        suggestion_pids=asked.compatible_pids,
         compatible_pids=asked.compatible_pids,
     )
 
@@ -157,6 +163,7 @@ def analysed(
             answers=answers if answers is not None else without_cisco,
             config_facts=_config_facts(records),
             collected=collected_from(records),
+            inventory=inventories(built, records),
         )
     )
 
@@ -361,6 +368,54 @@ def _train(release: str, os_type: OsType) -> str | None:
     if _TRAIN.match(normalised) is None:
         return None
     return train_of(normalised, os_type)
+
+
+_HARDWARE_KIND: Final = {kind.value: HardwareKind(kind.value) for kind in InventoryKind}
+"""The four `show inventory` kinds Analysis may ask about; anything else is never kept."""
+
+
+def inventories(built: Topology, records: tuple[DeviceRecord, ...]) -> tuple[DeviceInventory, ...]:
+    """Each Visited Device's hardware PIDs, under the same id `topology.build` gave it (#135).
+
+    They come from the device's `show inventory`: chassis, stack members, supervisors and line
+    cards only, never optics, PSUs or fans. When it was refused, not understood or not
+    collected, the device falls back to the chassis model and stack-member PIDs `show version`
+    gave; the Hardware EoX Check records the device as skipped for the reason.
+    """
+    devices = {device.id: device for device in built.devices}
+    inventories: list[DeviceInventory] = []
+    for known in known_devices(records):
+        reading = known.collected.inventory
+        if isinstance(reading, Reading):
+            items = _inventory_items(reading.value)
+        else:
+            device = devices.get(known.id)
+            items = _fallback_items(device) if device is not None else ()
+        if items:
+            inventories.append(DeviceInventory(known.id, items))
+    return tuple(inventories)
+
+
+def _inventory_items(entries: tuple[InventoryItem, ...]) -> tuple[HardwareItem, ...]:
+    return tuple(
+        HardwareItem(entry.pid, kind)
+        for entry in entries
+        if isinstance(entry.pid, str) and (kind := _HARDWARE_KIND.get(entry.kind.value)) is not None
+    )
+
+
+def _fallback_items(device: VisitedDevice) -> tuple[HardwareItem, ...]:
+    """The chassis model and each stack member's model, for a device with no inventory."""
+    items: list[HardwareItem] = []
+    if isinstance(device.model, str):
+        items.append(HardwareItem(device.model, HardwareKind.CHASSIS))
+    if not isinstance(device.stack_members, Unknown):
+        items.extend(
+            HardwareItem(member.model, HardwareKind.STACK_MEMBER)
+            for member in device.stack_members
+            if isinstance(member.model, str)
+        )
+    return tuple(items)
 
 
 def _config_facts(records: tuple[DeviceRecord, ...]) -> tuple[ConfigFacts, ...]:

@@ -129,7 +129,9 @@ def finish(  # noqa: PLR0913 (the Run's end, every dependency explicit)
     built = run_topology.build_topology(collected.records(), scope)
     try:
         known = AnalysisInput(
-            topology=built, collected=run_analysis.collected_from(collected.records())
+            topology=built,
+            collected=run_analysis.collected_from(collected.records()),
+            inventory=run_analysis.inventories(built, collected.records()),
         )
         answers, lookups, replies = _ask(known, key, scan=scan, proxy=proxy, now=now)
         results = run_analysis.analysed(built, answers, records=collected.records())
