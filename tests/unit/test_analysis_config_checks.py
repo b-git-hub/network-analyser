@@ -200,12 +200,37 @@ def test_type_5_is_weak_on_classic_ios() -> None:
     assert "type 5 x1" in finding.what_was_found
 
 
-def test_type_5_is_not_weak_on_ios_xe_or_nxos() -> None:
-    ios_xe = _analyse(Platform.IOS_XE, IOS_XE, {SECRET_TYPE_5: 1})
+def test_type_5_is_weak_on_ios_xe_too() -> None:
+    for release in (IOS_XE, Unknown("show version not read")):
+        finding = _only(
+            _analyse(Platform.IOS_XE, release, {SECRET_TYPE_5: 2}),
+            "hardening-weak-secret-types",
+        )
+
+        assert finding.level is FindingLevel.HIGH
+        assert "type 5 x2" in finding.what_was_found
+
+
+def test_type_5_is_not_weak_on_nxos() -> None:
     nxos = _analyse(Platform.NX_OS, NXOS, {SECRET_TYPE_5: 1})
 
-    assert _found(ios_xe, "hardening-weak-secret-types") == []
     assert _found(nxos, "hardening-weak-secret-types") == []
+
+
+def test_no_type_5_on_ios_xe_raises_nothing() -> None:
+    results = _analyse(Platform.IOS_XE, IOS_XE, {SECRET_TYPE_5: 0, SECRET_TYPE_9: 1})
+
+    assert _found(results, "hardening-weak-secret-types") == []
+
+
+def test_type_5_with_an_unread_count_on_ios_xe_could_not_decide() -> None:
+    finding = _only(
+        _analyse(Platform.IOS_XE, IOS_XE, {SECRET_TYPE_5: Unknown("config fact not collected")}),
+        "hardening-weak-secret-types",
+    )
+
+    assert finding.level is FindingLevel.LOW
+    assert finding.what_was_found.startswith("Could not decide:")
 
 
 def test_strong_secret_types_9_and_8_raise_nothing() -> None:

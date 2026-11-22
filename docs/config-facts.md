@@ -20,7 +20,7 @@ The facts ride `DeviceRecord.config_facts`; the cli puts them in `AnalysisInput.
 | `telnet_lines` | `tuple[str, ...]` or `Unknown` | both | The `line vty` block headers where Telnet is permitted, exactly as the config heads them. A block with no `transport input` permits Telnet (the default is `all`). NX-OS also needs `feature telnet`; without it the tuple is empty. `Unknown` when no `line vty` block is shown. |
 | `secret_type_0` | `int` | both | Numbered `password`/`secret` lines using type 0 (cleartext). |
 | `secret_type_4` | `int` | both | Numbered `password`/`secret` lines using type 4. |
-| `secret_type_5` | `int` | both | Numbered lines using type 5. MD5 on IOS, SHA-256 on NX-OS. |
+| `secret_type_5` | `int` | both | Numbered lines using type 5. MD5-crypt on IOS and IOS-XE (flagged as weak on both, operator decision on #142), SHA-256 on NX-OS (not flagged). |
 | `secret_type_6` | `int` | both | Numbered lines using type 6 (AES). |
 | `secret_type_7` | `int` | both | Numbered lines using type 7 (reversible). |
 | `secret_type_8` | `int` | both | Numbered lines using type 8. |
@@ -68,7 +68,7 @@ The facts ride `DeviceRecord.config_facts`; the cli puts them in `AnalysisInput.
 | Check id | Level | Facts |
 |---|---|---|
 | `hardening-telnet` | High | `telnet_lines` |
-| `hardening-weak-secret-types` | High | `secret_type_0`, `_4`, `_5` (classic IOS only), `_7` |
+| `hardening-weak-secret-types` | High | `secret_type_0`, `_4`, `_5` (IOS and IOS-XE, not NX-OS), `_7` |
 | `hardening-enable-secret` | High | `enable_secret`, `enable_password` (IOS/IOS-XE only) |
 | `hardening-snmp-v1-v2c` | High; Critical when a read-write community has a default name or no ACL | the four `snmp_v1_v2c_*` facts |
 | `hardening-snmp-v3-priv` | High | `snmp_v3_configured`, `snmp_v3_users`, `snmp_v3_users_without_priv`, `snmp_v3_groups_without_priv`, `snmp_global_enforce_priv` (NX-OS) |

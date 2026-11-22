@@ -354,7 +354,11 @@ def telnet(data: AnalysisInput) -> tuple[Finding, ...]:
 
 
 def weak_secret_types(data: AnalysisInput) -> tuple[Finding, ...]:
-    """Story 62: fire on secret types 0, 4 and 7, plus type 5 on classic IOS only (story 64)."""
+    """Story 62: fire on secret types 0, 4 and 7, plus type 5 (MD5-crypt) on IOS and IOS-XE.
+
+    Type 5 is weak on IOS-XE as well as classic IOS (research #76; operator decision on #142).
+    On NX-OS type 5 is SHA-256, so it is not flagged there.
+    """
     findings: list[Finding] = []
     for device, facts in _checked_devices(data):
         by_type: dict[int, int] = {}
@@ -371,10 +375,10 @@ def weak_secret_types(data: AnalysisInput) -> tuple[Finding, ...]:
             elif value:
                 by_type[number] = value
         type_five = by_type.pop(5, 0)
-        if type_five and _is_classic_ios(device):
+        if type_five and device.platform is Platform.IOS_XE:
             by_type[5] = type_five
-        elif type_five and not _family_known(device):
-            undecided = Unknown("the release was not read, so type 5's strength is unknown")
+        elif type_five and device.platform is not Platform.NX_OS:
+            undecided = Unknown("the Platform was not identified, so type 5's strength is unknown")
         if by_type:
             listed = ", ".join(
                 f"type {number} x{count}" for number, count in sorted(by_type.items())
