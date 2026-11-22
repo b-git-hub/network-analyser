@@ -601,11 +601,15 @@ def http_server(data: AnalysisInput) -> tuple[Finding, ...]:
 
 
 def legacy_services(data: AnalysisInput) -> tuple[Finding, ...]:
-    """Story 62: fire on source routing and each legacy service the config turns on."""
+    """Story 62: fire on source routing and each legacy service the config turns on.
+
+    Source routing is judged on IOS/IOS-XE only: its default is an IOS default, so on NX-OS it
+    is neither a hit nor "could not decide".
+    """
     findings: list[Finding] = []
     for device, facts in _checked_devices(data):
         services = facts.fact(LEGACY_SERVICES)
-        source = _flag(facts, IP_SOURCE_ROUTE)
+        source = _flag(facts, IP_SOURCE_ROUTE) if device.platform is Platform.IOS_XE else False
         items: list[str] = []
         if isinstance(source, bool) and source:
             items.append("ip source-route")

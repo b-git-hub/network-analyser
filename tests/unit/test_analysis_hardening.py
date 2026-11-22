@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from network_analyser import platforms
 from network_analyser.records.analysis import (
     NTP_CONFIGURED,
     SNMP_V3_USER_CRYPTO,
@@ -176,6 +177,61 @@ def test_nxos_with_a_malformed_config_fact_is_could_not_decide() -> None:
 
     assert finding.level is FindingLevel.LOW
     assert finding.what_was_found.startswith("Could not decide:")
+
+
+def _nxos_snmp_results(*user_lines: str) -> AnalysisResults:
+    """Analysis of an NX-OS device whose facts are read from a synthetic running config."""
+    config = "hostname nx-a\n" + "".join(f"{line}\n" for line in user_lines)
+    device = visited(A, "S1", "sw-a", platform=Platform.NX_OS)
+    nxos_facts = ConfigFacts("dev-S1", platforms.read_config_facts(Platform.NX_OS, config))
+    return analysed(device, facts=nxos_facts)
+
+
+_NXOS_MD5 = (
+    "snmp-server user u1 network-operator auth md5 0xCANARY-141-a priv aes-128 0xCANARY-141-b"
+)
+_NXOS_DES = "snmp-server user u2 network-operator auth sha 0xCANARY-141-c priv 0xCANARY-141-d"
+_NXOS_AES = (
+    "snmp-server user u3 network-operator auth sha 0xCANARY-141-e priv aes-128 0xCANARY-141-f"
+)
+_NXOS_NO_PRIV = "snmp-server user u4 network-operator auth sha 0xCANARY-141-g"
+
+
+def test_a_config_read_nxos_md5_user_is_high() -> None:
+    finding = _only(_nxos_snmp_results(_NXOS_MD5), SNMP)
+
+    assert finding.level is FindingLevel.HIGH
+    assert "MD5 authentication on 1" in finding.what_was_found
+
+
+def test_a_config_read_nxos_priv_without_aes_128_is_des_and_high() -> None:
+    finding = _only(_nxos_snmp_results(_NXOS_DES), SNMP)
+
+    assert finding.level is FindingLevel.HIGH
+    assert "DES privacy on 1" in finding.what_was_found
+
+
+def test_a_config_read_nxos_aes_128_and_no_priv_users_raise_nothing() -> None:
+    results = _nxos_snmp_results(_NXOS_AES, _NXOS_NO_PRIV)
+
+    assert found(results, SNMP) == []
+    assert run_of(results, SNMP).ran is True
+
+
+def test_a_config_read_nxos_without_users_does_not_apply_and_is_not_skipped() -> None:
+    results = _nxos_snmp_results()
+
+    assert found(results, SNMP) == []
+    assert run_of(results, SNMP).skipped == ()
+
+
+def test_a_config_read_nxos_finding_holds_no_user_name_or_key() -> None:
+    finding = _only(_nxos_snmp_results(_NXOS_MD5, _NXOS_DES), SNMP)
+
+    assert "2 (" in finding.what_was_found
+    for text in (finding.what_was_found, finding.summary, finding.what_to_do):
+        assert "CANARY" not in text
+        assert "u1" not in text
 
 
 # -- NTP not synchronised ---------------------------------------------------------------------

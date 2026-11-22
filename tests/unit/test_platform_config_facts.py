@@ -9,6 +9,7 @@ import pytest
 
 from network_analyser import platforms
 from network_analyser.records import Platform
+from network_analyser.records.analysis import SNMP_V3_USER_CRYPTO
 from network_analyser.records.config_facts import (
     AAA_ACCOUNTING,
     AAA_AUTHORIZATION,
@@ -134,7 +135,6 @@ def test_nxos_running_config_gives_its_own_hardening_facts() -> None:
         SECRET_TYPE_7: 0,
         SECRET_TYPE_8: 0,
         SECRET_TYPE_9: 0,
-        IP_SOURCE_ROUTE: False,
         LEGACY_SERVICES: ("FTP",),
         HTTP_SERVER: True,
         SNMP_V1_V2C_COMMUNITIES: 2,
@@ -145,6 +145,7 @@ def test_nxos_running_config_gives_its_own_hardening_facts() -> None:
         SNMP_V3_USERS: 1,
         SNMP_V3_USERS_WITHOUT_PRIV: 1,
         SNMP_V3_GROUPS_WITHOUT_PRIV: 1,
+        SNMP_V3_USER_CRYPTO: ("MD5/none",),
         SNMP_GLOBAL_ENFORCE_PRIV: False,
         NTP_CONFIGURED: False,
         NTP_AUTHENTICATED: False,
@@ -217,15 +218,69 @@ def test_nothing_from_the_config_line_reaches_a_fact() -> None:
             assert canary not in shown
 
 
-@pytest.mark.parametrize("platform", [Platform.IOS_XE, Platform.NX_OS])
-def test_no_source_route_line_reads_as_enabled_because_the_default_is_on(
-    platform: Platform,
-) -> None:
-    assert _facts(platform, "hostname sw-a\n")[IP_SOURCE_ROUTE] is True
+def test_no_source_route_line_reads_as_enabled_because_the_ios_default_is_on() -> None:
+    assert _facts(Platform.IOS_XE, "hostname sw-a\n")[IP_SOURCE_ROUTE] is True
 
 
 def test_the_no_source_route_form_reads_as_disabled() -> None:
     assert _facts(Platform.IOS_XE, "no ip source-route\n")[IP_SOURCE_ROUTE] is False
+
+
+@pytest.mark.parametrize("config", ["hostname nx-a\n", "hostname nx-a\nno ip source-route\n"])
+def test_source_routing_is_not_an_nxos_fact(config: str) -> None:
+    assert IP_SOURCE_ROUTE not in _facts(Platform.NX_OS, config)
+
+
+def _nxos_users(*lines: str) -> FactValue:
+    return _facts(Platform.NX_OS, "hostname nx-a\n" + "".join(f"{line}\n" for line in lines))[
+        SNMP_V3_USER_CRYPTO
+    ]
+
+
+def test_nxos_snmpv3_user_crypto_is_one_auth_and_privacy_pair_per_user() -> None:
+    users = _nxos_users(
+        "snmp-server user u1 network-operator auth md5 0xCANARY-cfg-141-a priv 0xCANARY-cfg-141-b"
+        " localizedkey",
+        "snmp-server user u2 network-operator auth sha 0xCANARY-cfg-141-c priv aes-128"
+        " 0xCANARY-cfg-141-d localizedkey",
+        "snmp-server user u3 network-admin auth sha-256 0xCANARY-cfg-141-e priv aes-128"
+        " 0xCANARY-cfg-141-f localizedkey",
+        "snmp-server user u4 network-operator auth sha 0xCANARY-cfg-141-g localizedkey",
+        "snmp-server user u5 network-operator",
+    )
+
+    assert users == ("MD5/DES", "SHA/AES128", "SHA-256/AES128", "SHA/none", "none/none")
+
+
+def test_nxos_snmpv3_user_crypto_is_empty_when_no_user_is_configured() -> None:
+    assert _nxos_users("snmp-server community public RO") == ()
+
+
+def test_nxos_snmpv3_user_crypto_reads_the_position_not_a_key_that_spells_a_keyword() -> None:
+    users = _nxos_users("snmp-server user u1 network-operator auth md5 priv aes-128 localizedkey")
+
+    assert users == ("MD5/none",)
+
+
+def test_nxos_snmpv3_user_crypto_is_unknown_when_a_line_is_not_understood() -> None:
+    value = _nxos_users("snmp-server user u1 network-operator auth md6 0xCANARY-cfg-141-h")
+
+    assert isinstance(value, Unknown)
+    assert "CANARY" not in value.reason
+    assert "md6" not in value.reason
+
+
+def test_nxos_snmpv3_user_crypto_never_keeps_a_key_or_a_user_name() -> None:
+    users = _nxos_users(
+        "snmp-server user CANARY-cfg-141-name network-admin auth md5 0xCANARY-cfg-141-key"
+        " priv 0xCANARY-cfg-141-key2 localizedkey"
+    )
+
+    assert "CANARY" not in repr(users)
+
+
+def test_ios_has_no_snmpv3_user_crypto_fact() -> None:
+    assert SNMP_V3_USER_CRYPTO not in _facts(Platform.IOS_XE, device_text.IOS_XE_HARDENING_CONFIG)
 
 
 def test_insecure_mode_and_the_enable_lines_are_ios_facts() -> None:
