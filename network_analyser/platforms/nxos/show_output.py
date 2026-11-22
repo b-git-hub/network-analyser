@@ -303,6 +303,10 @@ _BIT_COUNT: Final = re.compile(
 )
 _BIT_WORD: Final = re.compile(r"\b(?P<bits>\d{3,5})\s*(?:bit|bits)\b", re.IGNORECASE)
 _RSA_KEY: Final = re.compile(r"\bssh-rsa\s+(?P<key>[A-Za-z0-9+/=]+)")
+_KEY_SECTION: Final = re.compile(
+    r"^\s*(?P<kind>rsa|dsa|ecdsa|ed25519)\s+keys\s+generated\b", re.IGNORECASE | re.MULTILINE
+)
+_OTHER_KEY: Final = re.compile(r"\b(?:ecdsa-sha2-\S+|ssh-ed25519|ssh-dss)\b", re.IGNORECASE)
 _SANE_BITS: Final = (512, 16384)
 _MAX_FIELD: Final = 1024
 """The largest field a public key blob may hold: enough for an 8192-bit modulus."""
@@ -321,13 +325,34 @@ def ssh_settings(reply: str) -> SshSettings:
 
 
 def _bits(reply: str) -> int:
-    found = _BIT_COUNT.search(reply) or _BIT_WORD.search(reply)
+    section = _rsa_section(reply)
+    found = _BIT_COUNT.search(section) or _BIT_WORD.search(section)
     if found is not None:
         return _sane_bits(int(found.group("bits")))
-    key = _RSA_KEY.search(reply)
+    key = _RSA_KEY.search(section)
     if key is None:
         raise NotUnderstood
     return _sane_bits(_rsa_key_bits(key.group("key")))
+
+
+def _rsa_section(reply: str) -> str:
+    """The part of a `show ssh key` reply that describes the RSA key, never another type's.
+
+    The reply prints one section per key type (`rsa Keys generated:`, `ecdsa Keys
+    generated:`), each with its own bit count, so reading the first count would size an
+    ECDSA-only device's key as "521 bits". A reply with no section headers is read whole,
+    unless it holds another key type and no RSA key.
+    """
+    headers = list(_KEY_SECTION.finditer(reply))
+    if not headers:
+        if _OTHER_KEY.search(reply) is not None and _RSA_KEY.search(reply) is None:
+            raise NotUnderstood
+        return reply
+    for index, header in enumerate(headers):
+        if header.group("kind").lower() == "rsa":
+            end = headers[index + 1].start() if index + 1 < len(headers) else len(reply)
+            return reply[header.end() : end]
+    raise NotUnderstood
 
 
 def _sane_bits(bits: int) -> int:
@@ -373,10 +398,13 @@ _GUEST_SHELL_OFF: Final = (
     "not present",
     "not running",
     "not activated",
+    "deactivated",
+    "uninstalled",
     "no guestshell",
     "no guest shell",
 )
-_GUEST_SHELL_ON: Final = ("enabled", "activated", "active", "running", "installed")
+_GUEST_SHELL_ON: Final = re.compile(r"\b(?:enabled|activated|active|running|installed)\b")
+"""Whole words only: `activated` is inside `deactivated`, which is off."""
 
 
 def guest_shell(reply: str) -> bool:
@@ -386,7 +414,7 @@ def guest_shell(reply: str) -> bool:
         raise NotUnderstood
     if any(phrase in lowered for phrase in _GUEST_SHELL_OFF):
         return False
-    if any(phrase in lowered for phrase in _GUEST_SHELL_ON):
+    if _GUEST_SHELL_ON.search(lowered) is not None:
         return True
     raise NotUnderstood
 
@@ -398,7 +426,15 @@ def guest_shell_from_service_list(reply: str) -> bool:
         if "guestshell" not in line:
             continue
         return not any(
-            phrase in line for phrase in ("inactive", "not installed", "disabled", "down")
+            phrase in line
+            for phrase in (
+                "inactive",
+                "deactivated",
+                "not installed",
+                "uninstalled",
+                "disabled",
+                "down",
+            )
         )
     if "name" in lowered and "status" in lowered:
         return False  # a real list, with no Guest Shell in it
