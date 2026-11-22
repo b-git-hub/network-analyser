@@ -272,9 +272,9 @@ def test_an_ios_xe_device_fixed_in_17_12_7a_and_17_12_8_targets_17_12_7a() -> No
             NEXUS_MODEL,
             "7.0(3)I7(9)",
             OsType.NX_OS,
-            "7.0(3)I7",
+            "7.0I7",
             "7.0(3)I7(10)",
-            "7.0(3)I7",
+            "7.0I7",
         ),
     ],
 )
