@@ -18,11 +18,33 @@ As of 2026-11-22, before the Wave A fixes:
   is the second intermittent failure ([#160](https://github.com/b-git-hub/network-analyser/issues/160));
   it passed on this run.
 
-The exact failing node ids are appended below when the baseline run finishes.
+The run on 2026-11-22 at `6ce2cf9` finished `21 failed, 2970 passed, 1 skipped in
+113.87s`. The two intermittents happened to pass, so the 21 below are the pure Windows
+baseline.
 
 ## Exact failing node ids
 
-Pending the 2026-11-22 baseline run.
+- `tests/unit/test_package_build.py::test_the_sums_cover_every_file_in_the_folder_and_the_zip_itself`
+- `tests/unit/test_run_start_folder.py::test_permissions_the_tool_cannot_read_are_warned_about`
+- `tests/unit/test_run_start_folder.py::test_a_run_checks_the_trust_folder`
+- `tests/unit/test_runs_parent_check.py::test_permissions_are_read_from_a_folder_made_where_the_run_folder_will_go`
+- `tests/unit/test_ssh.py::test_the_client_identifies_itself_as_network_analyser`
+- `tests/unit/test_ssh.py::test_only_modern_algorithms_are_offered`
+- `tests/unit/test_ssh.py::test_a_known_device_is_asked_only_for_its_trusted_key_type[trusted0-asked0]`
+- `tests/unit/test_ssh.py::test_a_known_device_is_asked_only_for_its_trusted_key_type[trusted1-asked1]`
+- `tests/unit/test_ssh.py::test_a_known_device_is_asked_only_for_its_trusted_key_type[trusted2-asked2]`
+- `tests/unit/test_ssh.py::test_the_handshake_hands_back_the_identification_string_and_host_key`
+- `tests/unit/test_ssh.py::test_no_algorithm_in_common_is_recorded_as_too_old`
+- `tests/unit/test_ssh.py::test_one_password_attempt_and_no_key_or_agent_lookup`
+- `tests/unit/test_ssh.py::test_a_refused_password_is_a_failed_login`
+- `tests/unit/test_trust_folder_check.py::test_another_account_that_can_change_the_folder_refuses[other0]`
+- `tests/unit/test_trust_folder_check.py::test_another_account_that_can_change_the_folder_refuses[other1]`
+- `tests/unit/test_trust_folder_check.py::test_another_account_that_can_change_the_folder_refuses[other2]`
+- `tests/unit/test_trust_folder_check.py::test_an_account_that_can_only_read_the_folder_refuses_too`
+- `tests/unit/test_trust_folder_check.py::test_an_account_on_the_known_hosts_file_itself_is_caught`
+- `tests/unit/test_trust_folder_check.py::test_before_the_first_run_the_folder_it_will_inherit_from_is_read`
+- `tests/unit/test_trust_folder_check.py::test_permissions_windows_will_not_give_refuse[modify]`
+- `tests/unit/test_trust_folder_check.py::test_permissions_windows_will_not_give_refuse[read]`
 
 ## Parallel runs
 
