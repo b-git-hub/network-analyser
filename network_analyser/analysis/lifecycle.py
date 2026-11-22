@@ -25,6 +25,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import Final
 
+from network_analyser.analysis.chassis import chassis_pid
 from network_analyser.analysis.ids import finding_id
 from network_analyser.analysis.outcome import NOT_COLLECTED_REASON
 from network_analyser.analysis.releases import (
@@ -179,8 +180,8 @@ def suggested_release(data: AnalysisInput) -> tuple[Finding, ...]:
     by_pid = {answer.pid: answer for answer in source}
     findings: list[Finding] = []
     for device in data.topology.devices:
-        model = device.model
-        if not isinstance(model, str) or not model:
+        model = chassis_pid(data, device)
+        if model is None:
             findings.append(_suggested_could_not_check(device, "the model is not readable"))
             continue
         if not is_safe_pid(model):

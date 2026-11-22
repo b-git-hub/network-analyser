@@ -25,7 +25,8 @@ from network_analyser.records.topology import (
     CheckType,
     Finding,
 )
-from tests.support.topology_records import visited
+from tests.support.analysis_records import collected_of
+from tests.support.topology_records import chassis_inventory, visited
 
 A = "192.0.2.1"
 MODEL = "C9300-48P"
@@ -41,10 +42,14 @@ def _device(
     platform: Platform = Platform.IOS_XE,
     model: str = MODEL,
 ) -> DeviceRecord:
-    record = visited(A, "S1", "sw-a", platform=platform)
+    nexus = platform is Platform.NX_OS
+    record = visited(
+        A, "S1", "sw-a", platform=platform, inventory=chassis_inventory(model) if nexus else None
+    )
     version = record.version
     assert version is not None
-    return replace(record, version=replace(version, model=model, software_version=release))
+    shown = model.removeprefix("N9K-") if nexus else model
+    return replace(record, version=replace(version, model=shown, software_version=release))
 
 
 def _compatible(pid: str, *releases: tuple[str, str | None]) -> CompatibleReleases:
@@ -57,6 +62,7 @@ def _advice(record: DeviceRecord, compatible: CompatibleReleases) -> tuple[str, 
     results = analysis.analyse(
         AnalysisInput(
             topology=topology.build((record,)),
+            collected=collected_of(record),
             answers=CiscoAnswers(compatible=(compatible,)),
         )
     )
@@ -68,6 +74,7 @@ def _suggested_findings(record: DeviceRecord, *releases: str) -> list[Finding]:
     results: AnalysisResults = analysis.analyse(
         AnalysisInput(
             topology=topology.build((record,)),
+            collected=collected_of(record),
             answers=CiscoAnswers(
                 advisories=_NOT_ASKED,
                 eox=_NOT_ASKED,

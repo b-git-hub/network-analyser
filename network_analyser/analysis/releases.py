@@ -64,14 +64,17 @@ _CLASSIC_IOS: Final = re.compile(
 _IOS_XE: Final = re.compile(
     r"(?:1[6-9]|2[6-9]|[3-9][0-9])\.[0-9]{1,2}\.[0-9]{1,3}[a-z]{0,2}[0-9]{0,2}"
 )
-# The Nexus hardware families openVuln matches NX-OS on, from the model `show version` names.
+# The Nexus platform aliases openVuln matches NX-OS on, from a chassis PID's series prefix. The
+# aliases are the ones Cisco's `/platforms?OSType=nxos` documents (NEXUS3000, NEXUS5000,
+# NEXUS6000, NEXUS7000, NEXUS9000); the Nexus 7700 (`N77-`) is listed under NEXUS7000, and a
+# Nexus 2000 Fabric Extender (`N2K-`) runs no NX-OS of its own, so neither has an alias of its
+# own.
 _NEXUS_FAMILIES: Final = (
-    (re.compile(r"\bN9K-|\bNexus ?9000\b", re.IGNORECASE), "NEXUS9000"),
-    (re.compile(r"\bN7K-|\bNexus ?7000\b", re.IGNORECASE), "NEXUS7000"),
-    (re.compile(r"\bN77-|\bNexus ?7700\b", re.IGNORECASE), "NEXUS7700"),
-    (re.compile(r"\bN5K-|\bNexus ?5000\b", re.IGNORECASE), "NEXUS5000"),
-    (re.compile(r"\bN3K-|\bNexus ?3000\b", re.IGNORECASE), "NEXUS3000"),
-    (re.compile(r"\bN2K-|\bNexus ?2000\b", re.IGNORECASE), "NEXUS2000"),
+    (re.compile(r"N9K-", re.IGNORECASE), "NEXUS9000"),
+    (re.compile(r"N7K-|N77-", re.IGNORECASE), "NEXUS7000"),
+    (re.compile(r"N6K-", re.IGNORECASE), "NEXUS6000"),
+    (re.compile(r"N5K-", re.IGNORECASE), "NEXUS5000"),
+    (re.compile(r"N3K-", re.IGNORECASE), "NEXUS3000"),
 )
 _BASE_TRAIN: Final = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}")
 _CLASSIC_TRAIN: Final = re.compile(r"\)([A-Za-z]+)")
@@ -214,17 +217,19 @@ def _suffix_key(suffix: str) -> tuple[tuple[int, str | int], ...]:
     )
 
 
-def hardware_family(model: str | Unknown) -> str | None:
-    """Return the Nexus hardware family `model` names, or None when it cannot be worked out.
+def hardware_family(chassis_pid: str | None) -> str | None:
+    """Return the Nexus series alias a chassis PID names, or None when it cannot be worked out.
 
-    None makes the NX-OS match rest on release alone, and marks the Finding "hardware family
-    not confirmed" (story 46). A model that is not a Nexus model gives None as well: Analysis
-    never guesses a family from a model it does not recognise.
+    The PID is the chassis entry of `show inventory | json` (`N9K-C93180YC-EX`), because the
+    model `show version` gives (`C93180YC-EX`) carries no series (#134). None marks the Finding
+    "hardware family not confirmed" (story 46). A PID that does not start with a Nexus series
+    prefix gives None as well: Analysis never guesses a series from a name it does not
+    recognise.
     """
-    if not isinstance(model, str):
+    if chassis_pid is None:
         return None
     return next(
-        (family for pattern, family in _NEXUS_FAMILIES if pattern.search(model)),
+        (family for pattern, family in _NEXUS_FAMILIES if pattern.match(chassis_pid)),
         None,
     )
 
