@@ -95,3 +95,6 @@ last on the integration branch.
 - 2026-11-22: merged #158 at `ab31b6b`; gate: ruff/format/mypy pass, pytest 2990 passed, 1
   skipped, 21 failed (baseline); all temp-then-rename writers now share
   `_winsys/rename.retry_rename`, so the intermittent is covered (ticket closed).
+- 2026-11-22: merged #140 at `4c691c4`; gate: ruff/format/mypy pass, pytest 2997 passed, 1
+  skipped, 21 failed (baseline); every Cisco insecure-list entry now names a shipped Check id,
+  enforced by a test that refuses stale ids.
