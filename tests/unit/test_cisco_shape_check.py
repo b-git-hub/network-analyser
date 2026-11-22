@@ -178,7 +178,7 @@ def test_an_unrecognised_error_string_shows_only_its_length() -> None:
     assert f"<unrecognised code, length {len(CANARY_CODE)}>" in summary
 
 
-def test_the_licence_slash_question_reports_only_whether_the_status_was_2xx() -> None:
+def test_the_licence_slash_question_reports_the_http_status_and_never_a_value() -> None:
     fake = _canary_cisco()
     fake.scripted.append(
         (
@@ -189,12 +189,32 @@ def test_the_licence_slash_question_reports_only_whether_the_status_was_2xx() ->
 
     summary = collect_summary(_session(fake), Inputs())
 
-    slash_lines = [line for line in summary.splitlines() if "%2F" in line]
-    assert slash_lines
-    assert any("2xx: no" in line for line in slash_lines)
-    assert any("2xx: yes" in line for line in slash_lines)
-    assert "%2F" in summary
+    lines = summary.splitlines()
+    label = next(
+        i for i, line in enumerate(lines) if "Software Suggestion, PID with a licence slash" in line
+    )
+    assert "HTTP 404" in lines[label + 1]
+    assert "2xx" not in summary
     assert CANARY_CODE not in summary
+
+
+def test_the_operator_pid_is_also_asked_of_the_hardware_eox_path_as_the_tool_sends_it() -> None:
+    fake = _canary_cisco()
+
+    collect_summary(_session(fake), Inputs(pid="SYNTH-PID-3/K9"))
+
+    assert "/supporttools/eox/rest/5/EOXByProductID/1/SYNTH-PID-3%2FK9" in fake.paths()
+
+
+def test_the_iosxe_and_nxos_version_codes_print_by_name_when_they_match_exactly() -> None:
+    fake = _canary_cisco()
+    fake.advisory_errors[("iosxe", "1.2.3", None)] = (400, "INVALID_IOSXE_VERSION")
+    fake.advisory_errors[("nxos", "1.2.3", "NEXUS9000")] = (400, "INVALID_NXOS_VERSION")
+
+    summary = collect_summary(_session(fake), Inputs())
+
+    assert "INVALID_IOSXE_VERSION x1" in summary
+    assert "INVALID_NXOS_VERSION x1" in summary
 
 
 def test_release_fields_report_booleans_never_the_value() -> None:

@@ -13,7 +13,9 @@ to paste back onto the ticket. The summary holds only:
   error string shows as `<unrecognised code, length N>`),
 - booleans and counts about release and date fields (a dotted form, a codename prefix, which
   fixed date format), and which of a fixed list of Nexus family spellings a reply used,
-- for the licence-slash `%2F` question, only whether the HTTP status was 2xx.
+- for the licence-slash `%2F` question, the HTTP status and error code, as for every other call
+  (the status is not a value, and a bare "2xx: no" cannot tell an unknown PID from an encoding
+  refusal).
 
 It never prints a value from a reply, a PID, a release string, a date, a hostname or an
 address. By default every PID and release it sends is a synthetic sample from this file. The
@@ -108,6 +110,10 @@ ALLOWED_CODES: Final = frozenset(
         "ERR_403_NOT_AUTHORIZED",
         "ERR_403_DEVELOPER_INACTIVE",
         "invalid_client",
+        # Inferred from the lengths (21 and 20) in the first live run, not yet seen by name.
+        # A name is printed only when it matches exactly, so a wrong guess shows as its length.
+        "INVALID_IOSXE_VERSION",
+        "INVALID_NXOS_VERSION",
     }
 )
 """The only error strings the summary may print. Any other shows as its length only.
@@ -368,7 +374,7 @@ def _eox_probes(inputs: Inputs) -> list[Probe]:
     whose = "operator release" if inputs.release else "synthetic release"
     base = "/supporttools/eox/rest/5/EOXBySWReleaseString/1"
     both = (release, SAMPLE_RELEASE_2)
-    return [
+    probes = [
         Probe(
             f"software EoX, path form, two releases comma-joined ({whose})",
             CiscoEndpoint.EOX,
@@ -397,6 +403,18 @@ def _eox_probes(inputs: Inputs) -> list[Probe]:
             Kind.SLASH,
         ),
     ]
+    if inputs.pid is not None:
+        # The production hardware path (`advisories/lookup.py`), with the operator's own PID.
+        probes.append(
+            Probe(
+                "hardware EoX, operator PID as the tool sends it",
+                CiscoEndpoint.EOX,
+                f"/supporttools/eox/rest/5/EOXByProductID/1/{wire_pid(inputs.pid)}",
+                Kind.EOX,
+                (inputs.pid,),
+            )
+        )
+    return probes
 
 
 def _suggestion_probes(inputs: Inputs) -> list[Probe]:
@@ -513,9 +531,6 @@ def _describe(number: int, probe: Probe, call: Call) -> list[str]:
     response = call.response
     if response is None:
         lines.append(f"    {call.outcome.value}; no reply ({_reason(call.reason)})")
-        return lines
-    if probe.kind is Kind.SLASH:
-        lines.append(f"    licence slash sent as %2F; 2xx: {_yes(200 <= response.status < 300)}")  # noqa: PLR2004
         return lines
     lines.append(
         f"    {call.outcome.value}; HTTP {response.status}; reply {len(response.body)} bytes"
@@ -649,6 +664,8 @@ def _count_search(texts: list[str], pattern: re.Pattern[str]) -> str:
 def _date_shape(value: object) -> str:
     if not isinstance(value, str):
         return "not text"
+    if value == "":
+        return "empty text"
     return next((label for pattern, label in _DATE_SHAPES if pattern.fullmatch(value)), "other")
 
 
