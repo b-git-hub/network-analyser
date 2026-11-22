@@ -605,7 +605,10 @@ def http_server(data: AnalysisInput) -> tuple[Finding, ...]:
 
 
 def legacy_services(data: AnalysisInput) -> tuple[Finding, ...]:
-    """Story 62: fire on source routing and each legacy service the config turns on.
+    """Story 62: fire on source routing and each legacy service that is on.
+
+    PAD and BOOTP count at their IOS/IOS-XE default (on), so a device that never disabled them
+    is a hit; the fact carries that reading (operator decision on #142, 2026-11-22).
 
     Source routing is judged on IOS/IOS-XE only: its default is an IOS default, so on NX-OS it
     is neither a hit nor "could not decide".
