@@ -111,6 +111,7 @@ def visited_device(known: Known, addresses: dict[IPv4Address, str]) -> VisitedDe
         vlan_database=vlan_database(known),
         vpc=vpc.value if isinstance(vpc, Reading) else vpc,
         hardware_series=version.hardware_series if version else None,
+        router_operating_mode=version.router_operating_mode if version else None,
     )
 
 

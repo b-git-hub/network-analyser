@@ -92,6 +92,8 @@ class VisitedDevice:
         hardware_series: the Nexus hardware series token `show version` named, such as
             `Nexus9000`; None when it named none, named more than one, or the Platform prints
             no such token (#159).
+        router_operating_mode: Cisco's `Router operating mode:` text, such as
+            `Controller-Managed`; None when `show version` printed none (ticket #147).
     """
 
     id: str
@@ -109,6 +111,7 @@ class VisitedDevice:
     vlan_database: frozenset[int] | Unknown
     vpc: VpcState | Unknown | None
     hardware_series: str | None = None
+    router_operating_mode: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -17,6 +17,7 @@ import os
 import secrets
 from pathlib import Path
 
+from network_analyser._winsys import retry_rename
 from network_analyser.credentials import SecretScan
 
 
@@ -59,4 +60,4 @@ def register_run_folder(register: Path, run_folder: Path, *, scan: SecretScan) -
         os.fsync(handle)
     finally:
         os.close(handle)
-    temporary.replace(register)
+    retry_rename(lambda: temporary.replace(register))

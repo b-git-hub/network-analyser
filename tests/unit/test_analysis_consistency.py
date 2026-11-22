@@ -4,10 +4,11 @@ Driven through `analysis.analyse` only. A stack or StackWise Virtual pair, a vPC
 Catalyst 9000 in bundle mode and an IOS-XE Standard-Support Train are all facts the Run
 already collected, so these Checks need no new command and no Cisco lookup.
 
-The Standard- and Extended-Support Train list is the one researched on #76 from Cisco's
-Catalyst 9200-9600 release guidance (C9K-REL, as of September 2026): Extended Support is
-17.12, 17.15 and 17.18; Standard Support is 17.13, 17.14, 17.16 and 17.17. A Train the
-research does not classify is never guessed at.
+From 16.6 on, Cisco makes every third IOS-XE Train an Extended-Support Train (48 months) and
+the ones between it Standard-Support Trains (12 months); #147 confirmed the rule against
+Cisco's own model, and the published Trains are listed below. A Train outside that list,
+such as the 26.x scheme Cisco has not published, is judged per device and says it could not
+decide rather than passing for an Extended-Support Train.
 """
 
 from dataclasses import replace
@@ -31,6 +32,7 @@ from tests.support.topology_records import visited, vpc
 
 A = "192.0.2.1"
 B = "192.0.2.2"
+C = "192.0.2.3"
 C9K = "C9300-48P"
 C8300 = "C8300-1N1S-4T2X"
 SHOW_VERSION = "show version"
@@ -354,13 +356,36 @@ def test_a_catalyst_9000_whose_mode_was_not_read_raises_nothing() -> None:
     assert _findings(results, "consistency-bundle-mode") == []
 
 
-# -- Standard-Support Train -------------------------------------------------------------------
+# -- Standard- and Extended-Support Trains -----------------------------------------------------
+
+STANDARD_TRAINS = (
+    "16.7",
+    "16.8",
+    "16.10",
+    "16.11",
+    "17.1",
+    "17.2",
+    "17.4",
+    "17.5",
+    "17.7",
+    "17.8",
+    "17.10",
+    "17.11",
+    "17.13",
+    "17.14",
+    "17.16",
+    "17.17",
+)
+EXTENDED_TRAINS = ("16.6", "16.9", "16.12", "17.3", "17.6", "17.9", "17.12", "17.15", "17.18")
+UNCLASSIFIED_TRAINS = ("16.5", "17.19", "26.1")
+"""Cisco publishes no support class for these: 26.x's scheme is not published, and a Train
+before 16.6 or after 17.18 is outside the model #147 confirmed. Each says it could not decide."""
 
 
-@pytest.mark.parametrize("release", ["17.13.1", "17.14.2", "17.16.1", "17.17.3"])
-def test_ios_xe_on_a_standard_support_train_raises_low(release: str) -> None:
+@pytest.mark.parametrize("train", STANDARD_TRAINS)
+def test_ios_xe_on_a_standard_support_train_raises_low(train: str) -> None:
     (finding,) = _findings(
-        _results(_device(A, "S1", "sw-a", release=release)),
+        _results(_device(A, "S1", "sw-a", release=f"{train}.1")),
         "consistency-standard-support-train",
     )
 
@@ -368,17 +393,57 @@ def test_ios_xe_on_a_standard_support_train_raises_low(release: str) -> None:
     assert finding.check.type is CheckType.CONSISTENCY
     assert finding.devices == ("dev-S1",)
     assert "sw-a" in finding.what_was_found
-    assert release in finding.what_was_found
+    assert train in finding.what_was_found
     assert "Standard-Support" in finding.what_was_found
     assert "Extended-Support" in finding.what_to_do
     assert finding.source == "device reports"
 
 
-@pytest.mark.parametrize("release", ["17.12.4", "17.15.1", "17.18.4"])
-def test_ios_xe_on_an_extended_support_train_raises_nothing(release: str) -> None:
-    results = _results(_device(A, "S1", "sw-a", release=release))
+@pytest.mark.parametrize("train", EXTENDED_TRAINS)
+def test_ios_xe_on_an_extended_support_train_raises_nothing(train: str) -> None:
+    results = _results(_device(A, "S1", "sw-a", release=f"{train}.1"))
 
     assert _findings(results, "consistency-standard-support-train") == []
+    assert _run(results, "consistency-standard-support-train").ran is True
+
+
+@pytest.mark.parametrize("train", UNCLASSIFIED_TRAINS)
+def test_a_train_the_model_does_not_classify_gets_a_low_could_not_decide(train: str) -> None:
+    results = _results(_device(A, "S1", "sw-a", release=f"{train}.1"))
+
+    (finding,) = _findings(results, "consistency-standard-support-train")
+    assert finding.level is FindingLevel.LOW
+    assert finding.devices == ("dev-S1",)
+    assert "could not decide" in finding.what_was_found
+    assert train in finding.what_was_found
+    run = _run(results, "consistency-standard-support-train")
+    assert run.ran is True
+    assert run.reason is None
+
+
+def test_the_classified_trains_are_exactly_ciscos_published_ones() -> None:
+    """A Train Cisco adds must be added to this list on purpose: never classified by accident.
+
+    The rule is "every third Train from 16.6 is Extended", but it is applied only to the
+    Trains Cisco has published. This fails if the code starts classifying 17.19 or 16.5.
+    """
+    judged: dict[str, str] = {}
+    for major in (16, 17):
+        for minor in range(1, 40):
+            train = f"{major}.{minor}"
+            findings = _findings(
+                _results(_device(A, "S1", "sw-a", release=f"{train}.1")),
+                "consistency-standard-support-train",
+            )
+            if not findings:
+                judged[train] = "extended"
+            elif "could not decide" not in findings[0].what_was_found:
+                judged[train] = "standard"
+
+    assert judged == {
+        **dict.fromkeys(STANDARD_TRAINS, "standard"),
+        **dict.fromkeys(EXTENDED_TRAINS, "extended"),
+    }
 
 
 def test_an_ios_xe_device_that_is_not_a_catalyst_9000_is_still_this_check() -> None:
@@ -413,25 +478,17 @@ def test_a_classic_ios_train_is_outside_this_check() -> None:
     assert _run(results, "consistency-standard-support-train").ran is True
 
 
-def test_a_train_the_research_does_not_classify_skips_the_check_instead_of_guessing() -> None:
-    results = _results(_device(A, "S1", "sw-a", release="17.9.4a"))
-
-    assert _findings(results, "consistency-standard-support-train") == []
-    run = _run(results, "consistency-standard-support-train")
-    assert run.ran is False
-    assert run.reason is not None
-    assert "17.9" in run.reason
-
-
-def test_a_mixed_estate_still_flags_the_classified_device() -> None:
+def test_a_mixed_estate_judges_each_device_on_its_own_train() -> None:
     results = _results(
-        _device(A, "S1", "sw-a", release="17.9.4a"),
+        _device(A, "S1", "sw-a", release="26.1.1"),
         _device(B, "S2", "sw-b", release="17.13.1"),
+        _device(C, "S3", "sw-c", release="17.12.4"),
     )
 
-    (finding,) = _findings(results, "consistency-standard-support-train")
-
-    assert finding.devices == ("dev-S2",)
+    findings = _findings(results, "consistency-standard-support-train")
+    assert sorted(finding.devices for finding in findings) == [("dev-S1",), ("dev-S2",)]
+    undecided = next(finding for finding in findings if finding.devices == ("dev-S1",))
+    assert "could not decide" in undecided.what_was_found
     assert _run(results, "consistency-standard-support-train").ran is True
 
 

@@ -24,6 +24,7 @@ from network_analyser.records.platform import CredentialSetResult, Platform
 from network_analyser.records.run_summary import RunReport, RunReportFacts
 from network_analyser.records.sweep import SweepResult
 from network_analyser.records.topology import (
+    NOT_AVAILABLE,
     Check,
     DeviceAdvice,
     Finding,
@@ -47,6 +48,10 @@ COULD_NOT_CHECK_CHECK_ID: Final = "advisory-could-not-check"
 """The stable Check id of a Low "could not check" Advisory Finding (story 53)."""
 CRITICAL_AND_HIGH_ROWS: Final = 10
 """How many of the worst Critical and High Checks the table shows (story 101)."""
+NEWER_THAN_LIST: Final = "running release is newer than Cisco's list"
+"""The fixed text Analysis gives when the running release is above everything Cisco lists
+(#127). `analysis.advisory.NEWER_THAN_LIST` holds the same text; `run_output` may not import
+`analysis`, so it is repeated here and a test keeps the two equal (#139)."""
 _POLICY: Final = (
     "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; "
     "img-src 'none'; connect-src 'none'; base-uri 'none'; form-action 'none'"
@@ -257,6 +262,7 @@ _VISITED_HEAD: Final = (
     "Ciphertext SHA-256",
     "Scrypt level",
     "Upgrade Target",
+    "Latest Release",
 )
 
 
@@ -290,6 +296,7 @@ def _visited_row(
         _text(None if backup is None else backup.ciphertext_sha256, scan),
         _text(_scrypt(None if backup is None else backup.scrypt_level), scan),
         _text(_upgrade_target(advice.get(device.id)), scan),
+        _text(_latest_release(advice.get(device.id)), scan),
     )
 
 
@@ -308,6 +315,27 @@ def _upgrade_target(advice: DeviceAdvice | None) -> str:
             f"(does not clear {advice.not_cleared} Advisories: no fix in {train})"
         )
     return f"Upgrade to {target} or later"
+
+
+def _latest_release(advice: DeviceAdvice | None) -> str:
+    """Both Latest Release values with Cisco's lifecycle code beside each (#139).
+
+    The same words the Findings report uses (#127). A code is left out when the record holds
+    none, and beside `not available` or the running-release text, which name no listed
+    release for a code to describe.
+    """
+    if advice is None:
+        return f"Latest Release in Train: {NOT_AVAILABLE}; overall: {NOT_AVAILABLE}"
+    in_train = _latest_value(advice.latest_release_in_train, advice.latest_in_train_lifecycle)
+    overall = _latest_value(advice.latest_release, advice.latest_release_lifecycle)
+    return f"Latest Release in Train: {in_train}; overall: {overall}"
+
+
+def _latest_value(release: str, lifecycle: str | None) -> str:
+    """One Latest Release value, with its code when there is one to show (#139)."""
+    if lifecycle is None or release in (NOT_AVAILABLE, NEWER_THAN_LIST):
+        return release
+    return f"{release} ({lifecycle})"
 
 
 def _unvisited(built: Topology, names: dict[str, str], scan: SecretScan) -> str:

@@ -215,9 +215,11 @@ def _readable_release(device: VisitedDevice) -> str | Unknown:
 
 
 def _resolve_release(data: AnalysisInput, device: VisitedDevice, release: str) -> DeviceAdvisory:
-    os_type = family_of(device.platform, release)
+    os_type = family_of(device.platform, release, device.router_operating_mode)
     if os_type is None:
-        return _unchecked(device, family_reason(release))
+        return _unchecked(
+            device, family_reason(device.platform, release, device.router_operating_mode)
+        )
     normalised = normalise_release(release)
     family = nexus_series(data, device) if os_type is OsType.NX_OS else None
     answer = _answer_for(data.answers.advisories, os_type, normalised, family)
@@ -498,7 +500,7 @@ def _latest(
     running = _running_release(device)
     if (
         running is not None
-        and family_of(device.platform, running) is not None
+        and family_of(device.platform, running, device.router_operating_mode) is not None
         and release_key(running) > release_key(overall)
     ):
         overall, overall_lifecycle = NEWER_THAN_LIST, None
@@ -524,7 +526,7 @@ def _placed_releases(
     placed: list[tuple[str, str | None]] = []
     for item in releases:
         release = normalise_listed_release(item.release)
-        if family_of(device.platform, release) is not None:
+        if family_of(device.platform, release, device.router_operating_mode) is not None:
             placed.append((release, _lifecycle(item.lifecycle)))
     return tuple(placed)
 
@@ -537,7 +539,7 @@ def _latest_in_train(
     """The highest listed release in the device's Train, or `not available` (#127)."""
     if running is None:
         return NOT_AVAILABLE, None
-    os_type = family_of(device.platform, device.software_version)
+    os_type = family_of(device.platform, device.software_version, device.router_operating_mode)
     if os_type is None:
         return NOT_AVAILABLE, None
     train = train_of(running, os_type)

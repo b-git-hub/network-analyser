@@ -14,6 +14,15 @@ _VIEW: Final = re.compile(r"\bview\b", re.IGNORECASE)
 _RELEASE: Final = re.compile(r"^(\d{1,3})\.(\d{1,3})(?:\.(\d{1,3}))?")
 _INSECURE_CONFIGURATION_FLOOR: Final = (17, 18, 2)
 """The first IOS-XE release with `show system insecure configuration` (story 68; #97)."""
+_ROUTER_OPERATING_MODE: Final = re.compile(
+    r"^\s*Router operating mode:\s*([A-Za-z][A-Za-z -]{0,30}[A-Za-z])\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+"""Cisco's `Router operating mode:` line, which an SD-WAN edge router prints (#147).
+
+The value is kept as a short word or phrase only, so arbitrary device text never reaches a
+record. The line is absent on classic IOS and Catalyst 9000 switches, so absence is None.
+"""
 _LOWEST_WORKING_LEVEL: Final = 2
 """Levels 0 and 1 are user EXEC: too low for any Backup (ADR 0005). Any higher level may
 be the custom-level fallback, so it is never flagged here."""
@@ -37,14 +46,16 @@ def supports_insecure_configuration(version: VersionFacts) -> bool:
 
 
 def read_version(text: str) -> VersionFacts:
-    """Return the hostname, model, software version and every stack serial."""
+    """Return the hostname, model, software version, stack serials and operating mode."""
     rows = parse(_TEMPLATES, SHOW_VERSION, text)
     row = rows[0] if rows else None
+    mode = _ROUTER_OPERATING_MODE.search(text)
     return VersionFacts(
         hostname=fields.word(row, "hostname", "hostname"),
         model=fields.word(row, "hardware", "model"),
         software_version=fields.word(row, "version", "software version"),
         serials=fields.serials(fields.text_list(row, "serial")),
+        router_operating_mode=None if mode is None else mode.group(1),
     )
 
 

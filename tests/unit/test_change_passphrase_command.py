@@ -10,6 +10,7 @@ import io
 import os
 import signal
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -307,3 +308,75 @@ def test_nothing_is_written_with_a_typed_passphrase_in_it(operator: Operator) ->
         data = path.read_bytes()
         assert OLD.encode() not in data
         assert NEW.encode() not in data
+
+
+# -- The Cisco API key follows the passphrase (ADR 0008, story 37; #144) ---------------------
+
+CLIENT_ID = "CANARY-client-id-144"
+CLIENT_SECRET = "CANARY-client-secret-144"
+SET_AT = datetime(2026, 11, 20, 12, 34, 56, tzinfo=UTC)
+THIRD = "CANARY-pp-th1rd-other"
+
+
+def _store_key(operator: Operator, passphrase: backup_store.BackupPassphrase) -> None:
+    backup_store.lock_key_file(
+        operator.data.cisco_key_file,
+        Secret(CLIENT_ID),
+        Secret(CLIENT_SECRET),
+        passphrase,
+        set_at=SET_AT,
+    )
+
+
+def test_the_summary_names_the_cisco_key_file_when_one_exists(operator: Operator) -> None:
+    operator.run_folder("20261117T080000Z", "sw-a")
+    _store_key(operator, operator.old)
+
+    got = operator(typed=_change(start="n"))
+
+    assert got.code == 3
+    assert "Cisco API key file" in _flat(got.err)
+    assert str(operator.data.cisco_key_file) in got.err
+
+
+def test_without_a_cisco_key_file_the_change_still_finishes(operator: Operator) -> None:
+    folder = operator.run_folder("20261117T080000Z", "sw-a")
+    assert not operator.data.cisco_key_file.exists()
+
+    got = operator(typed=_change())
+
+    assert got.code == 0, got.err
+    assert _all_open_with(folder, NEW)
+    assert not operator.data.change_pending.exists()
+    assert not operator.data.previous_check_file.exists()
+
+
+def test_a_key_file_that_cannot_be_relocked_leaves_the_change_pending_until_a_rerun(
+    operator: Operator,
+) -> None:
+    folder = operator.run_folder("20261117T080000Z", "sw-a")
+    third = backup_store.create_check_file(operator.data.root / "third-check.age", Secret(THIRD))
+    _store_key(operator, third)  # a key file neither the old nor the new passphrase opens
+
+    stopped = operator(typed=_change())
+
+    assert stopped.code == 1
+    assert "NOT finished" in _flat(stopped.out)
+    assert "change-passphrase" in _flat(stopped.out)
+    assert operator.data.change_pending.exists()
+    assert operator.data.previous_check_file.exists()
+    assert _all_open_with(folder, NEW)
+    assert backup_store.unlock_check_file(operator.data.check_file, Secret(NEW)) is not None
+    assert fake_age.unlock(operator.data.cisco_key_file.read_bytes(), NEW) is None
+
+    # The operator repairs the key with `cisco-key set` under the new passphrase, then reruns.
+    current = backup_store.unlock_check_file(operator.data.check_file, Secret(NEW))
+    assert current is not None
+    _store_key(operator, current)
+
+    resumed = operator(typed=typed("YES", OLD, NEW, "y"))
+
+    assert resumed.code == 0, resumed.err
+    assert not operator.data.change_pending.exists()
+    assert not operator.data.previous_check_file.exists()
+    assert fake_age.unlock(operator.data.cisco_key_file.read_bytes(), NEW) is not None

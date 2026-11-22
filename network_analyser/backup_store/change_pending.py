@@ -38,6 +38,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Final
 
+from network_analyser._winsys import retry_rename
 from network_analyser.backup_store.check_file import (
     BackupPassphrase,
     CheckFileError,
@@ -288,4 +289,4 @@ def _write_replacing(path: Path, data: bytes) -> None:
         os.fsync(handle)
     finally:
         os.close(handle)
-    temporary.replace(path)
+    retry_rename(lambda: temporary.replace(path))

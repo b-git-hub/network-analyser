@@ -13,10 +13,11 @@ them (`26.1.2s1`, `10.3(4a)`, `15.1(4)M12a`) are part of the release, never a re
 
 NX-OS in ACI mode (`14.2(4i)`, `15.2(3e)`), IOS-XR and any other shape are not in the table,
 so they are never matched: the device gets a "could not check" Finding instead. IOS-XR never
-reaches Analysis, because it is not a supported Platform. The fields Analysis holds can tell an
-NX-OS ACI-mode release from a plain NX-OS one, and an IOS-XE SD-WAN controller release (`20.x`)
-from an IOS-XE one, but a cEdge SD-WAN device looks exactly like an IOS-XE device; the family
-table keeps its three entries either way.
+reaches Analysis, because it is not a supported Platform. IOS XE SD-WAN is never matched
+either (decided on #78): a controller-managed edge router prints an ordinary IOS-XE release,
+so it is told apart by its `Router operating mode:` line, and a vManage controller by its
+`20.x` release line. NX-OS in ACI mode is told apart by its release shape. A device the
+fields cannot tell apart is matched as its release shape says.
 
 A device's release is normalised before it is looked up: the NX-OS `[build ...]` suffix is
 dropped and IOS-XE zero padding is stripped (`16.09.01` becomes `16.9.1`), so a formatting
@@ -106,6 +107,12 @@ _NEXUS_VERSION_SERIES: Final[Mapping[str, str]] = MappingProxyType(
         "Nexus9000": "NEXUS9000",
     }
 )
+_SDWAN_REASON: Final = "IOS XE SD-WAN is not matched"
+# A Catalyst SD-WAN edge router managed by a controller prints this `Router operating mode:`
+# value, whatever IOS-XE release it runs (#147, decided on #78).
+_SDWAN_CONTROLLER_MANAGED: Final = re.compile(r"controller[\s_-]*managed", re.IGNORECASE)
+# A Catalyst SD-WAN controller (vManage, vBond, vSmart) runs IOS-XE 20.x (#78).
+_SDWAN_CONTROLLER_RELEASE: Final = re.compile(r"20\.[0-9]{1,3}\.[0-9]{1,3}[a-z]{0,2}")
 
 
 def normalise_release(release: str) -> str:
@@ -153,15 +160,23 @@ def release_token(text: str) -> str:
     return match.group(0) if match else text.strip()
 
 
-def family_of(platform: Platform | Unknown, release: str | Unknown) -> OsType | None:
+def family_of(
+    platform: Platform | Unknown,
+    release: str | Unknown,
+    router_operating_mode: str | None = None,
+) -> OsType | None:
     """Return the family `release` belongs to, or None when the table does not hold it.
 
     None means never matched: an unreadable release, an unsupported Platform, NX-OS in ACI
-    mode, or a shape the family table does not name (stories 44, 46).
+    mode, IOS XE SD-WAN, or a shape the family table does not name (stories 44, 46). SD-WAN is
+    a controller-managed IOS-XE device's `Router operating mode:` text, or a 20.x controller
+    release (decided on #78, #147).
     """
     if not isinstance(release, str):
         return None
     normalised = normalise_release(release)
+    if platform is Platform.IOS_XE and _is_sdwan(normalised, router_operating_mode):
+        return None
     if platform is Platform.NX_OS:
         return OsType.NX_OS if _NXOS.fullmatch(normalised) else None
     if platform is Platform.IOS_XE:
@@ -172,11 +187,28 @@ def family_of(platform: Platform | Unknown, release: str | Unknown) -> OsType | 
     return None
 
 
-def family_reason(release: str | Unknown) -> str:
+def family_reason(
+    platform: Platform | Unknown,
+    release: str | Unknown,
+    router_operating_mode: str | None = None,
+) -> str:
     """Why `family_of` could not name a family, in fixed text the operator can read."""
-    if isinstance(release, str) and _ACI_MODE.fullmatch(normalise_release(release)):
-        return _ACI_REASON
+    if isinstance(release, str):
+        normalised = normalise_release(release)
+        if platform is Platform.IOS_XE and _is_sdwan(normalised, router_operating_mode):
+            return _SDWAN_REASON
+        if _ACI_MODE.fullmatch(normalised):
+            return _ACI_REASON
     return _FAMILY_REASON
+
+
+def _is_sdwan(release: str, router_operating_mode: str | None) -> bool:
+    """Say whether this IOS/IOS-XE device is one Cisco's SD-WAN family owns (#78, #147)."""
+    if router_operating_mode is not None and _SDWAN_CONTROLLER_MANAGED.search(
+        router_operating_mode
+    ):
+        return True
+    return _SDWAN_CONTROLLER_RELEASE.fullmatch(release) is not None
 
 
 def train_of(release: str, os_type: OsType) -> str:
