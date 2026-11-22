@@ -31,8 +31,14 @@ at once race on pytest's shared `pytest-current` temp link and one crashes at se
 with `PermissionError [WinError 5]` and no summary. Set a worktree-local root before the gate:
 
 ```powershell
-$env:PYTEST_DEBUG_TEMPROOT = Join-Path $PWD '.pytest-tmp'
+$root = Join-Path $env:TEMP ('na-pytest-' + (Split-Path $PWD -Leaf))
+New-Item -ItemType Directory -Force -Path $root | Out-Null
+$env:PYTEST_DEBUG_TEMPROOT = $root
 ```
+
+The directory must exist before pytest starts; a non-existent value fails every test at
+setup with `FileNotFoundError [WinError 3]`. #167 must create its unique directory with
+`tempfile.mkdtemp` (or equivalent), not merely name one.
 
 ## How to read a gate result
 

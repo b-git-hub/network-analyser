@@ -42,11 +42,14 @@ Your prompt names the ticket and your worktree. Read, in this order, from your w
   session, before the gate:
 
   ```powershell
-  $env:PYTEST_DEBUG_TEMPROOT = Join-Path $PWD '.pytest-tmp'
+  $root = Join-Path $env:TEMP ('na-pytest-' + (Split-Path $PWD -Leaf))
+  New-Item -ItemType Directory -Force -Path $root | Out-Null
+  $env:PYTEST_DEBUG_TEMPROOT = $root
   ```
 
-  A `PermissionError ... pytest-current` at session finish is this race, not your ticket;
-  set the variable and rerun. Do not commit `.pytest-tmp`.
+  The directory must already exist, or pytest fails at setup with `FileNotFoundError
+  [WinError 3]`. A `PermissionError ... pytest-current` at session finish is the race, not
+  your ticket; set the variable and rerun. Do not commit the temp directory.
 - If you must work around tooling or a convention, say so in your report; the environment is
   fixed, not the agent.
 
