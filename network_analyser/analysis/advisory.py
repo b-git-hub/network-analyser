@@ -24,6 +24,7 @@ from network_analyser.analysis.ids import finding_id
 from network_analyser.analysis.releases import (
     family_of,
     family_reason,
+    normalise_listed_release,
     normalise_release,
     platform_name,
     release_key,
@@ -34,6 +35,7 @@ from network_analyser.records.analysis import (
     AdvisoryPlatform,
     AnalysisInput,
     CiscoAnswer,
+    CompatibleRelease,
     CompatibleReleases,
     FixedRelease,
     OsType,
@@ -476,10 +478,12 @@ def _latest(
 
     Overall is the highest release on Cisco's compatible list by the tool's own release order;
     in Train is the highest listed release whose Train, by the same rule, is the device's.
-    Cisco's `releaseTrain` text is never used. A device running above a value reads
-    `running release is newer than Cisco's list` instead of being shown an older release
-    (story 7). An unanswered or rejected PID, an empty list, the page cap and an outage all
-    read `not available` (stories 9, 11-13).
+    Cisco's `releaseTrain` text is never used. Only list entries the family table can place
+    count, so a codename or free-text entry never wins (#138). A device running above a value
+    reads `running release is newer than Cisco's list` instead of being shown an older release
+    (story 7), but only when its own release is in the family table: an ACI-mode device is
+    never compared with a standalone list. An unanswered or rejected PID, an empty list, the
+    page cap and an outage all read `not available` (stories 9, 11-13).
     """
     missing = LatestRelease()
     if isinstance(answers, SourceUnavailable) or pid is None:
@@ -487,10 +491,16 @@ def _latest(
     answer = next((item for item in answers if item.pid == pid), None)
     if answer is None or answer.unanswered is not None or not answer.releases:
         return missing
-    listed = tuple((release.release, _lifecycle(release.lifecycle)) for release in answer.releases)
+    listed = _placed_releases(answer.releases, device)
+    if not listed:
+        return missing
     overall, overall_lifecycle = max(listed, key=lambda pair: release_key(pair[0]))
     running = _running_release(device)
-    if running is not None and release_key(running) > release_key(overall):
+    if (
+        running is not None
+        and family_of(device.platform, running) is not None
+        and release_key(running) > release_key(overall)
+    ):
         overall, overall_lifecycle = NEWER_THAN_LIST, None
     in_train, in_train_lifecycle = _latest_in_train(listed, device, running)
     return LatestRelease(
@@ -499,6 +509,24 @@ def _latest(
         overall=overall,
         overall_lifecycle=overall_lifecycle,
     )
+
+
+def _placed_releases(
+    releases: tuple[CompatibleRelease, ...], device: VisitedDevice
+) -> tuple[tuple[str, str | None], ...]:
+    """The list's releases the family table can place, each in the shape a device prints (#138).
+
+    An entry that is not a release, such as a codename or free text, never wins a Latest
+    Release; neither does one that names no family for the device's Platform. A dotted classic
+    IOS entry and a zero-padded entry are normalised first, so they order and match a Train
+    like the running release does.
+    """
+    placed: list[tuple[str, str | None]] = []
+    for item in releases:
+        release = normalise_listed_release(item.release)
+        if family_of(device.platform, release) is not None:
+            placed.append((release, _lifecycle(item.lifecycle)))
+    return tuple(placed)
 
 
 def _latest_in_train(

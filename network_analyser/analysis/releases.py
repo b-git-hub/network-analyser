@@ -34,6 +34,17 @@ from network_analyser.records.unknown import Unknown
 
 _BUILD_SUFFIX: Final = re.compile(r"\s*\[build[^\]]*\]", re.IGNORECASE)
 _ZERO_PADDED: Final = re.compile(r"^0+([0-9][a-z]*)$")
+# A classic IOS release written dotted: `15.2.7E4`. Only classic IOS capitalises its Train.
+_DOTTED_CLASSIC: Final = re.compile(
+    r"([0-9]{1,2})\.([0-9]{1,2})\.0*([0-9]{1,3})([A-Z][A-Za-z0-9]{0,6})"
+)
+# The release inside a display name such as `Dublin-17.12.4`: a major and a minor number, then
+# parenthesised or dotted parts.
+_RELEASE_TOKEN: Final = re.compile(
+    r"[0-9]{1,3}\.[0-9]{1,3}"
+    r"(?:\([0-9]{1,3}[a-z]{0,2}\)[A-Za-z]{0,3}[0-9]{0,3}[a-z]{0,2}"
+    r"|\.[0-9]{1,3}[A-Za-z]{0,3}[0-9]{0,3})*"
+)
 _PART_SEPARATOR: Final = re.compile(r"[^0-9A-Za-z]+")
 _DIGITS: Final = re.compile(r"[0-9]+")
 _SUFFIX_COMPONENT: Final = re.compile(r"[0-9]+|[A-Za-z]+")
@@ -101,6 +112,33 @@ def normalise_release(release: str) -> str:
 def _strip_component(part: str) -> str:
     match = _ZERO_PADDED.fullmatch(part)
     return match.group(1) if match else part
+
+
+def normalise_listed_release(release: str) -> str:
+    """Return a release from one of Cisco's lists in the shape a device prints (#138).
+
+    `normalise_release` runs first, then a classic IOS release written dotted, such as
+    `15.2.7E4` or `15.02.07E4`, is rewritten to the parenthesised form `15.2(7)E4` that
+    `show version` prints, so it orders and matches a Train like the running release does. An
+    IOS-XE release only ever carries lowercase letters, so it is never rewritten.
+    """
+    normalised = normalise_release(release)
+    match = _DOTTED_CLASSIC.fullmatch(normalised)
+    if match is None:
+        return normalised
+    major, minor, rebuild, train = match.groups()
+    return f"{major}.{minor}({int(rebuild)}){train}"
+
+
+def release_token(text: str) -> str:
+    """Return the release inside a Cisco display name, or `text` when it holds none (#138).
+
+    A Suggested Release can come as `Dublin-17.12.4` or `IOS XE 17.12.4`. The first run of text
+    shaped like a release is taken; text with no such run is returned stripped, so it can only
+    match an equally odd release.
+    """
+    match = _RELEASE_TOKEN.search(text)
+    return match.group(0) if match else text.strip()
 
 
 def family_of(platform: Platform | Unknown, release: str | Unknown) -> OsType | None:

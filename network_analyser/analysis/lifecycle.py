@@ -27,7 +27,12 @@ from typing import Final
 
 from network_analyser.analysis.chassis import chassis_pid
 from network_analyser.analysis.ids import finding_id
-from network_analyser.analysis.releases import normalise_release
+from network_analyser.analysis.releases import (
+    normalise_listed_release,
+    normalise_release,
+    release_key,
+    release_token,
+)
 from network_analyser.records.analysis import (
     AnalysisInput,
     HardwareItem,
@@ -521,9 +526,16 @@ def _suggested_could_not_check(device: VisitedDevice, reason: str) -> Finding:
 
 
 def _is_suggested(release: str, suggested: tuple[str, ...]) -> bool:
-    """True when `release` is one of `suggested`, compared after normalisation (story 45)."""
-    normalised = normalise_release(release)
-    return any(normalise_release(value) == normalised for value in suggested)
+    """True when `release` is one of `suggested`, compared after normalisation (story 45).
+
+    A Suggested Release named with a codename, such as `Dublin-17.12.4`, is read by its release
+    token, and both sides are compared by release order, not by raw text (#138).
+    """
+    running = release_key(normalise_listed_release(release))
+    return any(
+        release_key(normalise_listed_release(release_token(value))) == running
+        for value in suggested
+    )
 
 
 def _unique(items: list[EoxItem]) -> tuple[EoxItem, ...]:
