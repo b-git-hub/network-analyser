@@ -403,8 +403,8 @@ def test_the_results_fit_topology_json_as_optional_fields() -> None:
     train = next(
         item for item in checks if item["check"]["id"] == "consistency-standard-support-train"
     )
-    assert train["ran"] is False
-    assert "17.9" in train["reason"]
+    assert train["ran"] is True
+    assert train["reason"] is None
 
 
 def test_the_advice_shape_accepts_an_advisory_answer() -> None:

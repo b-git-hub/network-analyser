@@ -54,6 +54,7 @@ def _device(  # noqa: PLR0913 (every device field the Check reads, by name)
     model: str | Unknown = MODEL,
     release: str | Unknown = "17.9.4a",
     chassis: str | None = None,
+    router_operating_mode: str | None = None,
 ) -> DeviceRecord:
     inventory = chassis_inventory(chassis) if chassis is not None else None
     record = visited(address, serial, hostname, inventory=inventory)
@@ -62,7 +63,12 @@ def _device(  # noqa: PLR0913 (every device field the Check reads, by name)
     return replace(
         record,
         platform=platform,
-        version=replace(version, model=model, software_version=release),
+        version=replace(
+            version,
+            model=model,
+            software_version=release,
+            router_operating_mode=router_operating_mode,
+        ),
     )
 
 
@@ -313,14 +319,47 @@ def test_a_family_the_table_does_not_hold_is_never_matched() -> None:
     assert outcomes["dev-S1"].kind is AdvisoryOutcomeKind.COULD_NOT_CHECK
     assert outcomes["dev-S1"].text == "could not check: NX-OS in ACI mode is not matched"
     assert outcomes["dev-S2"].kind is AdvisoryOutcomeKind.COULD_NOT_CHECK
-    assert "family" in (outcomes["dev-S2"].reason or "")
+    assert "IOS XE SD-WAN" in (outcomes["dev-S2"].reason or "")
     assert outcomes["dev-S3"].kind is AdvisoryOutcomeKind.COULD_NOT_CHECK
     assert "family" in (outcomes["dev-S3"].reason or "")
 
+
+def test_a_controller_managed_ios_xe_device_is_never_matched_as_ios_xe() -> None:
+    """An IOS XE SD-WAN edge router runs a 17.x release but is not a plain IOS-XE device.
+
+    Decision #78 lists IOS XE SD-WAN among the families the Advisory Check never matches, so
+    the device gets the "could not check" Finding with that reason, never IOS-XE Advisories.
+    """
+    edge = _device(A, "S1", "sw-a", release="17.9.4a", router_operating_mode="Controller-Managed")
+    results = _results(edge, answers=(_answer(OsType.IOS_XE, "17.9.4a", _advisory()),))
+
+    assert _advisory_findings(results) == []
+    (advice,) = results.advice
+    assert advice.advisory_outcome.kind is AdvisoryOutcomeKind.COULD_NOT_CHECK
+    assert advice.advisory_outcome.text == "could not check: IOS XE SD-WAN is not matched"
+    (finding,) = _could_not_check(results)
+    assert finding.level is FindingLevel.LOW
+    assert "IOS XE SD-WAN is not matched" in finding.what_was_found
+
+
+def test_a_controller_managed_ios_xe_device_asks_cisco_nothing() -> None:
+    edge = _device(A, "S1", "sw-a", release="17.9.4a", router_operating_mode="Controller-Managed")
+
     questions = analysis.lookup_questions(
-        AnalysisInput(topology=topology.build((aci, sdwan_controller, unknown_platform)))
+        AnalysisInput(topology=topology.build((edge,)), collected=collected_of(edge))
     )
+
     assert questions.releases == ()
+
+
+def test_an_autonomous_ios_xe_router_is_still_matched() -> None:
+    """Only Cisco's controller-managed mode marks SD-WAN: an autonomous router is IOS-XE."""
+    router = _device(A, "S1", "sw-a", release="17.9.4a", router_operating_mode="Autonomous")
+
+    results = _results(router, answers=(_answer(OsType.IOS_XE, "17.9.4a", _advisory()),))
+
+    (finding,) = _advisory_findings(results)
+    assert finding.devices == ("dev-S1",)
 
 
 def test_nxos_is_matched_on_its_nexus_hardware_family() -> None:

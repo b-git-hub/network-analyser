@@ -59,13 +59,23 @@ class LandingPrivilege:
 
 @dataclass(frozen=True, slots=True)
 class VersionFacts:
-    """What `show version` says about a device (ticket #49)."""
+    """What `show version` says about a device (ticket #49).
+
+    Attributes:
+        hostname: the device's name.
+        model: the hardware model `show version` names.
+        software_version: the release it runs.
+        serials: every chassis serial: one per stack member, in the order shown.
+        router_operating_mode: Cisco's `Router operating mode:` text, such as
+            `Controller-Managed` or `Autonomous`; None when the output has no such line, as
+            classic IOS and Catalyst 9000 switches do (ticket #147).
+    """
 
     hostname: str | Unknown
     model: str | Unknown
     software_version: str | Unknown
     serials: tuple[str, ...] | Unknown
-    """Every chassis serial: one per stack member, in the order shown."""
+    router_operating_mode: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
