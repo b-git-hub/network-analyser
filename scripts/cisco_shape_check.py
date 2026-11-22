@@ -515,6 +515,15 @@ def _suggestion_probes(inputs: Inputs) -> list[Probe]:
             f"{compatible}CISCO2811?supportedHardware=CISCO3925/K9",
             Kind.COMPATIBLE,
         ),
+        # The same documented request with a hardware value that has no slash, also from
+        # Cisco's docs. If this one answers and the pair above does not, the slash is the cause.
+        Probe(
+            "Software Suggestion compatible list, Cisco's documented sample base with a "
+            "non-slashed hardware value (CISCO2811 with HWIC-1FE in supportedHardware)",
+            CiscoEndpoint.COMPATIBLE,
+            f"{compatible}CISCO2811?supportedHardware=HWIC-1FE",
+            Kind.COMPATIBLE,
+        ),
     ]
     if inputs.pid is not None:
         pid = wire_pid(inputs.pid)
