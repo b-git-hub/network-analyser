@@ -46,6 +46,19 @@ DEVICE_ROLE_CHECK_ID: Final = "config-device-role-out-of-date"
 """
 COULD_NOT_CHECK_CHECK_ID: Final = "advisory-could-not-check"
 """The stable Check id of a Low "could not check" Advisory Finding (story 53)."""
+HARDWARE_EOX_COULD_NOT_CHECK_CHECK_ID: Final = "lifecycle-hardware-eox-could-not-check"
+"""The stable Check id of a Low unchecked-hardware-PID EoX Finding (#153)."""
+SOFTWARE_EOX_COULD_NOT_CHECK_CHECK_ID: Final = "lifecycle-software-eox-could-not-check"
+"""The stable Check id of a Low unchecked-release EoX Finding (#153)."""
+_ATTENTION_CHECK_IDS: Final = frozenset(
+    {
+        COULD_NOT_CHECK_CHECK_ID,
+        DEVICE_ROLE_CHECK_ID,
+        HARDWARE_EOX_COULD_NOT_CHECK_CHECK_ID,
+        SOFTWARE_EOX_COULD_NOT_CHECK_CHECK_ID,
+    }
+)
+"""The per-device Findings Needs attention lists; their Check ids are repeated here (#100)."""
 CRITICAL_AND_HIGH_ROWS: Final = 10
 """How many of the worst Critical and High Checks the table shows (story 101)."""
 NEWER_THAN_LIST: Final = "running release is newer than Cisco's list"
@@ -182,18 +195,15 @@ def _attention(report: RunReport, names: dict[str, str], scan: SecretScan, hits:
 
 
 def _analysis_attention(built: Topology, names: dict[str, str], scan: SecretScan) -> list[str]:
-    """One line per "could not check" and per Device Role out of date (story 100).
+    """One line per "could not check" and per Device Role out of date (stories 100; #153).
 
     A Cisco source that is down already has one line from the Run's end, in
-    `RunReport.attention`; these are the per-device gaps Analysis found. A whole-source
-    outage skips both Checks, so it never turns into one line per device (story 118).
+    `RunReport.attention`; these are the per-device gaps Analysis found, including a value
+    EoX could not check. A whole-source outage skips those Checks, so it never turns into one
+    line per device (story 118).
     """
     selected = sorted(
-        (
-            finding
-            for finding in built.findings
-            if finding.check.id in (COULD_NOT_CHECK_CHECK_ID, DEVICE_ROLE_CHECK_ID)
-        ),
+        (finding for finding in built.findings if finding.check.id in _ATTENTION_CHECK_IDS),
         key=lambda finding: finding.order,
     )
     return ["!! " + _finding_attention(finding, names, scan) for finding in selected]

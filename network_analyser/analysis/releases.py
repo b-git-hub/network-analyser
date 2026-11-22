@@ -5,7 +5,7 @@ the Platform alone: classic IOS and IOS-XE share one command set, so the release
 them apart. Only three families are ever looked up (stories 44-45):
 
 - classic IOS, such as `15.2(7)E4`, `12.2(55)SE7` and `15.1(4)M12a`;
-- IOS-XE, such as `16.9.1`, `17.9.4a` and `26.1.2s1`;
+- IOS-XE, such as `16.9.1`, `17.9.4a`, `26.1.2s1` and the 3.x `3.6.8E`;
 - NX-OS, such as `9.3(10)`, `10.6(3s)` and `7.0(3)I4(8b)`.
 
 A lettered or special running release is an ordinary release: the letters and the digit after
@@ -34,10 +34,13 @@ from network_analyser.records.lookup_values import strip_release_suffix
 from network_analyser.records.platform import Platform
 from network_analyser.records.unknown import Unknown
 
-_ZERO_PADDED: Final = re.compile(r"^0+([0-9][a-z]*)$")
-# A classic IOS release written dotted: `15.2.7E4`. Only classic IOS capitalises its Train.
+# One zero-padded dotted part, with any letters it carries: `03`, `08E`, `09a`.
+_ZERO_PADDED: Final = re.compile(r"^0+([0-9][A-Za-z]*)$")
+# A classic IOS release written dotted: `15.2.7E4`. Only classic IOS capitalises its Train, and
+# its majors are the two-digit 10-15 lines; IOS-XE 3.x is dotted with a capital letter too, so
+# it must never be rewritten here (#151).
 _DOTTED_CLASSIC: Final = re.compile(
-    r"([0-9]{1,2})\.([0-9]{1,2})\.0*([0-9]{1,3})([A-Z][A-Za-z0-9]{0,6})"
+    r"(1[0-5])\.([0-9]{1,2})\.0*([0-9]{1,3})([A-Z][A-Za-z0-9]{0,6})"
 )
 # The release inside a display name such as `Dublin-17.12.4`: a major and a minor number, then
 # parenthesised or dotted parts.
@@ -65,6 +68,13 @@ _CLASSIC_IOS: Final = re.compile(
 _IOS_XE: Final = re.compile(
     r"(?:1[6-9]|2[6-9]|[3-9][0-9])\.[0-9]{1,2}\.[0-9]{1,3}[a-z]{0,2}[0-9]{0,2}"
 )
+# IOS-XE 3.x: dotted releases whose rebuild carries an upper-case Train letter, such as
+# `3.6.8E` and `3.2.2SE`, with an optional rebuild letter before it (`3.16.4aS`). The letter
+# stays part of the Train, because 3.6E and 3.6S are different Train lines. Only 3.x is numbered
+# this way; 16.x on keeps lower-case suffixes (#151).
+_IOS_XE_3X: Final = re.compile(r"3\.[0-9]{1,2}\.[0-9]{1,3}[a-z]?[A-Z]{1,3}")
+# The Train letter of an IOS-XE 3.x release, which its Train keeps: `3.6E`, `3.2SE`.
+_IOS_XE_3X_TRAIN: Final = re.compile(r"3\.[0-9]{1,3}\.[0-9]{1,3}[a-z]?([A-Z]{1,3})")
 # The Nexus platform aliases openVuln matches NX-OS on, from a chassis PID's series prefix. The
 # aliases are the ones Cisco's `/platforms?OSType=nxos` documents (NEXUS3000, NEXUS5000,
 # NEXUS6000, NEXUS7000, NEXUS9000); the Nexus 7700 (`N77-`) is listed under NEXUS7000, and a
@@ -121,7 +131,9 @@ def normalise_release(release: str) -> str:
     The bracketed suffix NX-OS prints after the release (`[build ...]`, `[Feature Release]`) is
     dropped, by the same rule `platforms` uses when it reads `show version` (#155). A dotted
     release has its zero padding stripped, which is what IOS-XE devices print in `show
-    version`. Parenthesised releases, classic IOS and NX-OS, are left as they are.
+    version`: `16.09.01` becomes `16.9.1` and `03.06.08E` becomes `3.6.8E`, an upper-case
+    suffix letter kept as it is. Parenthesised releases, classic IOS and NX-OS, are left as
+    they are.
     """
     stripped = strip_release_suffix(release).strip()
     if "(" in stripped or "." not in stripped:
@@ -140,7 +152,9 @@ def normalise_listed_release(release: str) -> str:
     `normalise_release` runs first, then a classic IOS release written dotted, such as
     `15.2.7E4` or `15.02.07E4`, is rewritten to the parenthesised form `15.2(7)E4` that
     `show version` prints, so it orders and matches a Train like the running release does. An
-    IOS-XE release only ever carries lowercase letters, so it is never rewritten.
+    IOS-XE release is never rewritten: a 16.x-on one only carries lower-case letters, and a
+    3.x one such as `3.6.8E` is IOS-XE numbering even though it capitalises its Train letter
+    (#151).
     """
     normalised = normalise_release(release)
     match = _DOTTED_CLASSIC.fullmatch(normalised)
@@ -183,7 +197,7 @@ def family_of(
     if platform is Platform.IOS_XE:
         if _CLASSIC_IOS.fullmatch(normalised):
             return OsType.IOS
-        if _IOS_XE.fullmatch(normalised):
+        if _IOS_XE.fullmatch(normalised) or _IOS_XE_3X.fullmatch(normalised):
             return OsType.IOS_XE
     return None
 
@@ -213,13 +227,15 @@ def _is_sdwan(release: str, router_operating_mode: str | None) -> bool:
 
 
 def train_of(release: str, os_type: OsType) -> str:
-    """Return the Train `release` belongs to (GLOSSARY.md: `17.12`, `15.2E`).
+    """Return the Train `release` belongs to (GLOSSARY.md: `17.12`, `15.2E`, `3.6E`).
 
-    IOS-XE and NX-OS use the first two dotted numbers. Classic IOS keeps the Train letter that
-    follows the maintenance rebuild. An NX-OS release with a hardware-line segment, a capital
-    letter and a number such as `I7`, `U6`, `A8`, `F3` or `N1`, keeps everything up to and
-    including it, so `7.0(3)I7(9)` is in Train `7.0(3)I7` and `6.0(2)U6(10)` in `6.0(2)U6`
-    (#137): releases built for different hardware lines are never lumped (story 19).
+    IOS-XE and NX-OS use the first two dotted numbers, and an IOS-XE 3.x release keeps the
+    Train letter that follows its rebuild (`3.6.8E` is in Train `3.6E`, #151). Classic IOS
+    keeps the Train letter that follows the maintenance rebuild. An NX-OS release with a
+    hardware-line segment, a capital letter and a number such as `I7`, `U6`, `A8`, `F3` or
+    `N1`, keeps everything up to and including it, so `7.0(3)I7(9)` is in Train `7.0(3)I7`
+    and `6.0(2)U6(10)` in `6.0(2)U6` (#137): releases built for different hardware lines are
+    never lumped (story 19).
     """
     match = _BASE_TRAIN.match(release)
     base = match.group(0) if match else release
@@ -227,6 +243,10 @@ def train_of(release: str, os_type: OsType) -> str:
         suffix = _CLASSIC_TRAIN.search(release)
         if suffix is not None:
             return f"{base}{suffix.group(1).upper()}"
+    if os_type is OsType.IOS_XE:
+        letter_train = _IOS_XE_3X_TRAIN.match(release)
+        if letter_train is not None:
+            return f"{base}{letter_train.group(1)}"
     if os_type is OsType.NX_OS:
         letter_train = _NXOS_LETTER_TRAIN.match(release)
         if letter_train is not None:

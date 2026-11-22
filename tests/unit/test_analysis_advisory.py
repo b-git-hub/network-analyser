@@ -752,7 +752,9 @@ def test_every_advisory_check_runs_when_the_source_answers() -> None:
         "hardening-vty-access-class",
         "hardening-weak-secret-types",
         "lifecycle-hardware-eox",
+        "lifecycle-hardware-eox-could-not-check",
         "lifecycle-software-eox",
+        "lifecycle-software-eox-could-not-check",
         "lifecycle-suggested-release",
     ]
     runs = {run.check.id: run for run in results.checks}
