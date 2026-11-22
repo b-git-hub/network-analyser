@@ -294,17 +294,17 @@ def _check_authorization(request: HttpRequest) -> None:
 def _pid_from_wire(wire: str) -> str:
     """Return the PID a path segment names, proving it left the PC in its safe wire form.
 
-    A licence suffix's `/` may only arrive as `%2F`: a raw `/` would change the path, and any
-    other `%` is not a PID character at all.
+    A licence suffix's `/` must arrive raw, the only form Cisco answers (#162): Cisco's gateway
+    refuses `%2F` with HTTP 400, and no `%` is a PID character at all. The PID pattern allows
+    that one slash and nothing after it that could change the path.
     """
-    if "/" in wire:
-        msg = f"a PID reached the path with a raw slash: {wire!r}"
+    if "%" in wire:
+        msg = f"a PID reached the path percent-encoded, which Cisco refuses: {wire!r}"
         raise UnsafeValueSentError(msg)
-    pid = wire.replace("%2F", "/")
-    if not is_safe_pid(pid):
+    if not is_safe_pid(wire):
         msg = f"PID left without its pattern: {wire!r}"
         raise UnsafeValueSentError(msg)
-    return pid
+    return wire
 
 
 def _params(query: str) -> dict[str, str]:
