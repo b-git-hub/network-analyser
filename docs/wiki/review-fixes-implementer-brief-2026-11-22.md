@@ -53,6 +53,18 @@ Your prompt names the ticket and your worktree. Read, in this order, from your w
 - If you must work around tooling or a convention, say so in your report; the environment is
   fixed, not the agent.
 
+## Shell notes
+
+- If `gh issue view <n> --comments` prints nothing in this shell, use
+  `gh issue view <n> --json number,title,body,comments` or
+  `gh api repos/b-git-hub/network-analyser/issues/<n>` and read the JSON.
+- Inline `--jq` expressions are sometimes mangled by PowerShell quoting. Prefer `--json` plus
+  `ConvertFrom-Json`, or a small `.ps1` file.
+- A successful `git push` can write to stderr and look like a failure. Verify with
+  `git status -sb` or `git ls-remote --heads origin <branch>`; an identical retry is safe.
+- Direct `pytest` (not `scripts/check.py`) still shares the temp root. Set an existing private
+  `PYTEST_DEBUG_TEMPROOT` before it; see the gate baseline page.
+
 ## Finish
 
 1. Commit on your branch. Message: reference the ticket ("Part of #<n>"), not "Closes", plus
