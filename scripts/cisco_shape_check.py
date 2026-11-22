@@ -403,16 +403,70 @@ def _eox_probes(inputs: Inputs) -> list[Probe]:
             Kind.SLASH,
         ),
     ]
-    if inputs.pid is not None:
-        # The production hardware path (`advisories/lookup.py`), with the operator's own PID.
-        probes.append(
+    # Cisco's documented IOS-XE OS type is `IOS-XE`; the probes above send `IOS`.
+    probes.extend(
+        [
             Probe(
-                "hardware EoX, operator PID as the tool sends it",
+                f"software EoX, query form input1 as release,IOS-XE ({whose})",
                 CiscoEndpoint.EOX,
-                f"/supporttools/eox/rest/5/EOXByProductID/1/{wire_pid(inputs.pid)}",
+                f"{base}?input1={release},IOS-XE",
                 Kind.EOX,
-                (inputs.pid,),
-            )
+                (release,),
+            ),
+            Probe(
+                f"software EoX, path form, release,IOS-XE ({whose})",
+                CiscoEndpoint.EOX,
+                f"{base}/{release},IOS-XE",
+                Kind.EOX,
+                (release,),
+            ),
+        ]
+    )
+    probes.extend(
+        [
+            Probe(
+                "hardware EoX, synthetic slash PID in the query form, raw slash",
+                CiscoEndpoint.EOX,
+                f"/supporttools/eox/rest/5/EOXByProductID/1?input1={SAMPLE_SLASH_PID}",
+                Kind.EOX,
+                (SAMPLE_SLASH_PID,),
+            ),
+            Probe(
+                "hardware EoX, synthetic slash PID in the query form, %2F",
+                CiscoEndpoint.EOX,
+                f"/supporttools/eox/rest/5/EOXByProductID/1?input1={wire_pid(SAMPLE_SLASH_PID)}",
+                Kind.EOX,
+                (SAMPLE_SLASH_PID,),
+            ),
+        ]
+    )
+    if inputs.pid is not None:
+        # The production hardware path (`advisories/lookup.py`), with the operator's own PID,
+        # then the same PID in the query form, raw and encoded.
+        probes.extend(
+            [
+                Probe(
+                    "hardware EoX, operator PID as the tool sends it",
+                    CiscoEndpoint.EOX,
+                    f"/supporttools/eox/rest/5/EOXByProductID/1/{wire_pid(inputs.pid)}",
+                    Kind.EOX,
+                    (inputs.pid,),
+                ),
+                Probe(
+                    "hardware EoX, operator PID in the query form, raw slash",
+                    CiscoEndpoint.EOX,
+                    f"/supporttools/eox/rest/5/EOXByProductID/1?input1={inputs.pid}",
+                    Kind.EOX,
+                    (inputs.pid,),
+                ),
+                Probe(
+                    "hardware EoX, operator PID in the query form, %2F",
+                    CiscoEndpoint.EOX,
+                    f"/supporttools/eox/rest/5/EOXByProductID/1?input1={wire_pid(inputs.pid)}",
+                    Kind.EOX,
+                    (inputs.pid,),
+                ),
+            ]
         )
     return probes
 

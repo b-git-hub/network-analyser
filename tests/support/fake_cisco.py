@@ -40,6 +40,8 @@ TOKEN = "CANARY-access-token-95"
 
 ADVISORY_PREFIX = "/security/advisories/v2/OSType/"
 EOX_PREFIX = "/supporttools/eox/rest/5/"
+_EOX_OS_TYPES = frozenset({"IOS", "IOS-XE", "NX-OS"})
+"""The OS types Cisco documents for `release,OSType`; a path value may carry one."""
 SUGGESTION_PREFIX = "/software/suggestion/v2/suggestions/releases/productIds/"
 COMPATIBLE_PREFIX = "/software/suggestion/v2/suggestions/compatible/productId/"
 TOKEN_PATH = "/oauth2/default/v1/token"
@@ -210,6 +212,8 @@ class FakeCisco:
         if kind == "EOXByProductID":
             values = [_pid_from_wire(value) for value in values]
         for value in values:
+            if value in _EOX_OS_TYPES:  # the `release,OSType` suffix, not a release
+                continue
             if kind == "EOXBySWReleaseString" and not is_safe_release(value):
                 msg = f"release left without its pattern: {value!r}"
                 raise UnsafeValueSentError(msg)

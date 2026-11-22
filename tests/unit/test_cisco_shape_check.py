@@ -206,6 +206,26 @@ def test_the_operator_pid_is_also_asked_of_the_hardware_eox_path_as_the_tool_sen
     assert "/supporttools/eox/rest/5/EOXByProductID/1/SYNTH-PID-3%2FK9" in fake.paths()
 
 
+def test_the_slash_pid_is_also_asked_in_the_query_form_raw_and_encoded() -> None:
+    fake = _canary_cisco()
+
+    collect_summary(_session(fake), Inputs())
+
+    paths = fake.paths()
+    assert any("EOXByProductID/1?input1=SYNTH-PID-2/K9" in path for path in paths)
+    assert any("EOXByProductID/1?input1=SYNTH-PID-2%2FK9" in path for path in paths)
+
+
+def test_the_software_eox_is_also_asked_with_the_ios_xe_os_type() -> None:
+    fake = _canary_cisco()
+
+    collect_summary(_session(fake), Inputs())
+
+    paths = fake.paths()
+    assert any("EOXBySWReleaseString/1?input1=1.2.3,IOS-XE" in path for path in paths)
+    assert any("EOXBySWReleaseString/1/1.2.3,IOS-XE" in path for path in paths)
+
+
 def test_the_iosxe_and_nxos_version_codes_print_by_name_when_they_match_exactly() -> None:
     fake = _canary_cisco()
     fake.advisory_errors[("iosxe", "1.2.3", None)] = (400, "INVALID_IOSXE_VERSION")
