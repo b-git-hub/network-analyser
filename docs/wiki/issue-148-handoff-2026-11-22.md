@@ -41,4 +41,16 @@ So the earlier reading (slash versus catalogue miss) is superseded. Every filter
 
 Superseded: the 2026-11-22 (earlier) reading that the 500s for `CISCO1811` and `CISCO3925` "were catalogue misses" if the documented sample returned 200. The sample returned 500, so that reading does not hold.
 
+## Update, 2026-11-22 (latest): a raw slash works
+
+The operator ran `--pid ISR4451-X/K9 --release-os iosxe` on `ticket-148-shape-check` at `317a777`. Results, by probe label:
+
+- Hardware EoX, raw slash in the path: HTTP 200, 2 records, every field filled. `EOXInputValue` contains the PID sent but is one character longer, on both records. (`C9300-24T` was echoed exactly on an earlier run.)
+- Hardware EoX, double-encoded `%252F`: HTTP 400, non-JSON, as with `%2F`.
+- Hardware EoX, base with a trailing wildcard (`ISR4451-X*`): HTTP 200, 32 records, 2 of which have `EOLProductID` equal to the operator PID. The echo is again one character longer than what was sent.
+- Software Suggestion, raw slash in the path: HTTP 200, 2 suggestions; `releaseFormat1` and `releaseFormat2` match the tool's release pattern; `basePID` is 12 characters, the length of the full PID.
+- Software Suggestion, `%252F`: HTTP 400.
+
+So the "cannot be looked up" finding above is superseded for hardware EoX and Software Suggestion. Cisco accepts the slash unencoded, which is the form its v4 EoX reference shows. Production `wire_pid` is wrong to encode it. Two more things block a fix: production groups EoX records by an exact `EOXInputValue` match (`_eox_by_input` in `network_analyser/cli/run_analysis.py`), which would miss both records; and comma-joined batches of slashed PIDs, and the compatible list with a raw slash, are untested. Commit `cb1c325` adds probes for both, plus a line describing the extra echo text by position, length and character class only.
+
 Related: [conventions](conventions.md), [index](index.md).
