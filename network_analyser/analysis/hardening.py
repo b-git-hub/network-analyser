@@ -906,7 +906,12 @@ def icmp(data: AnalysisInput) -> tuple[Finding, ...]:
 
 
 def ssh_v2(data: AnalysisInput) -> tuple[Finding, ...]:
-    """Story 61: absence-is-the-problem; SSH 1.99 on classic IOS and IOS-XE before 17.10."""
+    """Story 61: absence-is-the-problem; SSH 1.99 on classic IOS and IOS-XE before 17.10.
+
+    When the config has no `ip ssh version` line, `show ip ssh` says which version is in
+    force: 2.0 passes and 1.x fires, whatever the release. Only a device whose `show ip ssh`
+    could not be read falls back to the release's default (#142).
+    """
     findings: list[Finding] = []
     for device, facts in _checked_devices(data):
         if device.platform is not Platform.IOS_XE:
@@ -916,39 +921,60 @@ def ssh_v2(data: AnalysisInput) -> tuple[Finding, ...]:
         if isinstance(version, Unknown):
             findings.append(_undecided(SSH_V2_CHECK, device, SSH_VERSION, version))
             continue
-        if version == _SSH_V2_NUMBER:
-            continue
-        if version == 1:
-            what = "SSHv2 is not enforced: ip ssh version 1 is configured."
-        else:
-            late = _release_at_least(device, *SSH_V1_REMOVED)
-            if late is not False:
-                # The line is absent. From 17.10 Cisco refuses SSHv1 anyway, but the running
-                # config cannot show which version is in force (#76, X2).
-                findings.append(
-                    _could_not_decide(
-                        SSH_V2_CHECK,
-                        device,
-                        "the SSH version in force: the running config has no ip ssh version 2, "
-                        "and IOS-XE 17.10 or later refuses SSHv1 by default",
-                        "Confirm the SSH version in force with show ip ssh.",
-                    )
-                )
-                continue
-            what = (
-                "SSHv2 is not enforced: ip ssh version 2 is not configured, so the "
-                "release's default (SSH 1.99) accepts SSHv1."
-            )
-        findings.append(
-            _finding(
-                SSH_V2_CHECK,
-                device,
-                FindingLevel.HIGH,
-                what,
-                "Configure ip ssh version 2 on every device that still accepts SSHv1.",
-            )
-        )
+        finding = _ssh_v2_finding(device, version, _ssh_major_in_force(data, device))
+        if finding is not None:
+            findings.append(finding)
     return tuple(findings)
+
+
+_SSH_VERSION_REPORTED: Final = re.compile(r"^(\d+)\.\d+$")
+
+
+def _ssh_major_in_force(data: AnalysisInput, device: VisitedDevice) -> int | None:
+    """The SSH major version `show ip ssh` reports (`2.0` is 2, `1.99` is 1), else None."""
+    part = _show(data, device).ssh
+    if not isinstance(part, Reading):
+        return None
+    reported = part.value.version
+    match = _SSH_VERSION_REPORTED.match(reported.strip()) if isinstance(reported, str) else None
+    return None if match is None else int(match.group(1))
+
+
+def _ssh_v2_finding(device: VisitedDevice, configured: int, in_force: int | None) -> Finding | None:
+    """The SSHv2 Finding for one IOS/IOS-XE device, or None when SSHv2 is enforced."""
+    if configured == _SSH_V2_NUMBER:
+        return None
+    if configured == 1:
+        what = "SSHv2 is not enforced: ip ssh version 1 is configured."
+    elif in_force == _SSH_V2_NUMBER:
+        return None
+    elif in_force == 1:
+        what = (
+            "SSHv2 is not enforced: ip ssh version 2 is not configured, and show ip ssh "
+            "reports a version that accepts SSHv1."
+        )
+    elif _release_at_least(device, *SSH_V1_REMOVED) is not False:
+        # The line is absent and show ip ssh did not say. From 17.10 Cisco refuses SSHv1
+        # anyway, but the running config cannot show which version is in force (#76, X2).
+        return _could_not_decide(
+            SSH_V2_CHECK,
+            device,
+            "the SSH version in force: the running config has no ip ssh version 2, "
+            "and IOS-XE 17.10 or later refuses SSHv1 by default",
+            "Confirm the SSH version in force with show ip ssh.",
+        )
+    else:
+        what = (
+            "SSHv2 is not enforced: ip ssh version 2 is not configured, so the "
+            "release's default (SSH 1.99) accepts SSHv1."
+        )
+    return _finding(
+        SSH_V2_CHECK,
+        device,
+        FindingLevel.HIGH,
+        what,
+        "Configure ip ssh version 2 on every device that still accepts SSHv1.",
+    )
 
 
 # -- No VTY access-class -----------------------------------------------------------------------
