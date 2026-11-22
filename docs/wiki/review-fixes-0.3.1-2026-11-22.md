@@ -89,3 +89,6 @@ last on the integration branch.
 - 2026-11-22: merged #167 at `bf22e2b`; gate: ruff/format/mypy pass, pytest 2980 passed, 1
   skipped, 21 failed (baseline), run plain with no `PYTEST_DEBUG_TEMPROOT`; the
   parallel-temp workaround is no longer needed from this merge commit.
+- 2026-11-22: merged #144 at `51479c7`; gate: ruff/format/mypy pass, pytest 2983 passed, 1
+  skipped, 21 failed (baseline); `change-passphrase` now leaves the change pending when
+  `cisco-key.age` was not re-locked.
