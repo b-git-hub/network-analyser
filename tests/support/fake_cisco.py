@@ -43,6 +43,8 @@ TOKEN = "CANARY-access-token-95"
 
 ADVISORY_PREFIX = "/security/advisories/v2/OSType/"
 EOX_PREFIX = "/supporttools/eox/rest/5/"
+_EOX_OS_TYPES = frozenset({"IOS", "IOS-XE", "NX-OS"})
+"""The OS types Cisco documents for `release,OSType`; a query value must carry one."""
 SUGGESTION_PREFIX = "/software/suggestion/v2/suggestions/releases/productIds/"
 COMPATIBLE_PREFIX = "/software/suggestion/v2/suggestions/compatible/productId/"
 TOKEN_PATH = "/oauth2/default/v1/token"
@@ -202,20 +204,29 @@ class FakeCisco:
     def _eox(self, path: str) -> HttpResponse:
         rest = path.removeprefix(EOX_PREFIX)
         kind, _, tail = rest.partition("/")
-        page_text, _, values_text = tail.partition("/")
+        page_and_query, _, path_values = tail.partition("/")
+        page_text, _, query = page_and_query.partition("?")
         page = int(page_text)
-        values = values_text.split(",")
         if kind == "EOXByProductID":
-            values = [_pid_from_wire(value) for value in values]
-        for value in values:
-            if kind == "EOXBySWReleaseString" and not is_safe_release(value):
-                msg = f"release left without its pattern: {value!r}"
+            if query:
+                msg = "hardware EoX was asked in the query form; it is sent in the path"
                 raise UnsafeValueSentError(msg)
+            values = [_pid_from_wire(value) for value in path_values.split(",")]
+            known = self.eox_pid
+            input_type = "PID"
+        elif kind == "EOXBySWReleaseString":
+            if path_values:
+                msg = "software EoX sent a release in the path; the query form is required"
+                raise UnsafeValueSentError(msg)
+            values = _software_values(query)
+            known = self.eox_release
+            input_type = "Software"
+        else:
+            msg = f"asked an EoX kind the fake does not serve: {kind}"
+            raise UnsafeValueSentError(msg)
         if (kind, page) in self.page_records:
             records = self.page_records[(kind, page)]
         else:
-            known = self.eox_pid if kind == "EOXByProductID" else self.eox_release
-            input_type = "PID" if kind == "EOXByProductID" else "Software"
             records = [
                 known.get(value)
                 or {
@@ -286,6 +297,33 @@ class FakeCisco:
                 "paginationResponseRecord": {"pageIndex": page, "lastIndex": last},
             },
         )
+
+
+def _software_values(query: str) -> list[str]:
+    """Return the releases in a software EoX query, proving every `inputN` is safe."""
+    params = _params(query)
+    inputs = sorted(
+        (int(key.removeprefix("input")), value)
+        for key, value in params.items()
+        if key.startswith("input") and key.removeprefix("input").isdigit()
+    )
+    if not inputs:
+        msg = "software EoX was asked with no inputs"
+        raise UnsafeValueSentError(msg)
+    if [number for number, _ in inputs] != list(range(1, len(inputs) + 1)):
+        msg = f"software EoX inputs were not input1..inputN: {sorted(params)}"
+        raise UnsafeValueSentError(msg)
+    releases: list[str] = []
+    for _, pair in inputs:
+        release, _, os_type = pair.partition(",")
+        if os_type not in _EOX_OS_TYPES:
+            msg = f"software EoX sent an OS type Cisco does not document: {os_type!r}"
+            raise UnsafeValueSentError(msg)
+        if not is_safe_release(release):
+            msg = f"release left without its pattern: {release!r}"
+            raise UnsafeValueSentError(msg)
+        releases.append(release)
+    return releases
 
 
 def _check_authorization(request: HttpRequest) -> None:

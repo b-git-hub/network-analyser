@@ -23,6 +23,7 @@ from network_analyser.records.cisco import (
     CompatibleAnswers,
     LookupQuestions,
     ReleaseQuestion,
+    SoftwareEoxQuestion,
     SourceUnavailable,
     TokenOutcome,
 )
@@ -120,7 +121,7 @@ def test_a_401_stops_every_source_still_to_be_asked_without_sending_anything() -
     asked = LookupQuestions(
         releases=releases(2),
         hardware_pids=("C9300-48P",),
-        software_releases=("17.9.4a",),
+        software_releases=(SoftwareEoxQuestion(CiscoOsType.IOS_XE, "17.9.4a"),),
         suggestion_pids=("C9300-48P",),
         compatible_pids=("C9300-48P",),
     )
