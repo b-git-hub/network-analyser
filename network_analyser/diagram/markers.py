@@ -8,7 +8,9 @@ Every decision about what the Map shows on a device box is made here, from the r
 - The tag shows the device's upgrade path: its Upgrade Target, `no fix in Train` when its
   Advisory outcome reports matches but no release in its Train clears them, or
   `? could not check` when the Advisory outcome says so. A target that still leaves Advisories
-  open adds `(no fix in Train)`, so the gap shows on the Map (#124, story 27). A device whose
+  open is a `target-partial` tag in the warn colour, with `(no fix in Train)` on a second line
+  so the gap is never truncated; a target whose recorded count is missing or invalid says
+  `(count not recorded)`, never a complete target (#124, story 27, #146). A device whose
   advice is absent, whose Upgrade Target is unknown, or whose outcome says there are no
   Critical or High Advisories, has no tag: the tool never guesses (story 97; spec #92,
   Further Notes).
@@ -39,6 +41,15 @@ NO_FIX_LEGEND: Final = "no fix in Train = no release in its Train clears its Adv
 COULD_NOT_CHECK_LEGEND: Final = "? could not check = its Advisories could not be checked"
 NO_FIX: Final = "no fix in Train"
 PARTIAL_SUFFIX: Final = " (no fix in Train)"
+COUNT_NOT_RECORDED: Final = "count not recorded"
+"""Shown beside a target whose recorded count is missing or invalid, never as complete (#146)."""
+COUNT_NOTE: Final = " (count not recorded)"
+TARGET: Final = "target"
+TARGET_PARTIAL: Final = "target-partial"
+"""A target that still leaves Advisories open, or whose count is unknown: the warn colour
+(#124, story 27, #146)."""
+NO_FIX_KIND: Final = "no-fix"
+COULD_NOT_CHECK_KIND: Final = "could-not-check"
 COULD_NOT_CHECK: Final = "? could not check"
 _COULD_NOT_CHECK_PREFIX: Final = "could not check"
 _NO_FIX_PREFIX: Final = "no fix in Train"
@@ -56,7 +67,11 @@ class DeviceMarker:
         count: how many Findings name it; 0 when none do.
         level: its worst Finding level, or `""` when it has none.
         tag: the upgrade-path tag, or None when the Map shows none.
-        tag_kind: `target`, `no-fix` or `could-not-check`, or `""` for no tag.
+        tag_kind: `target`, `target-partial`, `no-fix` or `could-not-check`, or `""` for no
+            tag.
+        tag_note: a second line under a tag that does not fit in one, such as
+            `(no fix in Train)`; None when the tag is one line. The page draws it in full, so
+            the gap is never truncated away (#146).
     """
 
     device: str
@@ -64,6 +79,7 @@ class DeviceMarker:
     level: str
     tag: str | None
     tag_kind: str
+    tag_note: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,35 +133,49 @@ def _marker(
     ident: str, device: Mapping[str, Plain], levels: Mapping[str, list[str]]
 ) -> DeviceMarker:
     found = levels.get(ident, [])
-    tag, tag_kind = _tag(device_advice(device))
+    tag, tag_kind, tag_note = _tag(device_advice(device))
     return DeviceMarker(
         device=ident,
         count=len(found),
         level=next((level for level in LEVELS if level in found), ""),
         tag=tag,
         tag_kind=tag_kind,
+        tag_note=tag_note,
     )
 
 
-def _tag(advice: DeviceAdvice) -> tuple[str | None, str]:
+def _tag(advice: DeviceAdvice) -> tuple[str | None, str, str | None]:
     if not advice.known:
-        return None, ""
+        return None, "", None
     if advice.outcome is not None and advice.outcome.startswith(_COULD_NOT_CHECK_PREFIX):
-        return COULD_NOT_CHECK, "could-not-check"
+        return COULD_NOT_CHECK, COULD_NOT_CHECK_KIND, None
+    return _target_tag(advice)
+
+
+def _target_tag(advice: DeviceAdvice) -> tuple[str | None, str, str | None]:
+    """The tag for a device whose Advisories were checked, from its recorded target."""
     target = advice.upgrade_target
     if target is not None and target.startswith(_NO_FIX_PREFIX):
-        return NO_FIX, "no-fix"
+        return NO_FIX, NO_FIX_KIND, None
     if target and target not in (_NO_ADVISORIES, _NOT_AVAILABLE):
-        suffix = PARTIAL_SUFFIX if advice.not_cleared > 0 else ""
-        return f"\u2191 {target}{suffix}", "target"
+        return _release_tag(target, advice.not_cleared)
     if (
         target is None
         and advice.target_recorded
         and advice.outcome is not None
         and not advice.outcome.startswith(_NO_ADVISORIES_PREFIXES)
     ):
-        return NO_FIX, "no-fix"
-    return None, ""
+        return NO_FIX, NO_FIX_KIND, None
+    return None, "", None
+
+
+def _release_tag(target: str, not_cleared: int | None) -> tuple[str, str, str | None]:
+    """An Upgrade Target that is a release; partial unless its count says it clears all."""
+    if not_cleared is None:
+        return f"\u2191 {target}{COUNT_NOTE}", TARGET_PARTIAL, f"({COUNT_NOT_RECORDED})"
+    if not_cleared > 0:
+        return f"\u2191 {target}{PARTIAL_SUFFIX}", TARGET_PARTIAL, PARTIAL_SUFFIX.strip()
+    return f"\u2191 {target}", TARGET, None
 
 
 def _legend() -> MarkerLegend:

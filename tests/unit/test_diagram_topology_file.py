@@ -98,6 +98,18 @@ def test_text_that_is_not_a_topology_file_is_refused(text: str) -> None:
         diagram.read_topology(text)
 
 
+@pytest.mark.parametrize("depth", [10_000])
+def test_a_deeply_nested_file_is_refused_rather_than_crashing(depth: int) -> None:
+    """A file nested past Python's limit is a refusal (exit 2), never a `RecursionError`."""
+    nested = "[" * depth + "]" * depth
+    for text in (
+        f'{{"format_version": 3, "devices": {nested}}}',
+        f'{{"format_version": 3, "devices": [{{"id": "dev-S1", "model": {nested}}}]}}',
+    ):
+        with pytest.raises(diagram.TopologyFileError):
+            diagram.read_topology(text)
+
+
 def test_the_refusal_never_quotes_the_file() -> None:
     with pytest.raises(diagram.TopologyFileError) as refused:
         diagram.read_topology('{"format_version": 1, "devices": "CANARY-pw-7f3a"}')
@@ -383,3 +395,31 @@ def test_a_null_advice_record_reads_as_not_known() -> None:
     document["devices"][0]["advice"] = None
 
     assert diagram.device_advice(_content(document)["devices"][0]).known is False
+
+
+def test_not_cleared_is_a_count_or_not_recorded_but_never_a_zero_guess() -> None:
+    """A count the file does not hold is unknown, never 0: 0 claims a complete target (#146)."""
+    recorded: dict[int, int | None] = {}
+
+    for value in (0, 3):
+        document = _document()
+        document["format_version"] = 3
+        document["devices"][0]["advice"] = {
+            "outcome": "3 Advisories match",
+            "upgrade_target": "17.12.8",
+            "not_cleared": value,
+        }
+        recorded[value] = diagram.device_advice(_content(document)["devices"][0]).not_cleared
+
+    assert recorded == {0: 0, 3: 3}
+
+    invalid: tuple[object, ...] = (None, True, False, -2, 2.0, "3", [])
+    for missing in invalid:
+        document = _document()
+        document["format_version"] = 3
+        advice: dict[str, object] = {"outcome": "3 Advisories match", "upgrade_target": "17.12.8"}
+        if missing is not None:
+            advice["not_cleared"] = missing
+        document["devices"][0]["advice"] = advice
+
+        assert diagram.device_advice(_content(document)["devices"][0]).not_cleared is None, missing

@@ -119,9 +119,76 @@ def test_a_target_that_clears_every_advisory_carries_no_partial_note() -> None:
 def test_the_map_tag_adds_no_fix_in_train_when_the_target_leaves_advisories_open() -> None:
     markers, marker = _marker(_partial_document())
 
-    assert (marker.tag, marker.tag_kind) == ("\u2191 17.12.8 (no fix in Train)", "target")
+    assert (marker.tag, marker.tag_kind) == (
+        "\u2191 17.12.8 (no fix in Train)",
+        "target-partial",
+    )
+    assert marker.tag_note == "(no fix in Train)"
     assert "(no fix in Train)" in markers.legend.target_partial
     assert "does not clear" in markers.legend.target_partial
+
+
+def test_a_missing_or_invalid_not_cleared_never_reads_as_a_complete_target() -> None:
+    """A count the format-3 file does not hold shows "count not recorded", never 0 (#146)."""
+    for invalid in (None, True, -2, 2.0, "3"):
+        data = _partial_document()
+        advice = data["devices"][0]["advice"]
+        if invalid is None:
+            del advice["not_cleared"]
+        else:
+            advice["not_cleared"] = invalid
+
+        page = _page(data)
+        _markers, marker = _marker(data)
+        tab = findings_tab(read(data))
+        (high,) = tab.levels
+        (advisory,) = high.checks
+        assert advisory.advisory is not None
+        (row,) = advisory.advisory.devices
+
+        assert "Upgrade to 17.12.8 or later (count not recorded" in page, invalid
+        assert (marker.tag, marker.tag_kind) == (
+            "\u2191 17.12.8 (count not recorded)",
+            "target-partial",
+        ), invalid
+        assert row.not_cleared == "count not recorded", invalid
+
+
+def test_a_complete_target_with_a_count_of_zero_still_reads_as_complete() -> None:
+    data = _partial_document(not_cleared=0)
+
+    page = _page(data)
+    _markers, marker = _marker(data)
+
+    assert "Upgrade to 17.12.8 or later" in page
+    assert marker.tag == "\u2191 17.12.8"
+    assert marker.tag_kind == "target"
+
+
+def test_a_v1_or_v2_file_reads_not_available_without_a_broken_callout() -> None:
+    for version in (1, 2):
+        data = document([device("dev-S1", "sw-a", "192.0.2.1")])
+        data["format_version"] = version
+
+        page = _page(data)
+
+        assert '<p class="callout not-available"><b>not available</b></p>' in page, version
+        assert '<p class="callout could-not-check">' not in page, version
+
+
+def test_an_nxos_not_available_target_shows_a_dash_for_not_cleared() -> None:
+    data = _partial_document(upgrade_target="not available", train="10.4")
+
+    page = _page(data)
+    tab = findings_tab(read(data))
+    (high,) = tab.levels
+    (advisory,) = high.checks
+    assert advisory.advisory is not None
+    (row,) = advisory.advisory.devices
+
+    assert '<p class="callout could-not-check"><b>not available</b></p>' in page
+    assert row.upgrade_target == "not available"
+    assert row.not_cleared == "\u2014"
 
 
 def test_the_map_tag_is_plain_for_a_complete_target() -> None:
@@ -136,7 +203,7 @@ def test_the_advisory_detail_pane_shows_the_not_cleared_count() -> None:
     (advisory,) = high.checks
     assert advisory.advisory is not None
     (row,) = advisory.advisory.devices
-    assert row.not_cleared == 1
+    assert row.not_cleared == "1"
 
     page = diagram.draw_html(read(_partial_document()), lambda text: text)
     assert "Not cleared" in page

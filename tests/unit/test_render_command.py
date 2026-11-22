@@ -172,6 +172,22 @@ def test_a_file_that_is_not_a_topology_is_refused(
     assert not (run_folder / FINDINGS).exists()
 
 
+def test_render_refuses_a_deeply_nested_topology_as_not_a_topology(
+    run_folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A nesting bomb is refused with exit 2, not a RecursionError traceback (#146)."""
+    nested = "[" * 10_000 + "]" * 10_000
+    (run_folder / "topology.json").write_text(
+        f'{{"format_version": 3, "devices": {nested}}}', encoding="utf-8"
+    )
+
+    code = _render(str(run_folder))
+
+    assert code == ExitCode.REFUSED
+    assert "not a topology this version can draw" in capsys.readouterr().err
+    assert not (run_folder / DIAGRAM).exists()
+
+
 def test_a_folder_with_no_topology_is_refused(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

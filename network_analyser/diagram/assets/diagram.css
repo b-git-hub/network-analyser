@@ -116,9 +116,9 @@ header.top h1{font-size:15px;margin:0;font-weight:650}
 .marker.count.medium rect{fill:var(--medium)} .marker.count.low rect{fill:var(--low)}
 .marker.tag rect{fill:var(--surface);stroke:currentColor}
 .marker.tag text{font:700 10px var(--font);fill:currentColor}
-.marker.tag.target{color:var(--ok)} .marker.tag.no-fix{color:var(--warn)} .marker.tag.could-not-check{color:var(--unk)}
+.marker.tag.target{color:var(--ok)} .marker.tag.no-fix,.marker.tag.target-partial{color:var(--warn)} .marker.tag.could-not-check{color:var(--unk)}
 .marker-key{font:700 10.5px/1 var(--font)}
-.marker-key.target{color:var(--ok)} .marker-key.no-fix{color:var(--warn)} .marker-key.could-not-check{color:var(--unk)}
+.marker-key.target{color:var(--ok)} .marker-key.no-fix,.marker-key.target-partial{color:var(--warn)} .marker-key.could-not-check{color:var(--unk)}
 .marker-dot{width:9px;height:9px;border-radius:50%;display:inline-block;background:var(--unk)}
 .marker-dot.critical{background:var(--critical)} .marker-dot.high{background:var(--high)}
 .marker-dot.medium{background:var(--medium)} .marker-dot.low{background:var(--low)}
