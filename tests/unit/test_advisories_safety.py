@@ -16,6 +16,7 @@ from network_analyser.records.cisco import (
     CiscoOsType,
     LookupQuestions,
     ReleaseQuestion,
+    SoftwareEoxQuestion,
     SourceUnavailable,
     TokenOutcome,
 )
@@ -83,7 +84,7 @@ def answers_with(scan: SecretScan | None = None) -> CiscoAnswers:
         LookupQuestions(
             releases=(ReleaseQuestion(CiscoOsType.IOS_XE, "17.9.4a"),),
             hardware_pids=("C9300-48P",),
-            software_releases=("17.9.4a",),
+            software_releases=(SoftwareEoxQuestion(CiscoOsType.IOS_XE, "17.9.4a"),),
             suggestion_pids=("C9300-48P",),
         ),
         Secret(CLIENT_ID),

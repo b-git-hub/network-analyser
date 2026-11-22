@@ -20,6 +20,7 @@ from network_analyser.records.cisco import (
     EoxAnswer,
     LookupQuestions,
     ReleaseQuestion,
+    SoftwareEoxQuestion,
     SourceUnavailable,
     SuggestionsAnswer,
     TokenOutcome,
@@ -123,7 +124,7 @@ def asking(*pids: str, release: str = "17.9.4a") -> LookupQuestions:
     return LookupQuestions(
         releases=(ReleaseQuestion(CiscoOsType.IOS_XE, release),),
         hardware_pids=pids,
-        software_releases=(release,),
+        software_releases=(SoftwareEoxQuestion(CiscoOsType.IOS_XE, release),),
         suggestion_pids=pids,
         compatible_pids=pids,
     )
@@ -164,7 +165,11 @@ def test_an_odd_release_is_refused_alone_and_the_good_release_is_still_asked() -
             ReleaseQuestion(CiscoOsType.IOS_XE, "17.9.4a\r\nHost: evil.example"),
             ReleaseQuestion(CiscoOsType.IOS_XE, "../17.9"),
         ),
-        software_releases=("17.9.4a", "17.9.4a%0d%0a", "17.9.4a/.."),
+        software_releases=(
+            SoftwareEoxQuestion(CiscoOsType.IOS_XE, "17.9.4a"),
+            SoftwareEoxQuestion(CiscoOsType.IOS_XE, "17.9.4a%0d%0a"),
+            SoftwareEoxQuestion(CiscoOsType.IOS_XE, "17.9.4a/.."),
+        ),
     )
 
     answers = lookup(cisco, asked)
@@ -173,7 +178,7 @@ def test_an_odd_release_is_refused_alone_and_the_good_release_is_still_asked() -
         "/security/advisories/v2/OSType/iosxe?version=17.9.4a"
     ]
     assert [path for path in cisco.paths() if "EOXBySW" in path] == [
-        "/supporttools/eox/rest/5/EOXBySWReleaseString/1/17.9.4a"
+        "/supporttools/eox/rest/5/EOXBySWReleaseString/1?input1=17.9.4a,IOS-XE"
     ]
     assert isinstance(answers.advisories[0], AdvisoriesAnswer)
     assert answers.advisories[0].question.release == "17.9.4a"
