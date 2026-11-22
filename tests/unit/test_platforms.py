@@ -93,6 +93,20 @@ def test_ios_xe_show_version_gives_hostname_model_version_and_every_stack_serial
     )
 
 
+def test_ios_xe_sdwan_show_version_records_the_router_operating_mode() -> None:
+    facts = platforms.read_version(Platform.IOS_XE, device_text.IOS_XE_SDWAN_SHOW_VERSION)
+
+    assert facts.router_operating_mode == "Controller-Managed"
+    assert facts.model == "C8300-1N1S-4T2X"
+    assert facts.software_version == "17.9.4a"
+
+
+def test_a_show_version_without_a_router_operating_mode_records_none() -> None:
+    facts = platforms.read_version(Platform.IOS_XE, device_text.IOS_XE_SHOW_VERSION)
+
+    assert facts.router_operating_mode is None
+
+
 def test_nxos_show_version_gives_hostname_model_version_and_serial() -> None:
     facts = platforms.read_version(Platform.NX_OS, device_text.NXOS_SHOW_VERSION)
 

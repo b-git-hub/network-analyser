@@ -89,6 +89,8 @@ class VisitedDevice:
         vlan_database: the VLANs listed in its VLAN database, active or not, for the
             diagram's VLAN view (#64); unknown when not collected or incomplete.
         vpc: its vPC domain; None when it has none.
+        router_operating_mode: Cisco's `Router operating mode:` text, such as
+            `Controller-Managed`; None when `show version` printed none (ticket #147).
     """
 
     id: str
@@ -105,6 +107,7 @@ class VisitedDevice:
     interfaces: tuple[Interface, ...] | Unknown
     vlan_database: frozenset[int] | Unknown
     vpc: VpcState | Unknown | None
+    router_operating_mode: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
