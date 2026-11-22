@@ -9,6 +9,12 @@ config is a `CANARY-...` value, and none may reach a fact.
 from network_analyser import platforms
 from network_analyser.records import Platform
 from network_analyser.records.config_facts import (
+    FHRP_GROUPS,
+    FHRP_GROUPS_WITHOUT_AUTHENTICATION,
+    NTP_AUTHENTICATED,
+    NTP_CONFIGURED,
+    NTP_MD5_AUTHENTICATION,
+    REMOTE_SYSLOG_SERVERS,
     SECRET_TYPE_0,
     SECRET_TYPE_5,
     SECRET_TYPE_6,
@@ -225,3 +231,162 @@ def test_a_v3_snmp_user_is_counted_with_and_without_privacy() -> None:
     assert facts[SNMP_V3_USERS_WITHOUT_PRIV] == 1
     assert facts[SNMP_V3_CONFIGURED] is True
     _assert_no_canary(Platform.IOS_XE, config)
+
+
+# -- NTP ---------------------------------------------------------------------------------------
+
+
+def _ntp_config(*, authenticate: bool, trusted: str = "1", server_key: int = 1) -> str:
+    return (
+        f"ntp authentication-key 1 md5 {CANARY}-one\n"
+        f"ntp authentication-key 2 sha256 {CANARY}-two\n"
+        + ("ntp authenticate\n" if authenticate else "")
+        + f"ntp trusted-key {trusted}\n"
+        f"ntp server 192.0.2.10 key {server_key}\n"
+    )
+
+
+def test_ntp_keys_authenticate_nothing_without_ntp_authenticate() -> None:
+    for platform in (Platform.IOS_XE, Platform.NX_OS):
+        facts = _facts(platform, _ntp_config(authenticate=False))
+
+        assert facts[NTP_CONFIGURED] is True
+        assert facts[NTP_AUTHENTICATED] is False
+        assert facts[NTP_MD5_AUTHENTICATION] is False
+
+
+def test_ntp_with_ntp_authenticate_and_a_trusted_key_is_authenticated() -> None:
+    for platform in (Platform.IOS_XE, Platform.NX_OS):
+        facts = _facts(platform, _ntp_config(authenticate=True))
+
+        assert facts[NTP_AUTHENTICATED] is True
+        assert facts[NTP_MD5_AUTHENTICATION] is True
+
+
+def test_a_trusted_key_range_trusts_every_key_in_it() -> None:
+    inside = _facts(Platform.IOS_XE, _ntp_config(authenticate=True, trusted="1 - 3", server_key=2))
+    outside = _facts(Platform.IOS_XE, _ntp_config(authenticate=True, trusted="1 - 3", server_key=4))
+
+    assert inside[NTP_AUTHENTICATED] is True
+    assert inside[NTP_MD5_AUTHENTICATION] is False
+    assert outside[NTP_AUTHENTICATED] is False
+
+
+def test_the_end_of_a_trusted_key_range_is_trusted() -> None:
+    facts = _facts(Platform.IOS_XE, _ntp_config(authenticate=True, trusted="1 - 2", server_key=2))
+
+    assert facts[NTP_AUTHENTICATED] is True
+
+
+def test_no_ntp_secret_reaches_a_fact() -> None:
+    _assert_no_canary(Platform.IOS_XE, _ntp_config(authenticate=True))
+
+
+# -- Remote syslog -----------------------------------------------------------------------------
+
+
+def test_logging_that_is_not_a_server_is_not_counted() -> None:
+    config = (
+        "logging on\n"
+        "logging userinfo\n"
+        "logging buffered 64000\n"
+        "logging source-interface Vlan10\n"
+        "logging server-arp\n"
+        "archive\n"
+        " log config\n"
+        "  logging enable\n"
+        "  logging size 1000\n"
+        "  notify syslog contenttype plaintext\n"
+    )
+
+    assert _ios(config)[REMOTE_SYSLOG_SERVERS] == 0
+
+
+def test_each_top_level_remote_syslog_form_is_counted() -> None:
+    config = (
+        "logging on\n"
+        "logging host 192.0.2.20 transport tcp port 6514\n"
+        "logging 192.0.2.21\n"
+        "logging server 192.0.2.22 5 use-vrf management\n"
+        "logging host\n"
+    )
+
+    assert _ios(config)[REMOTE_SYSLOG_SERVERS] == 3
+
+
+def test_an_indented_logging_host_is_not_a_remote_server() -> None:
+    config = "some-feature\n logging host 192.0.2.20\n"
+
+    assert _ios(config)[REMOTE_SYSLOG_SERVERS] == 0
+
+
+def test_a_hostname_syslog_server_is_counted() -> None:
+    assert _ios("logging host syslog-a\n")[REMOTE_SYSLOG_SERVERS] == 1
+
+
+# -- FHRP groups -------------------------------------------------------------------------------
+
+
+def test_the_same_group_number_on_two_interfaces_is_two_groups() -> None:
+    config = (
+        "interface Vlan10\n"
+        " ip address 192.0.2.1 255.255.255.0\n"
+        " standby 1 ip 192.0.2.254\n"
+        f" standby 1 authentication md5 key-string {CANARY}-fhrp\n"
+        "interface Vlan20\n"
+        " ip address 198.51.100.1 255.255.255.0\n"
+        " standby 1 ip 198.51.100.254\n"
+    )
+
+    facts = _ios(config)
+
+    assert facts[FHRP_GROUPS] == 2
+    assert facts[FHRP_GROUPS_WITHOUT_AUTHENTICATION] == 1
+    _assert_no_canary(Platform.IOS_XE, config)
+
+
+def test_the_same_nxos_hsrp_group_on_two_interfaces_is_two_groups() -> None:
+    config = (
+        "interface Vlan10\n"
+        "  ip address 192.0.2.1/24\n"
+        "  hsrp 1\n"
+        "    ip 192.0.2.254\n"
+        f"    authentication md5 key-string {CANARY}-fhrp\n"
+        "interface Vlan20\n"
+        "  ip address 198.51.100.1/24\n"
+        "  hsrp 1\n"
+        "    ip 198.51.100.254\n"
+    )
+
+    facts = _nxos(config)
+
+    assert facts[FHRP_GROUPS] == 2
+    assert facts[FHRP_GROUPS_WITHOUT_AUTHENTICATION] == 1
+
+
+def test_groups_that_are_all_authenticated_are_not_flagged() -> None:
+    config = (
+        "interface Vlan10\n"
+        " standby 1 ip 192.0.2.254\n"
+        " standby 1 authentication md5 key-chain KC\n"
+        "interface Vlan20\n"
+        " standby 1 ip 198.51.100.254\n"
+        " standby 1 authentication md5 key-chain KC\n"
+    )
+
+    facts = _ios(config)
+
+    assert facts[FHRP_GROUPS] == 2
+    assert facts[FHRP_GROUPS_WITHOUT_AUTHENTICATION] == 0
+
+
+def test_one_interface_can_run_two_protocols_with_the_same_number() -> None:
+    config = (
+        "interface Vlan10\n standby 1 ip 192.0.2.254\n vrrp 1 ip 192.0.2.253\n"
+        " vrrp 1 authentication text KC\n"
+    )
+
+    facts = _ios(config)
+
+    assert facts[FHRP_GROUPS] == 2
+    assert facts[FHRP_GROUPS_WITHOUT_AUTHENTICATION] == 1

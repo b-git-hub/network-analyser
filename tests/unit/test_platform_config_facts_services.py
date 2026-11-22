@@ -75,6 +75,7 @@ def test_ntp_needs_a_trusted_key_referenced_by_a_server() -> None:
     )
     trusted = (
         "ntp authentication-key 1 md5 CANARY-cfg-101-a1b2-ntp-md5\n"
+        "ntp authenticate\n"
         "ntp trusted-key 1\n"
         "ntp server 192.0.2.10 key 1\n"
     )
@@ -86,6 +87,7 @@ def test_ntp_needs_a_trusted_key_referenced_by_a_server() -> None:
 def test_ntp_sha_authentication_is_not_md5() -> None:
     config = (
         "ntp authentication-key 1 sha256 CANARY-cfg-101-a1b2-ntp-sha\n"
+        "ntp authenticate\n"
         "ntp trusted-key 1\n"
         "ntp server 192.0.2.10 key 1\n"
     )

@@ -349,6 +349,7 @@ feature hsrp
 no password strength-check
 logging server 192.0.2.20
 ntp authentication-key 1 sha256 CANARY-cfg-101-a1b2-ntp-sha
+ntp authenticate
 ntp trusted-key 1
 ntp server 192.0.2.10 key 1
 router ospf 1

@@ -11,6 +11,7 @@ read exactly these.
 
 import re
 from dataclasses import dataclass
+from ipaddress import ip_address
 from itertools import pairwise
 from typing import Final
 
@@ -122,37 +123,10 @@ _LEGACY_PREFIXES: Final = (
 _NTP_SERVER: Final = re.compile(r"^ntp\s+(?:server|peer)\s+\S+(.*)$", re.IGNORECASE)
 _NTP_MASTER: Final = re.compile(r"^ntp\s+master(?:\s|$)", re.IGNORECASE)
 _NTP_KEY: Final = re.compile(r"^ntp\s+authentication-key\s+(\d+)\s+(\S+)", re.IGNORECASE)
-_NTP_TRUSTED_KEY: Final = re.compile(r"^ntp\s+trusted-key\s+(\d+)", re.IGNORECASE)
-_LOGGING_KEYWORDS: Final = frozenset(
-    {
-        "buffered",
-        "console",
-        "discriminator",
-        "event",
-        "exception",
-        "facility",
-        "file",
-        "filter",
-        "format",
-        "history",
-        "interface",
-        "level",
-        "logfile",
-        "message-counter",
-        "module",
-        "monitor",
-        "origin-id",
-        "persistent",
-        "queue-limit",
-        "rate-limit",
-        "snmp-trap",
-        "source-interface",
-        "synchronous",
-        "system-message",
-        "timestamp",
-        "trap",
-    }
+_NTP_TRUSTED_KEY: Final = re.compile(
+    r"^ntp\s+trusted-key\s+(\d+)(?:\s*-\s*(\d+))?\s*$", re.IGNORECASE
 )
+_NTP_AUTHENTICATE: Final = re.compile(r"^ntp\s+authenticate\s*$", re.IGNORECASE)
 _L3_ADDRESS: Final = re.compile(r"^ip\s+(?:address|unnumbered)\s+", re.IGNORECASE)
 _ROUTER_PROTOCOL: Final = re.compile(r"^router\s+(ospf|eigrp|bgp)(?:\s|$)", re.IGNORECASE)
 _FLAT_FHRP: Final = re.compile(r"^(standby|vrrp|glbp)\s+(\d+)\s+(.+)$", re.IGNORECASE)
@@ -425,15 +399,19 @@ def _service_facts(platform: Platform, lines: list[str]) -> dict[str, FactValue]
 def _ntp_facts(lines: list[str]) -> dict[str, FactValue]:
     """Whether NTP is configured, and whether its used key authenticates it, and how.
 
-    An NTP server or peer must name a key that is also trusted; a key line alone authenticates
-    nothing. MD5 is reported separately so the Check can name it.
+    NTP authenticates only with `ntp authenticate` set and a server or peer that names a key
+    that is also trusted (`ntp trusted-key 1 - 3` trusts every key from 1 to 3); a key line
+    alone authenticates nothing. MD5 is reported separately so the Check can name it.
     """
-    configured = False
+    configured = authenticate = False
     keys: dict[int, str] = {}
-    trusted: set[int] = set()
+    trusted: list[tuple[int, int]] = []
     referenced: list[int] = []
     for line in lines:
         text = line.strip()
+        if _NTP_AUTHENTICATE.match(text):
+            authenticate = True
+            continue
         if _NTP_MASTER.match(text):
             configured = True
             continue
@@ -450,8 +428,13 @@ def _ntp_facts(lines: list[str]) -> dict[str, FactValue]:
             continue
         trusted_line = _NTP_TRUSTED_KEY.match(text)
         if trusted_line is not None:
-            trusted.add(int(trusted_line.group(1)))
-    algorithms = {keys[key] for key in referenced if key in keys and key in trusted}
+            first = int(trusted_line.group(1))
+            trusted.append((first, int(trusted_line.group(2) or first)))
+    algorithms = {
+        keys[key]
+        for key in referenced
+        if authenticate and key in keys and any(low <= key <= high for low, high in trusted)
+    }
     return {
         NTP_CONFIGURED: configured,
         NTP_AUTHENTICATED: bool(algorithms),
@@ -469,20 +452,32 @@ def _ntp_key_reference(tail: str) -> int | None:
 
 
 def _remote_syslog_servers(lines: list[str]) -> int:
-    """How many remote syslog servers are configured, never counting local logging."""
+    """How many remote syslog servers are configured, never counting local logging.
+
+    Only a top-level `logging host <x>`, `logging server <x>` or `logging <IP address>` is a
+    server. Every other `logging` word (`on`, `userinfo`, `buffered`) and every indented line,
+    such as `logging enable` under `archive` / `log config`, is local.
+    """
     count = 0
     for line in lines:
+        if line[:1].isspace():
+            continue
         tokens = line.strip().lower().split()
-        if not tokens or tokens[0] != "logging":
+        if len(tokens) < 2 or tokens[0] != "logging":  # noqa: PLR2004 (`logging` and a value)
             continue
-        rest = tokens[1:]
-        if not rest:
-            continue
-        if rest[0] in {"host", "server"}:
-            count += int(bool(rest[1:]))
-        elif rest[0] not in _LOGGING_KEYWORDS:
+        if tokens[1] in {"host", "server"}:
+            count += int(len(tokens) > 2)  # noqa: PLR2004 (a named server follows)
+        elif _is_ip_address(tokens[1]):
             count += 1
     return count
+
+
+def _is_ip_address(text: str) -> bool:
+    try:
+        ip_address(text)
+    except ValueError:
+        return False
+    return True
 
 
 def _routing_authentication_missing(lines: list[str]) -> tuple[str, ...]:
@@ -526,20 +521,20 @@ def _eigrp_authenticated(tokens: list[str]) -> bool:
 
 def _fhrp_facts(lines: list[str]) -> dict[str, FactValue]:
     """How many FHRP groups are configured, and how many have no authentication."""
-    groups: dict[tuple[str, int], list[bool]] = {}
-    for _, body in _interface_blocks(lines):
-        current: tuple[str, int] | None = None
+    groups: dict[tuple[str, str, int], list[bool]] = {}
+    for header, body in _interface_blocks(lines):
+        current: tuple[str, str, int] | None = None
         current_indent = -1
         for indent, text in body:
             block = _BLOCK_FHRP.match(text)
             if block is not None:
-                current = (block.group(1).upper(), int(block.group(2)))
+                current = (header.lower(), block.group(1).upper(), int(block.group(2)))
                 groups.setdefault(current, [False, False])
                 current_indent = indent
                 continue
             flat = _FLAT_FHRP.match(text)
             if flat is not None:
-                key = (flat.group(1).upper(), int(flat.group(2)))
+                key = (header.lower(), flat.group(1).upper(), int(flat.group(2)))
                 state = groups.setdefault(key, [False, False])
                 command = flat.group(3).lower()
                 if command.startswith("ip "):
