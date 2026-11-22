@@ -1,7 +1,7 @@
 """The release workflow's own gate and its release notes (ticket #47, decision #32).
 
-    python -m scripts.release_gate check --tag v0.3.0
-    python -m scripts.release_gate notes --tag v0.3.0 --dist-dir dist --run-url <url>
+    python -m scripts.release_gate check --tag v0.3.1
+    python -m scripts.release_gate notes --tag v0.3.1 --dist-dir dist --run-url <url>
         --out <file>
 
 `check` is decision #32's first gate, which only the workflow runs: the tag is v0.y.z, equals
