@@ -42,6 +42,7 @@ from network_analyser.records.analysis import (
     ReleaseAdvisories,
     SourceUnavailable,
 )
+from network_analyser.records.lookup_values import is_safe_pid
 from network_analyser.records.topology import (
     ADVISORY_FIXED_LINE,
     ADVISORY_STATUS,
@@ -78,6 +79,15 @@ _LIFECYCLE: Final = re.compile(r"[A-Z][A-Z0-9]{1,7}")
 """Cisco's lifecycle code shape: two to eight upper-case letters or digits, such as `ED`."""
 NEWER_THAN_LIST: Final = "running release is newer than Cisco's list"
 """What a Latest Release value becomes when the device already runs something above it (#127)."""
+LATEST_PID_NOT_SENT: Final = (
+    f"{NOT_AVAILABLE}: Cisco was not asked about this device's chassis PID because it does not "
+    "match the safe pattern"
+)
+"""Both Latest Release values when the chassis PID failed the shared safe pattern, so the
+compatible-releases call was never asked about it (#155). The PID is never echoed (#130)."""
+_UNKNOWN_RELEASE: Final = "INVALID_IOS_VERSION"
+"""Cisco's code for a release it does not know: the one per-release failure that reads
+`does not know`, not `could not answer` (#155)."""
 FAMILY_NOT_CONFIRMED: Final = (
     "hardware family not confirmed: the Nexus hardware family could not be worked out, "
     "so Cisco openVuln was not asked"
@@ -233,10 +243,13 @@ def _resolve_release(data: AnalysisInput, device: VisitedDevice, release: str) -
     if answer is None:
         return _unchecked(device, f"Cisco openVuln gave no answer for release {normalised}")
     if answer.unavailable is not None:
-        return _unchecked(
-            device,
-            f"Cisco openVuln does not know release {normalised} ({answer.unavailable})",
-        )
+        if answer.unavailable == _UNKNOWN_RELEASE:
+            reason = f"Cisco openVuln does not know release {normalised} ({answer.unavailable})"
+        else:
+            reason = (
+                f"Cisco openVuln could not answer for release {normalised} ({answer.unavailable})"
+            )
+        return _unchecked(device, reason)
     train = train_of(normalised, os_type)
     series = platform_name(family)
     matches, unresolved = _matches(
@@ -502,9 +515,12 @@ def _latest(
     reads `running release is newer than Cisco's list` instead of being shown an older release
     (story 7), but only when its own release is in the family table: an ACI-mode device is
     never compared with a standalone list. An unanswered or rejected PID, an empty list, the
-    page cap and an outage all read `not available` (stories 9, 11-13).
+    page cap and an outage all read `not available` (stories 9, 11-13); a PID the safe pattern
+    refused says so, because Cisco was never asked about it (#155).
     """
     missing = LatestRelease()
+    if pid is not None and not is_safe_pid(pid):
+        return LatestRelease(in_train=LATEST_PID_NOT_SENT, overall=LATEST_PID_NOT_SENT)
     if isinstance(answers, SourceUnavailable) or pid is None:
         return missing
     answer = next((item for item in answers if item.pid == pid), None)

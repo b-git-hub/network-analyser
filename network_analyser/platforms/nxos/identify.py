@@ -7,11 +7,9 @@ from network_analyser.platforms import fields
 from network_analyser.platforms.nxos.commands import SHOW_USER_ACCOUNT, SHOW_VERSION
 from network_analyser.platforms.textfsm_parse import parse
 from network_analyser.records.device import LandingPrivilege, Unknown, VersionFacts
+from network_analyser.records.lookup_values import strip_release_suffix
 
 _TEMPLATES: Final = "cisco_nxos"
-_BRACKETED_SUFFIX: Final = re.compile(r"(?:\s*\[[^\]]*\])+\s*$")
-"""What NX-OS prints after the release: `[build 7.0(3)I7(8.18)]`, `[Feature Release]`. It is
-dropped before the value is checked, so the release reads as one word (story 45; #137)."""
 _ROLES: Final = re.compile(r"^\s*roles:(.*)$", re.MULTILINE)
 _ROLE: Final = re.compile(r"[A-Za-z0-9._-]{1,64}")
 _NEXUS_SERIES: Final = re.compile(r"\bNexus[0-9]{4}\b")
@@ -31,7 +29,7 @@ def read_version(text: str) -> VersionFacts:
         hostname=fields.word(row, "hostname", "hostname"),
         model=fields.word(row, "platform", "model"),
         software_version=fields.word(
-            {"os": _BRACKETED_SUFFIX.sub("", fields.text(row, "os"))}, "os", "software version"
+            {"os": strip_release_suffix(fields.text(row, "os"))}, "os", "software version"
         ),
         serials=fields.serials(fields.text_list(row, "serial")),
         hardware_series=_hardware_series(text),

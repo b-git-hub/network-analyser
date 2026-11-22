@@ -84,6 +84,9 @@ _EXPIRED_LINE: Final = (
 )
 """The one line an expired token gives, however many sources it stopped. It does not blame the key
 or send the operator to cisco-key set: Cisco's token is issued once a Run (#133)."""
+_REJECTED_LINE: Final = f"{_ALL_SOURCES} stopped: {_REJECTED}. {_KEY_STEP}"
+"""The one line a rejected key gives, however many sources it stopped. It says the lookups
+stopped, never that they did not run: an earlier source may already have answered (#155)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,19 +314,36 @@ def _attention(  # noqa: PLR0913 (the Run end's state, each part named)
         return (NO_KEY_ATTENTION,)
     if not lookups.ran:
         return ()  # there was nothing Cisco could be asked, so no source was down
+    return attention_lines(answers)
+
+
+def attention_lines(answers: CiscoAnswers) -> tuple[str, ...]:
+    """One Needs-attention line per named Cisco source that did not run.
+
+    A rejected key and an expired token each give one line, whatever they stopped, and they
+    are decided first: a rejected compatible list still gives the key line when Software
+    Suggestion failed for another reason, although the two calls share one name (#131, #155).
+    """
+    sources = tuple(getattr(answers, name) for name, _shown in _SOURCES)
     lines: list[str] = []
+    if any(_rejected(source) for source in sources):
+        lines.append(_REJECTED_LINE)
+    if any(_is_expired(source) for source in sources):
+        lines.append(_EXPIRED_LINE)
     named: set[str] = set()
-    for name, shown in _SOURCES:
-        source = getattr(answers, name)
-        if _is_expired(source) and _EXPIRED_LINE not in lines:
-            lines.append(_EXPIRED_LINE)
+    for (_name, shown), source in zip(_SOURCES, sources, strict=True):
         if not isinstance(source, SourceUnavailable) or shown in named:
             continue
+        if source.reason in (_REJECTED, TOKEN_EXPIRED):
+            continue  # its one line is already above
         named.add(shown)
-        line = _source_line(shown, source.reason)
-        if line not in lines:
-            lines.append(line)
+        lines.append(_source_line(shown, source.reason))
     return tuple(lines)
+
+
+def _rejected(source: object) -> bool:
+    """Whether a source says Cisco refused the API key."""
+    return isinstance(source, SourceUnavailable) and source.reason == _REJECTED
 
 
 def _is_expired(source: object) -> bool:
@@ -336,11 +356,7 @@ def _is_expired(source: object) -> bool:
 
 
 def _source_line(shown: str, reason: str) -> str:
-    """The Needs-attention line for one source that did not run; a shared cause shares a line."""
-    if reason == _REJECTED:
-        return f"{_ALL_SOURCES} did not run: {_REJECTED}. {_KEY_STEP}"
-    if reason == TOKEN_EXPIRED:
-        return _EXPIRED_LINE
+    """The Needs-attention line for one source that did not run; a shared name shares a line."""
     return f"{shown} did not run: {reason}."
 
 
