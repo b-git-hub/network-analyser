@@ -126,3 +126,9 @@ last on the integration branch.
   by rule and a controller-managed IOS XE SD-WAN device is never matched as IOS-XE. The
   earlier `CHANGELOG.md` conflict was resolved by #147's owner on the branch (merge forward
   at `d5d7001`) before this merge; nothing was resolved by the merger.
+- 2026-11-22: **#175 blocked again, not merged.** PR #175 (`ticket-143-run-end-durability`,
+  ticket #143, head `2dc5a2b`) is `CONFLICTING` on `docs/wiki/review-fixes-0.3.1-2026-11-22.md`
+  only: both sides append dated lines after the same Log tail, and the integration branch has
+  gained the #140, #166, #176 and #147 entries since its base. `git merge-tree` names no other
+  conflicting file. No merge was attempted, nothing was forced or rewritten, and no gate was
+  run. #143's owner needs to rebase forward onto this tip and re-run the gate.
