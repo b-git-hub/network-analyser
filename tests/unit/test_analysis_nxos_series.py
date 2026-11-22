@@ -4,14 +4,15 @@ The NX-OS `show version` reader yields a model such as `C93180YC-EX`, never a se
 the series is worked out from the chassis PID the Run collected (`N9K-C93180YC-EX`). Driven
 through `analysis.analyse` and `analysis.lookup_questions` with the records the real readers
 produce: a model with no `N9K-` prefix, and an inventory whose chassis entry carries the PID.
-Every PID, name and answer is synthetic.
+When the Device Role refuses `show inventory`, the series falls back to the `Nexus<NNNN>` token
+`show version` names (#159). Every PID, name and answer is synthetic.
 """
 
 from dataclasses import replace
 
 import pytest
 
-from network_analyser import analysis, topology
+from network_analyser import analysis, platforms, topology
 from network_analyser.records.analysis import (
     AdvisoryAnswer,
     AdvisoryPlatform,
@@ -36,6 +37,7 @@ from network_analyser.records.topology import (
     FindingLevel,
 )
 from network_analyser.records.unknown import Unknown
+from tests.support import device_text
 from tests.support.topology_records import ip, visited
 
 A = "192.0.2.1"
@@ -57,6 +59,7 @@ def _device(
     *,
     chassis: str | Unknown | None = CHASSIS,
     inventory: tuple[InventoryItem, ...] | Unknown | None = None,
+    hardware_series: str | None = None,
 ) -> DeviceRecord:
     """An NX-OS device as the real readers record it: model `C93180YC-EX`, PIDs in inventory."""
     if inventory is None:
@@ -68,7 +71,12 @@ def _device(
     record = visited(A, "S1", "sw-a", platform=Platform.NX_OS, inventory=inventory)
     version = record.version
     assert version is not None
-    return replace(record, version=replace(version, model=MODEL, software_version=RUNNING))
+    return replace(
+        record,
+        version=replace(
+            version, model=MODEL, software_version=RUNNING, hardware_series=hardware_series
+        ),
+    )
 
 
 def _input(record: DeviceRecord, answers: CiscoAnswers | None = None) -> AnalysisInput:
@@ -163,6 +171,72 @@ def test_no_chassis_pid_means_the_series_is_not_confirmed(
     assert [(q.os_type, q.hardware_family) for q in questions.releases] == [(OsType.NX_OS, None)]
     assert questions.compatible_pids == ()
     assert MODEL not in questions.pids
+
+
+def test_a_refused_show_inventory_falls_back_to_the_show_version_nexus_token() -> None:
+    record = _device(
+        inventory=Unknown("show inventory | json: denied"), hardware_series="Nexus9000"
+    )
+
+    questions = analysis.lookup_questions(_input(record))
+
+    assert [(q.os_type, q.release, q.hardware_family) for q in questions.releases] == [
+        (OsType.NX_OS, RUNNING, "NEXUS9000")
+    ]
+    assert questions.compatible_pids == ()
+    assert MODEL not in questions.pids
+
+
+def test_the_show_version_token_fallback_reaches_analysis_from_the_show_version_text() -> None:
+    base = visited(A, "S1", "nx-a", platform=Platform.NX_OS, inventory=Unknown("denied"))
+    record = replace(
+        base, version=platforms.read_version(Platform.NX_OS, device_text.NXOS_SHOW_VERSION)
+    )
+
+    questions = analysis.lookup_questions(_input(record))
+
+    assert [(q.os_type, q.hardware_family) for q in questions.releases] == [
+        (OsType.NX_OS, "NEXUS9000")
+    ]
+
+
+def test_a_show_version_token_that_names_no_documented_series_gives_no_alias() -> None:
+    record = _device(
+        inventory=Unknown("show inventory | json: denied"), hardware_series="Nexus2000"
+    )
+
+    questions = analysis.lookup_questions(_input(record))
+
+    assert [(q.os_type, q.hardware_family) for q in questions.releases] == [(OsType.NX_OS, None)]
+
+
+def test_the_chassis_pid_still_wins_over_the_show_version_token() -> None:
+    record = _device(chassis="N3K-C3048TP-1GE", hardware_series="Nexus9000")
+
+    questions = analysis.lookup_questions(_input(record))
+
+    assert [(q.os_type, q.hardware_family) for q in questions.releases] == [
+        (OsType.NX_OS, "NEXUS3000")
+    ]
+
+
+def test_a_fallback_series_matches_advisories_without_the_not_confirmed_note() -> None:
+    record = _device(
+        inventory=Unknown("show inventory | json: denied"), hardware_series="Nexus9000"
+    )
+    answers = CiscoAnswers(
+        advisories=(
+            ReleaseAdvisories(OsType.NX_OS, RUNNING, (_advisory(),), hardware_family="NEXUS9000"),
+        )
+    )
+
+    results = _results(record, answers)
+
+    (finding,) = [f for f in results.findings if f.check.id == "advisory-cisco-sa-nxos-0001"]
+    assert isinstance(finding.cisco_detail, AdvisoryDetail)
+    assert finding.cisco_detail.first_fixed == "10.4(5)"
+    assert finding.cisco_detail.hardware_family_not_confirmed is False
+    assert "hardware family not confirmed" not in finding.what_was_found
 
 
 def test_realistic_output_gives_advisory_findings_and_an_upgrade_target() -> None:

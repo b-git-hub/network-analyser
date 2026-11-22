@@ -94,6 +94,18 @@ _PLATFORM_NAMES: Final[Mapping[str, str]] = MappingProxyType(
 )
 _ACI_REASON: Final = "NX-OS in ACI mode is not matched"
 _FAMILY_REASON: Final = "the software family could not be worked out from show version"
+# The Nexus series `show version` names in its hardware line, and the alias each one matches
+# openVuln on (#159). A token that is not here names no documented series, such as a Nexus 2000
+# Fabric Extender, so it gives no alias rather than a guess.
+_NEXUS_VERSION_SERIES: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "Nexus3000": "NEXUS3000",
+        "Nexus5000": "NEXUS5000",
+        "Nexus6000": "NEXUS6000",
+        "Nexus7000": "NEXUS7000",
+        "Nexus9000": "NEXUS9000",
+    }
+)
 
 
 def normalise_release(release: str) -> str:
@@ -232,6 +244,20 @@ def hardware_family(chassis_pid: str | None) -> str | None:
         (family for pattern, family in _NEXUS_FAMILIES if pattern.match(chassis_pid)),
         None,
     )
+
+
+def hardware_family_from_version(token: str | None) -> str | None:
+    """Return the Nexus series alias the `show version` token names, or None (#159).
+
+    `show version` prints the series beside the model, `cisco Nexus9000 C93180YC-EX Chassis`,
+    while the model alone names no series (story 46). This is the fallback for a device whose
+    `show inventory | json` the Device Role refused: the token settles the series only, never
+    a chassis PID, so EoX and Suggestion lookups are still not asked. A token naming no
+    documented series gives None, never a guess.
+    """
+    if token is None:
+        return None
+    return _NEXUS_VERSION_SERIES.get(token)
 
 
 def platform_name(family: str | None) -> str | None:

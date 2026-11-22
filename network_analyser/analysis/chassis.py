@@ -3,11 +3,12 @@
 Classic IOS and IOS-XE name their chassis in `show version`, so the model is the PID. NX-OS
 does not: `show version` gives `C93180YC-EX`, while the real chassis PID is `N9K-C93180YC-EX`.
 The NX-OS chassis PID is therefore the chassis entry of `show inventory | json`, and without
-one there is no chassis PID, so nothing is looked up under a name Cisco does not know and the
-Nexus series stays unconfirmed (story 46).
+one there is no chassis PID, so nothing is looked up under a name Cisco does not know. The
+Nexus series still comes from the `Nexus<NNNN>` token `show version` names, when it names
+exactly one (#159); otherwise the series stays unconfirmed (story 46).
 """
 
-from network_analyser.analysis.releases import hardware_family
+from network_analyser.analysis.releases import hardware_family, hardware_family_from_version
 from network_analyser.records.analysis import AnalysisInput, HardwareKind
 from network_analyser.records.collected import InventoryKind
 from network_analyser.records.lookup_values import is_safe_pid
@@ -25,8 +26,15 @@ def chassis_pid(data: AnalysisInput, device: VisitedDevice) -> str | None:
 
 
 def nexus_series(data: AnalysisInput, device: VisitedDevice) -> str | None:
-    """Return the device's Nexus series alias, or None when it cannot be worked out."""
-    return hardware_family(chassis_pid(data, device))
+    """Return the device's Nexus series alias, or None when it cannot be worked out.
+
+    The chassis PID is exact, so it wins. When the Device Role refused `show inventory`, the
+    one `Nexus<NNNN>` token `show version` named still settles the series (#159).
+    """
+    family = hardware_family(chassis_pid(data, device))
+    if family is not None:
+        return family
+    return hardware_family_from_version(device.hardware_series)
 
 
 def _inventory_chassis(data: AnalysisInput, device: VisitedDevice) -> str | None:

@@ -89,6 +89,9 @@ class VisitedDevice:
         vlan_database: the VLANs listed in its VLAN database, active or not, for the
             diagram's VLAN view (#64); unknown when not collected or incomplete.
         vpc: its vPC domain; None when it has none.
+        hardware_series: the Nexus hardware series token `show version` named, such as
+            `Nexus9000`; None when it named none, named more than one, or the Platform prints
+            no such token (#159).
     """
 
     id: str
@@ -105,6 +108,7 @@ class VisitedDevice:
     interfaces: tuple[Interface, ...] | Unknown
     vlan_database: frozenset[int] | Unknown
     vpc: VpcState | Unknown | None
+    hardware_series: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
