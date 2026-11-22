@@ -14,13 +14,17 @@ _BRACKETED_SUFFIX: Final = re.compile(r"(?:\s*\[[^\]]*\])+\s*$")
 dropped before the value is checked, so the release reads as one word (story 45; #137)."""
 _ROLES: Final = re.compile(r"^\s*roles:(.*)$", re.MULTILINE)
 _ROLE: Final = re.compile(r"[A-Za-z0-9._-]{1,64}")
+_NEXUS_SERIES: Final = re.compile(r"\bNexus[0-9]{4}\b")
+"""The Nexus series token NX-OS prints beside the model: `cisco Nexus9000 C93180YC-EX
+Chassis`. The model alone names no series, so this token is the fallback series source when
+`show inventory` is refused (#159)."""
 _TOO_LOW_ROLES: Final = frozenset({"priv-0", "priv-1"})
 """Roles that hold no more than user EXEC rights. Any other role may be the exact custom
 role of ADR 0005, so it is never flagged here."""
 
 
 def read_version(text: str) -> VersionFacts:
-    """Return the hostname, model, software version and chassis serial."""
+    """Return the hostname, model, software version, chassis serial and Nexus series token."""
     rows = parse(_TEMPLATES, SHOW_VERSION, text)
     row = rows[0] if rows else None
     return VersionFacts(
@@ -30,7 +34,14 @@ def read_version(text: str) -> VersionFacts:
             {"os": _BRACKETED_SUFFIX.sub("", fields.text(row, "os"))}, "os", "software version"
         ),
         serials=fields.serials(fields.text_list(row, "serial")),
+        hardware_series=_hardware_series(text),
     )
+
+
+def _hardware_series(text: str) -> str | None:
+    """Return the one Nexus series token `show version` names; None when none or several."""
+    tokens = {found.group(0) for found in _NEXUS_SERIES.finditer(text)}
+    return tokens.pop() if len(tokens) == 1 else None
 
 
 def privilege_command(username: str) -> str | None:
