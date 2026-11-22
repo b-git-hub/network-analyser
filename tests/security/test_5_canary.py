@@ -6,7 +6,8 @@ console output, `audit.log`, `topology.json` (#52), `diagram.html` (#63), `diagr
 the `netmiko`/`paramiko` loggers reaches any file or the console. Plain pytest, no device.
 Every Finding's text is scanned too, as a backstop for a Check that leaks a secret (#93).
 The Cisco API Key's client ID, secret and token are canaries too (#103): they never reach the
-console, any file or the Findings in a report.
+console, any file or the Findings in a report. When the tool goes online, the Run's
+`SecretScan` holds no value of any typed secret, only fingerprints (#145).
 """
 
 import dataclasses
@@ -47,8 +48,10 @@ from tests.support.run_driver import (
     Runner,
     data_folder,
     first_run,
+    later_run,
     typed,
 )
+from tests.support.scan_state import reachable_text
 from tests.support.topology_documents import device, document
 from tests.support.topology_records import neighbour, port, visited
 from tests.unit.test_run_report import _report
@@ -268,6 +271,50 @@ def test_a_secret_that_slips_into_device_text_never_reaches_the_run_report(tmp_p
         assert canary not in text
     assert "[blocked]" in text
     assert scan.hits >= 1
+
+
+def test_no_typed_secret_is_reachable_from_the_scan_when_cisco_is_asked(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The scan holds fingerprints, not values, at the moment the first Cisco request opens.
+
+    ADR 0007 wipes every password and the passphrase before the tool goes online, and #145
+    makes that true of the scan too: `SecretScan` keeps only a length and a keyed fingerprint.
+    The fake Cisco walks the Run's own scan when each request arrives, so the test sees the
+    real object at the real moment rather than a flag the code sets.
+    """
+    data = data_folder()
+    passphrase = backup_store.create_check_file(data.check_file, Secret(BACKUP_CANARY))
+    backup_store.lock_key_file(
+        data.cisco_key_file,
+        Secret(fake_cisco.CLIENT_ID),
+        Secret(fake_cisco.CLIENT_SECRET),
+        passphrase,
+        set_at=datetime.now(UTC),
+    )
+    fake = fake_cisco.FakeCisco()
+    monkeypatch.setattr("network_analyser.advisories.session.HttpsTransport", lambda **_: fake)
+    scans: list[SecretScan] = []
+
+    def record_scan() -> SecretScan:
+        scan = SecretScan()
+        scans.append(scan)
+        return scan
+
+    def check(*_args: object) -> None:
+        (scan,) = scans
+        held = reachable_text(scan)
+        for canary in CANARIES:
+            assert canary not in held, "the scan still held a typed secret while online"
+            assert scan.holds_secret(canary), "the scan stopped watching a typed secret"
+
+    fake.on_request = check
+    monkeypatch.setattr("network_analyser.cli.cmd_run.SecretScan", record_scan)
+
+    got = Runner(monkeypatch, capsys)(*FLAGS, "--cisco-lookups", "on", typed=later_run())
+
+    assert got.code == 0, got.err
+    assert fake.token_calls() == 1
 
 
 def test_a_stored_cisco_key_and_its_token_never_reach_the_console_or_any_file(
