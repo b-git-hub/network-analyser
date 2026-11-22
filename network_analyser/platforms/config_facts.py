@@ -74,7 +74,9 @@ _ACCESS_CLASS_IN: Final = re.compile(r"^access-class\s+\S+\s+in(?:\s|$)", re.IGN
 _EXEC_TIMEOUT: Final = re.compile(r"^exec-timeout\s+(\S+)(?:\s+(\S+))?", re.IGNORECASE)
 _SSH_VERSION: Final = re.compile(r"^ip\s+ssh\s+version\s+([12])\s*$", re.IGNORECASE)
 _AAA_LOGIN: Final = re.compile(r"^aaa\s+authentication\s+login\s+\S+\s+(.*)$", re.IGNORECASE)
-_AAA_AUTHORIZATION: Final = re.compile(r"^aaa\s+authorization\b", re.IGNORECASE)
+_AAA_ENABLE: Final = re.compile(r"^aaa\s+authentication\s+enable\s+\S+\s+(.*)$", re.IGNORECASE)
+_AAA_AUTHORIZATION: Final = re.compile(r"^aaa\s+authorization\b(.*)$", re.IGNORECASE)
+_NXAPI_HTTP_PORT: Final = re.compile(r"^nxapi\s+http\s+port\s+\d+\s*$", re.IGNORECASE)
 _AAA_ACCOUNTING: Final = re.compile(r"^aaa\s+accounting\b", re.IGNORECASE)
 _SECRET_LINE: Final = re.compile(
     r"(?<![\w-])(?:password|secret)\s+(?:level\s+\d+\s+)?([0-9])(?=\s|$)", re.IGNORECASE
@@ -239,7 +241,17 @@ def _legacy_services(lines: list[str]) -> tuple[str, ...]:
 
 
 def _http_server(lines: list[str]) -> bool:
-    return any(line.strip().lower() in {"ip http server", "feature http-server"} for line in lines)
+    """Plain HTTP is on: `ip http server`, `feature http-server`, or NX-API on an HTTP port.
+
+    `nxapi http port` only counts with `feature nxapi`, since the port line means nothing
+    while the feature is off.
+    """
+    stripped = [line.strip() for line in lines]
+    if any(line.lower() in {"ip http server", "feature http-server"} for line in stripped):
+        return True
+    return any(line.lower() == "feature nxapi" for line in stripped) and any(
+        _NXAPI_HTTP_PORT.match(line) for line in stripped
+    )
 
 
 def _telnet_lines(platform: Platform, lines: list[str]) -> tuple[str, ...] | Unknown:
@@ -359,12 +371,18 @@ def _aaa_facts(lines: list[str]) -> dict[str, FactValue]:
     for line in lines:
         text = line.strip()
         login = _AAA_LOGIN.match(text)
+        enable = _AAA_ENABLE.match(text)
+        authorize = _AAA_AUTHORIZATION.match(text)
         if login is not None:
             methods = {token.lower() for token in login.group(1).split()}
             fallback_none += int("none" in methods)
             central_login = central_login or "group" in methods
-        elif _AAA_AUTHORIZATION.match(text):
-            authorization = True
+        elif enable is not None:
+            fallback_none += int("none" in {token.lower() for token in enable.group(1).split()})
+        elif authorize is not None:
+            authorization = authorization or "group" in {
+                token.lower() for token in authorize.group(1).split()
+            }
         elif _AAA_ACCOUNTING.match(text):
             accounting = True
     return {
