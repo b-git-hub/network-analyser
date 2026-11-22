@@ -237,6 +237,8 @@ class Session:
         basic = base64.b64encode(
             f"{self._client_id.reveal()}:{self._client_secret.reveal()}".encode()
         ).decode("ascii")
+        if self._scan is not None:
+            self._scan.watch(Secret(basic))  # the header's form, which hides both secrets
         request = HttpRequest(
             host=TOKEN_HOST,
             port=443,

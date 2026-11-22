@@ -578,9 +578,13 @@ def _worst(first: FindingLevel, second: FindingLevel) -> FindingLevel:
 
 
 def _passed(value: str | None, today: date) -> bool:
-    """True when Cisco gave a readable date that is before `today`."""
+    """True when Cisco gave a readable date that is `today` or before.
+
+    A date of today has passed: counting it as neither passed nor upcoming would lose it from
+    both the Finding and the advice (#150).
+    """
     when = _as_date(value)
-    return when is not None and when < today
+    return when is not None and when <= today
 
 
 def _upcoming(value: str | None, today: date) -> bool:

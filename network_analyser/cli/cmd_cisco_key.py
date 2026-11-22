@@ -2,9 +2,11 @@
 
     set     ask the Backup Passphrase (checked against the check file, 3 tries), then the
             client ID and secret at masked prompts, lock them into `cisco-key.age`, and
-            send one token-only request to Cisco unless `--no-check`.
-    show    say whether a key is stored and when it was set and, with the passphrase, the
-            last 4 characters of the client ID.
+            send one token-only request to Cisco unless `--no-check`; `--proxy host:port`
+            picks the proxy for that one request.
+    show    say whether a key is stored and when it was set, without asking for the
+            passphrase; with `--last-4`, ask for it and show the client ID's last 4
+            characters.
     remove  delete the key file after a [y/N] confirmation.
 
 All three hold the data folder's single-instance lock and check that only the operator can
@@ -78,7 +80,7 @@ def _dispatch(args: argparse.Namespace, data: run_output.DataFolder, scan: Secre
     if action == "set":
         return _set(args, data, scan)
     if action == "show":
-        return _show(data, scan)
+        return _show(data, scan, last_four=args.last_4)
     return _remove(data)
 
 
@@ -134,7 +136,10 @@ def _store_and_check(  # noqa: PLR0913, PLR0917 (set's whole state, each part na
         ask.say("Skipped the online check (--no-check).")
         return ExitCode.CLEAN
     ask.say("Checking the key with Cisco (one token request, no device data)...")
-    return _report_token(ask, advisories.check_api_key(client_id, client_secret, scan=scan))
+    proxy = advisories.ProxyConfig.explicit(args.proxy) if args.proxy else None
+    return _report_token(
+        ask, advisories.check_api_key(client_id, client_secret, scan=scan, proxy=proxy)
+    )
 
 
 def _secret(ask: Prompter, prompt: str, scan: SecretScan) -> Secret:
@@ -174,7 +179,8 @@ def _token_detail(result: TokenResult) -> str:
 # -- show (story 30) -------------------------------------------------------------------------
 
 
-def _show(data: run_output.DataFolder, scan: SecretScan) -> ExitCode:
+def _show(data: run_output.DataFolder, scan: SecretScan, *, last_four: bool) -> ExitCode:
+    """Say whether a key is stored and when; ask for the passphrase only for the last 4 (#150)."""
     path = data.cisco_key_file
     if not path.is_file():
         print(_NO_KEY)
@@ -184,6 +190,8 @@ def _show(data: run_output.DataFolder, scan: SecretScan) -> ExitCode:
         print("A Cisco API key is stored.")
     else:
         print(f"A Cisco API key is stored, set {_utc_text(set_time)}.")
+    if not last_four:
+        return ExitCode.CLEAN
     ask = Prompter.for_this_process()
     if not guard_crash_dumps(ask):
         return ExitCode.REFUSED
@@ -191,10 +199,11 @@ def _show(data: run_output.DataFolder, scan: SecretScan) -> ExitCode:
     if isinstance(passphrase, ExitCode):
         return passphrase
     passphrase.add_to_scan(scan)
-    key = backup_store.unlock_key_file(path, passphrase)
-    if key is None:
-        print(backup_store.KEY_LOCKED_ELSEWHERE, file=sys.stderr)  # story 38
+    opened = backup_store.open_key_file(path, passphrase)
+    if opened.key is None:
+        print(opened.problem or backup_store.KEY_LOCKED_ELSEWHERE, file=sys.stderr)  # story 38
         return ExitCode.NEEDS_ATTENTION
+    key = opened.key
     key.add_to_scan(scan)
     print(f"  The client ID ends in {key.client_id_suffix()}.")
     return ExitCode.CLEAN

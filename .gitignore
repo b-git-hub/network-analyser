@@ -15,10 +15,12 @@ dist/
 # Synthetic test fixtures live under tests/fixtures/synthetic/ and are kept.
 runs/
 *.age
+*.age.tmp-*
 known_hosts
 topology.json
 audit.log
 run-report.html
+findings.html
 diagram.html
 diagram.drawio
 relock-*.txt

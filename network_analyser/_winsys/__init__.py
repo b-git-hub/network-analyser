@@ -33,7 +33,7 @@ from network_analyser._winsys.paths import (
     pc_name,
     windows_account,
 )
-from network_analyser._winsys.proxy import system_proxy
+from network_analyser._winsys.proxy import WindowsProxy, system_proxy
 from network_analyser._winsys.rename import retry_rename
 from network_analyser._winsys.wer import (
     RegistryUnreadableError,
@@ -48,6 +48,7 @@ __all__ = [
     "Grant",
     "RegistryUnreadableError",
     "RegistryView",
+    "WindowsProxy",
     "current_user_sid",
     "drive_kind",
     "enable_live_output",

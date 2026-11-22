@@ -4,10 +4,11 @@
 behind the operator's back, and the proxy is part of where the tool's traffic goes. The caller
 hands in a `ProxyConfig`; the default is Windows' own Internet Settings, read by `_winsys`.
 
-A setting the tool cannot use (a SOCKS address, a `user:password@host` form, a bare hostname)
-is refused rather than ignored, so a Run never quietly goes direct when the operator expected
-a proxy. The fence itself is unaffected: whatever the proxy, it only ever learns the exact
-Cisco host and port.
+A setting the tool cannot use (a SOCKS address, a `user:password@host` form, a bare hostname,
+or a PAC script with no fixed proxy beside it) is refused rather than ignored, so a Run never
+quietly goes direct when the operator expected a proxy. A fixed `ProxyServer` wins over a PAC
+script, because it is the setting the tool can honour. The fence itself is unaffected: whatever
+the proxy, it only ever learns the exact Cisco host and port.
 """
 
 import re
@@ -15,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, unique
 
-from network_analyser._winsys import system_proxy
+from network_analyser._winsys import WindowsProxy, system_proxy
 
 # A host name or dotted address and a port, nothing else: no scheme, path or credentials.
 _ADDRESS = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,252}):[0-9]{1,5}")
@@ -87,7 +88,7 @@ class ProxyNotUsable:
 
 
 def resolve_proxy(
-    config: ProxyConfig, *, system: Callable[[], str | None] = system_proxy
+    config: ProxyConfig, *, system: Callable[[], WindowsProxy | None] = system_proxy
 ) -> ProxyTarget | ProxyNotUsable | None:
     """Return the proxy to tunnel through, None for a direct connection, or why not.
 
@@ -102,10 +103,14 @@ def resolve_proxy(
     return _windows(system())
 
 
-def _windows(raw: str | None) -> ProxyTarget | ProxyNotUsable | None:
-    if raw is None:
+def _windows(setting: WindowsProxy | None) -> ProxyTarget | ProxyNotUsable | None:
+    if setting is None:
         return None
-    address = _chosen_address(raw)
+    if setting.server is None:
+        return ProxyNotUsable(
+            "the Windows proxy setting is a PAC script, which the tool cannot use"
+        )
+    address = _chosen_address(setting.server)
     if address is None:
         return ProxyNotUsable("the Windows proxy setting names no HTTP proxy")
     if "@" in address:

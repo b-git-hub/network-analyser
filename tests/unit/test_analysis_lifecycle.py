@@ -283,8 +283,11 @@ def test_upcoming_eox_dates_are_advice_not_findings() -> None:
     )
 
 
-def test_an_eox_date_of_today_is_neither_passed_nor_upcoming() -> None:
-    """The reference date is a day, so a milestone dated today has not passed (#149)."""
+def test_an_eox_date_of_today_counts_as_passed_and_is_not_upcoming() -> None:
+    """A milestone dated today has passed, so it raises its Finding and adds no advice (#150).
+
+    Counting it as neither used to lose it from both surfaces.
+    """
     today = AS_OF.date().isoformat()
     record = _device(A, "S1", "sw-a")
     results = _results(
@@ -312,7 +315,19 @@ def test_an_eox_date_of_today_is_neither_passed_nor_upcoming() -> None:
         ),
     )
 
-    assert _lifecycle(results) == []
+    hardware_finding = next(
+        finding
+        for finding in _lifecycle(results, "lifecycle-hardware-eox")
+        if finding.devices == ("dev-S1",)
+    )
+    software_finding = next(
+        finding
+        for finding in _lifecycle(results, "lifecycle-software-eox")
+        if finding.devices == ("dev-S1",)
+    )
+    assert hardware_finding.level is FindingLevel.HIGH
+    assert today in hardware_finding.what_was_found
+    assert software_finding.level is FindingLevel.MEDIUM
     (advice,) = results.advice
     assert advice.upcoming_eox == ()
 

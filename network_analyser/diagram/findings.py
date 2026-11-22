@@ -56,7 +56,8 @@ NEWER_THAN_LIST: Final = "running release is newer than Cisco's list"
 (#127). `analysis.advisory.NEWER_THAN_LIST` holds the same text; `diagram` may not import
 `analysis`, so it is repeated here and a test keeps the two equal (#139)."""
 
-_ADVISORY_ID: Final = re.compile(r"cisco-sa-[A-Za-z0-9._-]{1,160}")
+_ADVISORY_ID: Final = re.compile(r"cisco-sa-[A-Za-z0-9-]{1,160}")
+"""Cisco's Advisory id shape from #78: `cisco-sa-` then letters, digits and hyphens (#150)."""
 _ADVISORY_HREF: Final = (
     "https://sec.cloudapps.cisco.com/security/center/content/CiscoSecurityAdvisory/"
 )

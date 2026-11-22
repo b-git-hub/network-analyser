@@ -145,14 +145,17 @@ def finish(  # noqa: PLR0913 (the Run's end, every dependency explicit)
     after the unlock, so a failure in Topology building cannot skip the key wipe (#143).
     """
     key = None
-    locked_out = False
+    key_problem = None
     stopped = False
+    as_of = (now or datetime.now(UTC)).astimezone()
     try:
         if lookups_enabled and key_file.is_file():
-            key = backup_store.unlock_key_file(key_file, passphrase)
+            opened = backup_store.open_key_file(key_file, passphrase)
+            key = opened.key
             if key is not None:
                 key.add_to_scan(scan)  # story 40: the key joins the scan as soon as it exists
-        locked_out = lookups_enabled and key is None and key_file.is_file()
+            else:
+                key_problem = opened.problem or backup_store.KEY_LOCKED_ELSEWHERE
         wipe(sets, passphrase)
 
         built = run_topology.build_topology(collected.records(), scope)
@@ -162,7 +165,7 @@ def finish(  # noqa: PLR0913 (the Run's end, every dependency explicit)
             inventory=run_analysis.inventories(built, collected.records()),
         )
         answers, lookups, replies, stopped = _ask(known, key, scan=scan, proxy=proxy, now=now)
-        results, answers = _analysed(built, answers, lookups, collected.records())
+        results, answers = _analysed(built, answers, lookups, collected.records(), as_of=as_of)
         audit.record(analysis_event(results, lookups, replies))
         written = run_topology.save_all(
             folder,
@@ -180,7 +183,7 @@ def finish(  # noqa: PLR0913 (the Run's end, every dependency explicit)
         attention=_attention(
             lookups_enabled=lookups_enabled,
             key=key,
-            locked_out=locked_out,
+            key_problem=key_problem,
             answers=answers,
             lookups=lookups,
             stopped=stopped,
@@ -196,6 +199,8 @@ def _analysed(
     answers: CiscoAnswers,
     lookups: CiscoLookups,
     records: tuple[DeviceRecord, ...],
+    *,
+    as_of: datetime,
 ) -> tuple[AnalysisResults, CiscoAnswers]:
     """Run every Check, returning the results and the answers they were run with.
 
@@ -203,16 +208,17 @@ def _analysed(
     its `topology.json`, diagram and Findings report (story 120, #143): a Check that raises on
     them is retried offline, and the offline answers also carry the Needs-attention lines.
     When Cisco was not asked there is no Cisco data to blame, so the exception is the Run's
-    own and propagates.
+    own and propagates. `as_of` is the one local day the Lifecycle Checks judge EoX dates
+    against, used by the retry too (#150).
     """
     try:
-        return run_analysis.analysed(built, answers, records=records), answers
+        return run_analysis.analysed(built, answers, records=records, as_of=as_of), answers
     except Exception:  # one odd Cisco reply must not lose every output
         if not lookups.ran:
             raise
         print(ANALYSIS_FAILED, file=sys.stderr)
         offline = CiscoAnswers.unavailable(LOOKUPS_FAILED)
-        return run_analysis.analysed(built, offline, records=records), offline
+        return run_analysis.analysed(built, offline, records=records, as_of=as_of), offline
 
 
 def _ask(
@@ -296,7 +302,7 @@ def _attention(  # noqa: PLR0913 (the Run end's state, each part named)
     *,
     lookups_enabled: bool,
     key: backup_store.CiscoKey | None,
-    locked_out: bool,
+    key_problem: str | None,
     answers: CiscoAnswers,
     lookups: CiscoLookups,
     stopped: bool,
@@ -304,13 +310,14 @@ def _attention(  # noqa: PLR0913 (the Run end's state, each part named)
     """One Needs-attention line per Cisco source that did not run (stories 35, 118).
 
     A Ctrl+C during the online step already shows as a stopped Run, so it adds no line that
-    blames a Cisco source (#143).
+    blames a Cisco source (#143). A key file that did not open gives its own fixed reason: a
+    read problem and a wrong passphrase are not the same thing (#150).
     """
     if not lookups_enabled or stopped:
         return ()
     if key is None:
-        if locked_out:
-            return (backup_store.KEY_LOCKED_ELSEWHERE,)
+        if key_problem is not None:
+            return (key_problem,)
         return (NO_KEY_ATTENTION,)
     if not lookups.ran:
         return ()  # there was nothing Cisco could be asked, so no source was down

@@ -399,9 +399,9 @@ class AnalysisInput:
             (#102), keyed by the address logged into.
         inventory: each device's hardware PIDs, once #97 and #98 fill them.
         answers: Cisco's answers, or why each source could not be asked.
-        as_of: the moment the Lifecycle Checks judge EoX dates against, as an aware UTC
-            datetime; None means now, so a Run uses its own end and a test can pin a date
-            without reaching for the clock (#106).
+        as_of: the moment the Lifecycle Checks judge EoX dates against, as an aware datetime;
+            None means now. A Run pins the operator's local day once, so every Check uses the
+            same date, and a test can pin one without reaching for the clock (#106, #150).
     """
 
     topology: Topology

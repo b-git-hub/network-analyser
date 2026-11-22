@@ -1,7 +1,7 @@
-r"""The Trust Store folder check, part of the first Run-start step (#69; decided on #7).
+r"""The data folder permissions check, part of the first Run-start step (#69; #150; decided on #7).
 
 Made before any prompt, by `run` and by `trust-key`: only the operator may read or change
-`%LOCALAPPDATA%\NetworkAnalyser\trust\`.
+`%LOCALAPPDATA%\NetworkAnalyser\`, which holds the Trust Store and the Cisco API key file.
 """
 
 import sys

@@ -27,11 +27,14 @@ from network_analyser.backup_store.check_file import (
     unlock_check_file,
 )
 from network_analyser.backup_store.cisco_key import (
+    KEY_FILE_UNREADABLE,
     KEY_LOCKED_ELSEWHERE,
     CiscoKey,
     KeyOutcome,
+    KeyUnlock,
     key_file_set_time,
     lock_key_file,
+    open_key_file,
     relock_key_file,
     remove_key_file,
     unlock_key_file,
@@ -59,6 +62,7 @@ from network_analyser.backup_store.relock import (
 
 __all__ = [
     "BACKUPS_FOLDER",
+    "KEY_FILE_UNREADABLE",
     "KEY_LOCKED_ELSEWHERE",
     "MANIFEST_NAME",
     "PASSPHRASE_MIN",
@@ -72,6 +76,7 @@ __all__ = [
     "FileResult",
     "Fingerprints",
     "KeyOutcome",
+    "KeyUnlock",
     "PassphraseFiles",
     "PendingChange",
     "RegisterRefusedError",
@@ -85,6 +90,7 @@ __all__ = [
     "finish_change",
     "key_file_set_time",
     "lock_key_file",
+    "open_key_file",
     "passphrase_problem",
     "plan_relock",
     "register_run_folder",

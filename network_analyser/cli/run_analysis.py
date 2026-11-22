@@ -26,6 +26,7 @@ Checks still run.
 
 import re
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Final
 
 from network_analyser import advisories, analysis
@@ -160,6 +161,7 @@ def analysed(
     answers: CiscoAnswers | None = None,
     *,
     records: tuple[DeviceRecord, ...] = (),
+    as_of: datetime | None = None,
 ) -> AnalysisResults:
     """Run every Check on `built`, with Cisco's answers, config facts and show output.
 
@@ -168,7 +170,8 @@ def analysed(
     `built` was made from; their secret-free config facts ride into `AnalysisInput.config_facts`
     (#96) and their collected show output into `AnalysisInput.collected` (#102). With none,
     every fact and show command reads as `Unknown`, so a Check says it could not decide rather
-    than passing.
+    than passing. `as_of` is the one moment the Lifecycle Checks judge EoX dates against, which
+    a Run pins so every Check uses the same day (#150).
     """
     without_cisco = CiscoAnswers.unavailable(LOOKUPS_DID_NOT_RUN)
     return analysis.analyse(
@@ -178,6 +181,7 @@ def analysed(
             config_facts=_config_facts(records),
             collected=collected_from(records),
             inventory=inventories(built, records),
+            as_of=as_of,
         )
     )
 

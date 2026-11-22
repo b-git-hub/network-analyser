@@ -111,9 +111,11 @@ _BUNDLE: Final = "BUNDLE"
 def model_drift(data: AnalysisInput) -> tuple[Finding, ...]:
     """Return one Low Finding for each model that Visited Devices run on two or more releases.
 
-    It is tool policy, not a Cisco rule, so it says so. The Finding names every Visited
-    Device of that model, which is what the diagram lights when the Check is picked (story 92).
-    A device whose model or release is `Unknown` takes no part: Analysis never guesses.
+    It is tool policy, not a Cisco rule, so it says so. Releases are compared after
+    normalisation, so the same release printed two ways is not drift (#150). The Finding names
+    every Visited Device of that model, which is what the diagram lights when the Check is
+    picked (story 92). A device whose model or release is `Unknown` takes no part: Analysis
+    never guesses.
     """
     by_model: dict[str, list[tuple[str, str, str]]] = {}
     for device in data.topology.devices:
@@ -122,7 +124,7 @@ def model_drift(data: AnalysisInput) -> tuple[Finding, ...]:
         if not device.model:
             continue
         by_model.setdefault(device.model, []).append(
-            (device.id, device.software_version, _name(device))
+            (device.id, normalise_release(device.software_version), _name(device))
         )
 
     findings: list[Finding] = []

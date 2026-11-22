@@ -37,6 +37,12 @@ KEY_LOCKED_ELSEWHERE: Final = (
 )
 """Fixed text for a key file the current Backup Passphrase cannot open (story 38)."""
 
+KEY_FILE_UNREADABLE: Final = (
+    "The Cisco API key file could not be read (another program may hold it open, or it is not "
+    "a key file); run cisco-key set again"
+)
+"""Fixed text for a key file that could not be read at all, which is not a wrong passphrase."""
+
 NOT_READ: Final = "The Cisco API key file could not be read, so it was not re-locked"
 NOT_CHECKED_OUT: Final = (
     "The re-locked Cisco API key file did not open to the same content; it was left as it was"
@@ -121,6 +127,20 @@ class KeyOutcome:
     problem: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class KeyUnlock:
+    """What came of opening the key file (`open_key_file`), for the Run end and `show`.
+
+    Attributes:
+        key: the unlocked key, or None when it did not open.
+        problem: fixed text when the file could not be read at all; None when the file was
+            read and either opened or did not (a wrong passphrase is not a read problem).
+    """
+
+    key: CiscoKey | None = None
+    problem: str | None = None
+
+
 def lock_key_file(
     path: Path,
     client_id: Secret,
@@ -151,20 +171,34 @@ def lock_key_file(
     _set_mtime(path, int(set_at.timestamp()))
 
 
+def open_key_file(path: Path, passphrase: BackupPassphrase) -> KeyUnlock:
+    """Return the key at `path` unlocked with the passphrase, and why when it would not open.
+
+    A file that could not be read at all (missing, held open by another program, or larger than
+    a key document) comes back with `KEY_FILE_UNREADABLE`: the recovery is `cisco-key set`
+    again, but it is not the same problem as a wrong passphrase. A file that was read but does
+    not open (the wrong passphrase, not an age file, not a key document) is `key=None` with no
+    problem, so the caller gives story 38's message (story 38, #150).
+    """
+    if not path.is_file():
+        return KeyUnlock()
+    locked = _read(path)
+    if locked is None:
+        return KeyUnlock(problem=KEY_FILE_UNREADABLE)
+    plaintext = passphrase.unlock(locked)
+    if plaintext is None:
+        return KeyUnlock()
+    return KeyUnlock(key=_parse(plaintext))
+
+
 def unlock_key_file(path: Path, passphrase: BackupPassphrase) -> CiscoKey | None:
     """Return the key at `path` unlocked with the passphrase, or None if it does not open.
 
     None covers every unusable file: the wrong passphrase, a file that is not an age file, and
     a file whose plaintext is not a key document. The recovery is the same in every case: run
-    `cisco-key set` again (story 38).
+    `cisco-key set` again (story 38). `open_key_file` also says when the file could not be read.
     """
-    locked = _read(path)
-    if locked is None:
-        return None
-    plaintext = passphrase.unlock(locked)
-    if plaintext is None:
-        return None
-    return _parse(plaintext)
+    return open_key_file(path, passphrase).key
 
 
 def relock_key_file(  # noqa: PLR0911 (one return per fixed outcome, each named)

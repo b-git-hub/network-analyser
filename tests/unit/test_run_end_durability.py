@@ -153,7 +153,7 @@ def test_a_stopped_run_never_unlocks_the_key_and_still_records_analysis(
     def refuse(*_args: object, **_kwargs: object) -> None:
         pytest.fail("a stopped Run must not unlock the key file")
 
-    monkeypatch.setattr(backup_store, "unlock_key_file", refuse)
+    monkeypatch.setattr(backup_store, "open_key_file", refuse)
     _stop_during_the_crawl(run)
 
     got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
@@ -213,12 +213,13 @@ def test_a_check_that_raises_on_ciscos_answers_still_writes_every_output(
         answers: CiscoAnswers | None = None,
         *,
         records: tuple[DeviceRecord, ...] = (),
+        as_of: datetime | None = None,
     ) -> AnalysisResults:
         calls.append(answers)
         if len(calls) == 1:
             msg = "synthetic Check failure"
             raise TypeError(msg)
-        return real(built, answers, records=records)
+        return real(built, answers, records=records, as_of=as_of)
 
     monkeypatch.setattr(run_analysis, "analysed", flaky)
 
@@ -248,15 +249,13 @@ def test_the_key_is_unlocked_only_after_the_backup_locker_has_finished(
         return result
 
     monkeypatch.setattr(backup_store.BackupLocker, "finish", finish)
-    real_unlock = backup_store.unlock_key_file
+    real_unlock = backup_store.open_key_file
 
-    def unlock(
-        path: Path, passphrase: backup_store.BackupPassphrase
-    ) -> backup_store.CiscoKey | None:
+    def unlock(path: Path, passphrase: backup_store.BackupPassphrase) -> backup_store.KeyUnlock:
         assert finished, "the key was unlocked before the Backups were locked"
         return real_unlock(path, passphrase)
 
-    monkeypatch.setattr(backup_store, "unlock_key_file", unlock)
+    monkeypatch.setattr(backup_store, "open_key_file", unlock)
 
     got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
 

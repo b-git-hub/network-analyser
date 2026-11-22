@@ -393,13 +393,26 @@ def _add_cisco_key(commands: _Commands) -> None:
         default=None,
         help="store the key without the online token check (for offline storage)",
     )
-    actions.add_parser(
+    set_key.add_argument(
+        "--proxy",
+        type=_proxy,
+        metavar="HOST:PORT",
+        help="HTTP proxy for the token check (default: Windows' own proxy setting). "
+        "HTTPS_PROXY-style environment variables are never read.",
+    )
+    show_key = actions.add_parser(
         "show",
         help="say whether a key is stored, and show its details",
-        description="Say whether a Cisco API key is stored and when it was set. With the "
-        "Backup Passphrase,\nit also shows the last 4 characters of the client ID.",
+        description="Say whether a Cisco API key is stored and when it was set, without asking "
+        "for the\nBackup Passphrase. With --last-4, and the Backup Passphrase, it also shows "
+        "the last 4\ncharacters of the client ID.",
         allow_abbrev=False,
         color=False,
+    )
+    show_key.add_argument(
+        "--last-4",
+        action="store_true",
+        help="also show the last 4 characters of the client ID (asks for the Backup Passphrase)",
     )
     actions.add_parser(
         "remove",

@@ -1,8 +1,11 @@
 """The bridge from Analysis's questions to `advisories`, and Cisco's answers back (#104)."""
 
 from dataclasses import replace
+from datetime import UTC, datetime
 
-from network_analyser import topology
+import pytest
+
+from network_analyser import analysis, topology
 from network_analyser.advisories.replies import NOT_UNDERSTOOD
 from network_analyser.cli import run_analysis
 from network_analyser.records import Platform
@@ -44,6 +47,7 @@ from network_analyser.records.cisco import (
 )
 from network_analyser.records.topology import (
     AdvisoryOutcomeKind,
+    AnalysisResults,
     EoxKind,
     FindingLevel,
     Topology,
@@ -307,6 +311,26 @@ def test_one_release_cisco_does_not_know_leaves_the_other_releases_answered() ->
     assert (bad.release, bad.advisories, bad.unavailable) == ("17.99.1", (), "INVALID_IOS_VERSION")
     assert good.unavailable is None
     assert len(good.advisories) == 1
+
+
+def test_analysed_pins_the_reference_date_it_is_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Run hands Analysis one moment, so every Lifecycle Check judges the same day (#150)."""
+    seen: list[AnalysisInput] = []
+    real = analysis.analyse
+
+    def spy(data: AnalysisInput) -> AnalysisResults:
+        seen.append(data)
+        return real(data)
+
+    monkeypatch.setattr(analysis, "analyse", spy)
+    moment = datetime(2026, 11, 21, 23, 30, tzinfo=UTC)
+
+    run_analysis.analysed(_built(), as_of=moment)
+
+    (data,) = seen
+    assert data.as_of == moment
 
 
 def test_eox_becomes_one_answer_per_pid_and_per_release_asked() -> None:
