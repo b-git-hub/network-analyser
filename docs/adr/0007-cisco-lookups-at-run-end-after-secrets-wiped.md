@@ -53,3 +53,9 @@ Decided on [one PID and release pattern for analysis and advisories](https://git
 
 - **One value, one pattern, one refusal.** `analysis` and `advisories` read the same patterns (`records.lookup_values`). A value that does not match is dropped on its own and is never sent; the rest of the lookup is still asked, and the device whose PID was dropped reads "could not check" (the Suggested Release Check says the PID was not sent). The call is refused whole only when no value is left.
 - **A licence-suffixed PID** such as `ISR4451-X/K9` is a PID. One `/` and a short suffix are allowed in the value, and that `/` is the only character written percent-encoded (`%2F`) in a request path. Any other `%`, `/`, `?`, `&`, `#`, `..`, control character or non-ASCII character fails the pattern.
+
+## Amendment (2026-11-22, later)
+
+Decided on [Send licence-suffixed PIDs to Cisco with a raw slash](https://github.com/b-git-hub/network-analyser/issues/162), after the operator's live runs on [Verify Cisco reply shapes with the live API key](https://github.com/b-git-hub/network-analyser/issues/148). The decision is unchanged; one point of wording in the amendment above changes.
+
+- **A licence-suffixed PID goes into the request path as it is, slash included.** Cisco's gateway answers every path call that carries `%2F` or `%252F` with HTTP 400. It answers the raw slash on hardware EoX (one PID or several comma-joined), Software Suggestion and the compatible list. No character of a PID is percent-encoded. The pattern still allows only one `/`, followed by letters, digits and hyphens, so the slash cannot add `..` or any other change to the path, and any `%` fails the pattern. This replaces the `%2F` sentence above.

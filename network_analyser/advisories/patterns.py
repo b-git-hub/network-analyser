@@ -12,7 +12,6 @@ from network_analyser.records.lookup_values import (
     is_safe_pid,
     is_safe_platform_alias,
     is_safe_release,
-    wire_pid,
 )
 
-__all__ = ["is_safe_pid", "is_safe_platform_alias", "is_safe_release", "wire_pid"]
+__all__ = ["is_safe_pid", "is_safe_platform_alias", "is_safe_release"]

@@ -1,6 +1,6 @@
 """One odd value is refused on its own; the rest of the lookup is still asked (#130).
 
-The fake Cisco refuses an out-of-pattern value or a raw `/` in a PID, so a request that
+The fake Cisco refuses an out-of-pattern value or a percent-encoded PID, so a request that
 arrives has already proved the envelope held. The hostile values are synthetic. A refusal
 never echoes the value, and the Audit log's counts never hold a PID.
 """
@@ -180,18 +180,28 @@ def test_an_estate_with_an_isr_router_and_a_switch_asks_for_both() -> None:
     answers = lookup(cisco, asking(GOOD, ROUTER, VIRTUAL))
 
     paths = cisco.paths()
-    assert "/supporttools/eox/rest/5/EOXByProductID/1/C9300-48P,ISR4451-X%2FK9,C9300v" in paths
+    assert "/supporttools/eox/rest/5/EOXByProductID/1/C9300-48P,ISR4451-X/K9,C9300v" in paths
     assert (
-        "/software/suggestion/v2/suggestions/releases/productIds/C9300-48P,ISR4451-X%2FK9,C9300v"
+        "/software/suggestion/v2/suggestions/releases/productIds/C9300-48P,ISR4451-X/K9,C9300v"
         in paths
     )
     compatible = "/software/suggestion/v2/suggestions/compatible/productId/"
-    assert f"{compatible}ISR4451-X%2FK9?pageIndex=1" in paths
-    assert not any("/K9" in path for path in paths)
+    assert f"{compatible}ISR4451-X/K9?pageIndex=1" in paths
+    assert not any("%" in path for path in paths)
     assert isinstance(answers.hardware_eox, EoxAnswer)
     assert [record.input_value for record in answers.hardware_eox.records] == [GOOD, ROUTER]
     assert isinstance(answers.compatible, CompatibleAnswers)
     assert [answer.product_id for answer in answers.compatible.answers] == [GOOD, ROUTER]
+
+
+def test_a_slashed_pid_echoed_with_trailing_whitespace_still_names_its_pid() -> None:
+    cisco = fake()
+    cisco.eox_pid[ROUTER] = {**eox_record(ROUTER), "EOXInputValue": f"{ROUTER} "}
+
+    answers = lookup(cisco, asking(ROUTER))
+
+    assert isinstance(answers.hardware_eox, EoxAnswer)
+    assert [record.input_value for record in answers.hardware_eox.records] == [ROUTER]
 
 
 def test_the_audit_counts_hold_numbers_only_never_a_pid() -> None:

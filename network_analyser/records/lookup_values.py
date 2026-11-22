@@ -10,12 +10,13 @@ tool means to send, not everything a device or Cisco might print, so an odd valu
 alone rather than smuggled into a URL. A refusal never echoes the value: the text could be
 hostile.
 
-How a licence-suffixed PID is sent (#130): `ISR4451-X/K9` is what `show inventory` prints
-for an ISR 4000, and the whole string is the PID Cisco knows, so it is kept as it is in every
-record. A PID may hold one slash followed by a short suffix, and nothing else that could
-change a URL. When the PID is put in a request path, that single slash is written as its
-percent code (`wire_pid`); no other character is ever encoded, so a percent sign in a value
-is refused, not decoded.
+How a licence-suffixed PID is sent (#130, #162): `ISR4451-X/K9` is what `show inventory`
+prints for an ISR 4000, and the whole string is the PID Cisco knows, so it is kept as it is in
+every record and put in a request path as it is, slash included. Cisco's gateway refuses the
+slash percent-encoded (`%2F` or `%252F`, HTTP 400) and answers it raw. A PID may hold one
+slash followed by a short suffix of letters, digits and hyphens, and nothing else, so that
+slash cannot add `..` or any other change to a URL. No character is ever encoded, so a percent
+sign in a value is refused, not decoded.
 """
 
 import re
@@ -56,8 +57,3 @@ def is_safe_release(value: object) -> bool:
 def is_safe_platform_alias(value: object) -> bool:
     """Say whether `value` is an openVuln `platformAlias` shape that may be sent."""
     return isinstance(value, str) and _PLATFORM_ALIAS.fullmatch(value) is not None
-
-
-def wire_pid(pid: str) -> str:
-    """Return a safe PID as it is written in a request path: its licence slash percent-encoded."""
-    return pid.replace("/", "%2F")

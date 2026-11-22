@@ -76,10 +76,10 @@ def test_an_isr_router_with_a_licence_suffix_is_asked_about() -> None:
     cisco, results = run(SWITCH, ROUTER)
 
     assert (
-        "/software/suggestion/v2/suggestions/releases/productIds/C9300-48P,ISR4451-X%2FK9"
+        "/software/suggestion/v2/suggestions/releases/productIds/C9300-48P,ISR4451-X/K9"
         in cisco.paths()
     )
-    assert any("compatible/productId/ISR4451-X%2FK9" in path for path in cisco.paths())
+    assert any("compatible/productId/ISR4451-X/K9?" in path for path in cisco.paths())
     assert [item.what_was_found for item in suggested_findings(results)] == [
         "Release 17.9.4a is not one of Cisco's Suggested Releases for PID C9300-48P: 17.9.5.",
         "Release 17.9.4a is not one of Cisco's Suggested Releases for PID ISR4451-X/K9: 17.9.5.",
@@ -90,7 +90,8 @@ def test_one_odd_pid_is_not_sent_and_its_device_reads_could_not_check() -> None:
     cisco, results = run(SWITCH, ROUTER, ODD)
 
     paths = "\n".join(cisco.paths())
-    assert "ISR4451-X%2FK9" in paths
+    assert "ISR4451-X/K9" in paths
+    assert "%" not in paths
     assert "C9300-48P" in paths
     assert "4451;X" not in paths
     assert " " not in paths
