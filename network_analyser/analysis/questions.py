@@ -13,7 +13,6 @@ the Finding says so (story 46). The PIDs asked about are the chassis PID, never 
 """
 
 from network_analyser.analysis.chassis import chassis_pid, nexus_series
-from network_analyser.analysis.patterns import valid_pid, valid_release
 from network_analyser.analysis.releases import family_of, normalise_release
 from network_analyser.records.analysis import (
     AnalysisInput,
@@ -23,6 +22,7 @@ from network_analyser.records.analysis import (
     OsType,
     ReleaseQuestion,
 )
+from network_analyser.records.lookup_values import is_safe_pid, is_safe_release
 from network_analyser.records.platform import Platform
 from network_analyser.records.topology import VisitedDevice
 from network_analyser.records.unknown import Unknown
@@ -80,7 +80,7 @@ def _add_device_pids(pids: set[str], data: AnalysisInput, device: VisitedDevice)
 
 
 def _add_pid(pids: set[str], item: HardwareItem) -> None:
-    if valid_pid(item.pid):
+    if is_safe_pid(item.pid):
         pids.add(item.pid)
 
 
@@ -90,7 +90,7 @@ def _release_question(data: AnalysisInput, device: VisitedDevice) -> ReleaseQues
     if os_type is None or not isinstance(device.software_version, str):
         return None
     release = normalise_release(device.software_version)
-    if not valid_release(release):
+    if not is_safe_release(release):
         return None
     family = nexus_series(data, device) if os_type is OsType.NX_OS else None
     return ReleaseQuestion(os_type, release, family)

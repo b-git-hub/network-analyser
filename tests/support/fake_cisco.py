@@ -9,10 +9,14 @@ All data here is synthetic: made-up releases, PIDs, ids and text. No Cisco reply
 
 `FakeOpener` stands in for `transport.open_https`, so the real transport's own checks (TLS
 context, timeouts, tunnel, redirect refusal, size cap) are tested without a socket.
+`FakeNetwork` is lower still: the real `open_https` and `http.client` run on in-memory sockets,
+so a test sees the bytes a proxy and Cisco would receive (the tunnel, #132).
 """
 
 import base64
+import io
 import json
+import ssl
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -75,6 +79,14 @@ class FakeCisco:
 
     compatible_last_page: dict[str, int] = field(default_factory=dict)
     """The `paginationResponseRecord.lastIndex` one PID reports."""
+
+    advisory_errors: dict[tuple[str, str, str | None], tuple[int, str]] = field(
+        default_factory=dict
+    )
+    """An HTTP status and error code (empty for a bare body) for one openVuln question."""
+
+    compatible_errors: dict[str, tuple[int, str]] = field(default_factory=dict)
+    """An HTTP status and error code (empty for a bare body) for one chassis PID."""
 
     page_records: dict[tuple[str, int], list[dict[str, Any]]] = field(default_factory=dict)
     """Records for one EoX page, when a test needs paging instead of the maps above."""
@@ -177,8 +189,10 @@ class FakeCisco:
         if not is_safe_release(release):
             msg = f"release left without its pattern: {release!r}"
             raise UnsafeValueSentError(msg)
-        advisories = self.advisories.get((os_type, release, params.get("platformAlias")), [])
-        return _json(200, {"advisories": advisories})
+        key = (os_type, release, params.get("platformAlias"))
+        if key in self.advisory_errors:
+            return _error(*self.advisory_errors[key])
+        return _json(200, {"advisories": self.advisories.get(key, [])})
 
     def _eox(self, path: str) -> HttpResponse:
         rest = path.removeprefix(EOX_PREFIX)
@@ -186,10 +200,9 @@ class FakeCisco:
         page_text, _, values_text = tail.partition("/")
         page = int(page_text)
         values = values_text.split(",")
+        if kind == "EOXByProductID":
+            values = [_pid_from_wire(value) for value in values]
         for value in values:
-            if kind == "EOXByProductID" and not is_safe_pid(value):
-                msg = f"PID left without its pattern: {value!r}"
-                raise UnsafeValueSentError(msg)
             if kind == "EOXBySWReleaseString" and not is_safe_release(value):
                 msg = f"release left without its pattern: {value!r}"
                 raise UnsafeValueSentError(msg)
@@ -216,12 +229,11 @@ class FakeCisco:
         )
 
     def _suggestions(self, path: str) -> HttpResponse:
-        values = path.removeprefix(SUGGESTION_PREFIX).split(",")
+        values = [
+            _pid_from_wire(value) for value in path.removeprefix(SUGGESTION_PREFIX).split(",")
+        ]
         entries: list[dict[str, Any]] = []
         for value in values:
-            if not is_safe_pid(value):
-                msg = f"PID left without its pattern: {value!r}"
-                raise UnsafeValueSentError(msg)
             if value in self.suggestions:
                 entries.append(
                     {
@@ -240,10 +252,10 @@ class FakeCisco:
 
     def _compatible(self, path: str) -> HttpResponse:
         rest = path.removeprefix(COMPATIBLE_PREFIX)
-        product_id, _, query = rest.partition("?")
-        if not is_safe_pid(product_id):
-            msg = f"PID left without its pattern: {product_id!r}"
-            raise UnsafeValueSentError(msg)
+        wire_id, _, query = rest.partition("?")
+        product_id = _pid_from_wire(wire_id)
+        if product_id in self.compatible_errors:
+            return _error(*self.compatible_errors[product_id])
         page_text = _params(query).get("pageIndex", "1")
         if not page_text.isdigit() or int(page_text) < 1:
             msg = f"pageIndex was not a page number: {page_text!r}"
@@ -277,6 +289,22 @@ def _check_authorization(request: HttpRequest) -> None:
         raise UnsafeValueSentError(msg)
 
 
+def _pid_from_wire(wire: str) -> str:
+    """Return the PID a path segment names, proving it left the PC in its safe wire form.
+
+    A licence suffix's `/` may only arrive as `%2F`: a raw `/` would change the path, and any
+    other `%` is not a PID character at all.
+    """
+    if "/" in wire:
+        msg = f"a PID reached the path with a raw slash: {wire!r}"
+        raise UnsafeValueSentError(msg)
+    pid = wire.replace("%2F", "/")
+    if not is_safe_pid(pid):
+        msg = f"PID left without its pattern: {wire!r}"
+        raise UnsafeValueSentError(msg)
+    return pid
+
+
 def _params(query: str) -> dict[str, str]:
     params: dict[str, str] = {}
     for part in query.split("&"):
@@ -284,6 +312,10 @@ def _params(query: str) -> dict[str, str]:
             key, _, value = part.partition("=")
             params[key] = value
     return params
+
+
+def _error(status: int, code: str) -> HttpResponse:
+    return _json(status, {"errorCode": code, "errorMessage": "synthetic"} if code else {})
 
 
 def _json(status: int, document: object, headers: tuple[tuple[str, str], ...] = ()) -> HttpResponse:
@@ -358,7 +390,7 @@ class FakeOpener:
         connect_timeout_s: float,
         read_timeout_s: float,
         context: object,
-        tunnel: tuple[str, int] | None,
+        proxy: tuple[str, int] | None,
     ) -> FakeConnection:
         """Record the opening, then return the connection or raise the scripted error."""
         self.opened.append(
@@ -368,10 +400,108 @@ class FakeOpener:
                 "connect_timeout_s": connect_timeout_s,
                 "read_timeout_s": read_timeout_s,
                 "context": context,
-                "tunnel": tunnel,
+                "proxy": proxy,
             }
         )
         if self.error is not None:
             raise self.error
         assert self.connection is not None
         return self.connection
+
+
+# -- the lowest seam: the real `open_https` on in-memory sockets ------------------------------
+
+CONNECT_ESTABLISHED = b"HTTP/1.1 200 Connection established\r\n\r\n"
+"""What a proxy says when it has opened the tunnel."""
+
+CISCO_REPLY = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"
+"""What the fake Cisco says through the tunnel (or directly)."""
+
+
+class FakeSocket:
+    """A socket with scripted incoming bytes that records everything sent on it."""
+
+    def __init__(self, incoming: bytes) -> None:
+        """Hold the bytes the other end will say."""
+        self._incoming = incoming
+        self.sent = bytearray()
+        self.closed = False
+
+    def settimeout(self, value: float | None) -> None:
+        """Accept a timeout."""
+
+    def setsockopt(self, *args: object) -> None:
+        """Accept an option."""
+
+    def sendall(self, data: bytes) -> None:
+        """Record what was sent."""
+        self.sent += data
+
+    def makefile(self, *_args: object, **_kwargs: object) -> io.BytesIO:
+        """Hand out the scripted incoming bytes."""
+        return io.BytesIO(self._incoming)
+
+    def close(self) -> None:
+        """Record the close."""
+        self.closed = True
+
+
+class FakeTlsContext:
+    """A TLS context that records who the handshake is for, and wraps a socket in a fake one.
+
+    It has the two settings `http.client` checks, so the real `HTTPSConnection` accepts it.
+    """
+
+    check_hostname = True
+    verify_mode = ssl.CERT_REQUIRED
+
+    def __init__(self, tls_reply: bytes) -> None:
+        """Hold the bytes the far end says once the handshake is done."""
+        self._tls_reply = tls_reply
+        self.server_names: list[str | None] = []
+        self.wrapped: list[FakeSocket] = []
+        self.tls_sockets: list[FakeSocket] = []
+
+    def wrap_socket(self, sock: FakeSocket, *, server_hostname: str | None = None) -> FakeSocket:
+        """Record the name the certificate would be checked against."""
+        self.server_names.append(server_hostname)
+        self.wrapped.append(sock)
+        wrapped = FakeSocket(self._tls_reply)
+        self.tls_sockets.append(wrapped)
+        return wrapped
+
+
+@dataclass
+class FakeNetwork:
+    """`socket.create_connection` and the TLS context, on in-memory sockets.
+
+    `connected` is every address the code under test tried to reach, so a test can say
+    that nothing but the proxy was ever dialled.
+    """
+
+    proxy_says: bytes = CONNECT_ESTABLISHED
+    cisco_says: bytes = CISCO_REPLY
+    connected: list[tuple[str, int]] = field(default_factory=list)
+    plain_sockets: list[FakeSocket] = field(default_factory=list)
+    context: FakeTlsContext = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Make the TLS context that answers as Cisco."""
+        self.context = FakeTlsContext(self.cisco_says)
+
+    def create_connection(
+        self, address: tuple[str, int], _timeout: float | None = None, *_args: object
+    ) -> FakeSocket:
+        """Record the address, and give back a socket that speaks as a proxy would."""
+        self.connected.append(address)
+        sock = FakeSocket(self.proxy_says)
+        self.plain_sockets.append(sock)
+        return sock
+
+    def sent_in_clear(self) -> bytes:
+        """Everything written on the plain connections, before any TLS."""
+        return b"".join(bytes(sock.sent) for sock in self.plain_sockets)
+
+    def sent_over_tls(self) -> bytes:
+        """Everything written after the handshake."""
+        return b"".join(bytes(sock.sent) for sock in self.context.tls_sockets)

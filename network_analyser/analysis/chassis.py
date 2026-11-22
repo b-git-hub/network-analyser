@@ -7,10 +7,10 @@ one there is no chassis PID, so nothing is looked up under a name Cisco does not
 Nexus series stays unconfirmed (story 46).
 """
 
-from network_analyser.analysis.patterns import valid_pid
 from network_analyser.analysis.releases import hardware_family
 from network_analyser.records.analysis import AnalysisInput, HardwareKind
 from network_analyser.records.collected import InventoryKind
+from network_analyser.records.lookup_values import is_safe_pid
 from network_analyser.records.platform import Platform
 from network_analyser.records.topology import VisitedDevice
 from network_analyser.records.unknown import Unknown
@@ -35,7 +35,7 @@ def _inventory_chassis(data: AnalysisInput, device: VisitedDevice) -> str | None
         if item.device != device.id:
             continue
         for hardware in item.items:
-            if hardware.kind is HardwareKind.CHASSIS and valid_pid(hardware.pid):
+            if hardware.kind is HardwareKind.CHASSIS and is_safe_pid(hardware.pid):
                 return hardware.pid
     part = data.collected_for(device.management_ip).inventory
     if part is None or isinstance(part, Unknown):
@@ -44,7 +44,7 @@ def _inventory_chassis(data: AnalysisInput, device: VisitedDevice) -> str | None
         if (
             entry.kind is InventoryKind.CHASSIS
             and isinstance(entry.pid, str)
-            and valid_pid(entry.pid)
+            and is_safe_pid(entry.pid)
         ):
             return entry.pid
     return None

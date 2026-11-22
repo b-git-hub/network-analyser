@@ -148,6 +148,13 @@ class Connection(Protocol):
         ...
 
 
+_NOT_FENCED: Final = "refused a host outside the Cisco fence"
+
+
+class NotFencedError(OSError):
+    """`open_https` was asked for a host or port outside the Cisco fence."""
+
+
 def client_context() -> ssl.SSLContext:
     """Return the TLS context: Cisco's certificate, checked against the Windows store."""
     context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -164,17 +171,32 @@ def open_https(  # noqa: PLR0913 (a seam with every setting explicit, not a publ
     connect_timeout_s: float,
     read_timeout_s: float,
     context: ssl.SSLContext,
-    tunnel: tuple[str, int] | None,
+    proxy: tuple[str, int] | None,
 ) -> Connection:
-    """Open the TLS connection, through `tunnel` when there is one, and set its read timeout.
+    """Open the TLS connection to Cisco, through the proxy at `proxy` when there is one.
+
+    `host` and `port` are always the Cisco host: the fence is checked again here, so it holds
+    whatever a caller passes. With a proxy, the tool dials the proxy, asks it with `CONNECT`
+    for `host:port`, and only then starts TLS, with the certificate checked against `host`.
+    The proxy never sees more than the Cisco host name and port. Without one, `host` is dialled
+    directly. The read timeout is set once the connection is open.
 
     Raises:
+        NotFencedError: `host` and `port` are not a fenced Cisco host and port. Nothing is dialled.
         OSError: the connection could not be opened. The transport maps it to fixed text.
         http.client.HTTPException: the proxy or Cisco answered with something unreadable.
     """
-    connection = http.client.HTTPSConnection(host, port, timeout=connect_timeout_s, context=context)
-    if tunnel is not None:
-        connection.set_tunnel(tunnel[0], tunnel[1])
+    if not is_fenced(host, port):
+        raise NotFencedError(_NOT_FENCED)
+    if proxy is None:
+        connection = http.client.HTTPSConnection(
+            host, port, timeout=connect_timeout_s, context=context
+        )
+    else:
+        connection = http.client.HTTPSConnection(
+            proxy[0], proxy[1], timeout=connect_timeout_s, context=context
+        )
+        connection.set_tunnel(host, port)
     connection.connect()
     if connection.sock is not None:
         connection.sock.settimeout(read_timeout_s)
@@ -212,7 +234,7 @@ class HttpsTransport:
     ) -> HttpResponse | TransportFailed:
         """Make the request, or say in fixed text why there is no reply."""
         if not is_fenced(request.host, request.port):
-            return TransportFailed("refused a host outside the Cisco fence")
+            return TransportFailed(_NOT_FENCED)
         if not _is_safe_path(request.path):
             return TransportFailed("refused a request path the tool did not build")
         target = resolve_proxy(self.proxy, system=self.system_proxy)
@@ -225,7 +247,7 @@ class HttpsTransport:
                 connect_timeout_s=CONNECT_TIMEOUT_S,
                 read_timeout_s=request.timeout_s,
                 context=client_context(),
-                tunnel=None if target is None else (target.host, target.port),
+                proxy=None if target is None else (target.host, target.port),
             )
             try:
                 connection.request(
@@ -253,6 +275,8 @@ def _failure(  # noqa: PLR0911 (one return per fixed reason, so each is reviewab
     error: OSError | http.client.HTTPException,
 ) -> TransportFailed:
     """Map a connection failure to fixed text. Never its own text, which can quote a reply."""
+    if isinstance(error, NotFencedError):
+        return TransportFailed(_NOT_FENCED)
     if isinstance(error, ssl.SSLCertVerificationError):
         return TransportFailed("Cisco's certificate was not trusted")
     if isinstance(error, ssl.SSLError):
