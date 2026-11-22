@@ -72,7 +72,13 @@ _SSH_VERSION: Final = re.compile(r"^ip\s+ssh\s+version\s+([12])\s*$", re.IGNOREC
 _AAA_LOGIN: Final = re.compile(r"^aaa\s+authentication\s+login\s+\S+\s+(.*)$", re.IGNORECASE)
 _AAA_AUTHORIZATION: Final = re.compile(r"^aaa\s+authorization\b", re.IGNORECASE)
 _AAA_ACCOUNTING: Final = re.compile(r"^aaa\s+accounting\b", re.IGNORECASE)
-_SECRET_LINE: Final = re.compile(r"(?<![\w-])(?:password|secret)\s+([0-9])(?=\s|$)", re.IGNORECASE)
+_SECRET_LINE: Final = re.compile(
+    r"(?<![\w-])(?:password|secret)\s+(?:level\s+\d+\s+)?([0-9])(?=\s|$)", re.IGNORECASE
+)
+_KEY_LINE: Final = re.compile(
+    r"(?<![\w-])(?:key|key-string|md5|authentication-key)\s+([0-9])(?=\s+\S)", re.IGNORECASE
+)
+_CLEARTEXT_LINE_PASSWORD: Final = re.compile(r"^password\s+(?![0-9](?:\s|$))\S", re.IGNORECASE)
 _ENABLE_SECRET: Final = re.compile(r"^enable\s+secret(?:\s|$)", re.IGNORECASE)
 _ENABLE_PASSWORD: Final = re.compile(r"^enable\s+password(?:\s|$)", re.IGNORECASE)
 _SNMP_COMMUNITY: Final = re.compile(r"^snmp-server\s+community\s+(\S+)(.*)$", re.IGNORECASE)
@@ -195,14 +201,39 @@ def read_config_facts(platform: Platform, text: str) -> tuple[ConfigFact, ...]:
 
 
 def _secret_facts(lines: list[str]) -> dict[str, int]:
-    """Count the numbered `password`/`secret` lines by their type number."""
+    """Count secrets by their type number: `password`/`secret` lines, keys, cleartext lines.
+
+    Three forms are read. A `password` or `secret` line carries a type number, with an optional
+    `level N` before it. A `key`, `key-string`, `md5` or `authentication-key` keyword followed
+    by a type number and a value is a typed key (a bare `key 7` is a key id, and an NTP key
+    line puts its key number there, so neither counts). A `password` line under `line` with no
+    type number is cleartext, because IOS prints it that way without `service
+    password-encryption`.
+    """
     counts = dict.fromkeys((number for number, _ in _SECRET_TYPES), 0)
     for line in lines:
-        for match in _SECRET_LINE.finditer(line):
-            number = int(match.group(1))
-            if number in counts:
-                counts[number] += 1
+        patterns = (_SECRET_LINE,) if _is_ntp_line(line) else (_SECRET_LINE, _KEY_LINE)
+        for pattern in patterns:
+            for match in pattern.finditer(line):
+                number = int(match.group(1))
+                if number in counts:
+                    counts[number] += 1
+    counts[0] += _cleartext_line_passwords(lines)
     return {name: counts[number] for number, name in _SECRET_TYPES}
+
+
+def _is_ntp_line(line: str) -> bool:
+    return line.strip().lower().startswith("ntp ")
+
+
+def _cleartext_line_passwords(lines: list[str]) -> int:
+    """How many `line` blocks hold a `password` with no type number."""
+    return sum(
+        1
+        for _, _, settings in _line_blocks(lines)
+        for setting in settings
+        if _CLEARTEXT_LINE_PASSWORD.match(setting)
+    )
 
 
 def _source_routing(lines: list[str]) -> bool:
