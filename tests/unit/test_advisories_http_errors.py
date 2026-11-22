@@ -328,3 +328,21 @@ def test_an_unknown_403_from_the_token_endpoint_is_not_a_rejected_key() -> None:
     assert answers.tally.token.outcome is TokenOutcome.UNAVAILABLE
     assert fake.token_calls() == 1
     assert all("rejected" not in item.reason for item in answers.advisories)  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize("status", [400, 403])
+def test_no_data_found_on_a_status_148_did_not_confirm_is_not_an_empty_answer(
+    status: int,
+) -> None:
+    """`NO_DATA_FOUND` means an empty answer only on 200 and 404, the statuses #148 confirmed.
+
+    On any other status the reply contradicts itself, so the release reads unavailable with
+    the HTTP status rather than as "no Advisories" (#155).
+    """
+    fake = FakeCisco(advisory_errors={GOOD: (status, "NO_DATA_FOUND")})
+
+    answers = lookup(fake, questions(releases=(ReleaseQuestion(CiscoOsType.IOS_XE, "17.9.4a"),)))
+
+    (answer,) = answers.advisories
+    assert isinstance(answer, AdvisoriesAnswer)
+    assert (answer.advisories, answer.unavailable) == ((), f"HTTP {status}")

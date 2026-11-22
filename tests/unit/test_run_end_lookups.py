@@ -18,6 +18,7 @@ from network_analyser import backup_store, device_gateway
 from network_analyser.advisories import HttpResponse
 from network_analyser.cli import ExitCode, run_end
 from network_analyser.credentials import CredentialSets, Secret
+from network_analyser.records.analysis import CiscoAnswers, SourceUnavailable
 from network_analyser.records.device import DeviceRecord
 from network_analyser.records.identity import Alias
 from tests.support import fake_age
@@ -240,7 +241,8 @@ def test_a_rejected_key_gives_exactly_one_attention_line_and_exit_1(
     lines = [line for line in got.out.splitlines() if REJECTED in line]
     assert len(lines) == 1, got.out
     assert "cisco-key set" in lines[0]
-    assert len([line for line in got.out.splitlines() if "did not run:" in line]) == 1
+    assert lines[0].startswith("  Cisco lookups stopped:")
+    assert not [line for line in got.out.splitlines() if "did not run:" in line]
     assert (Path(_run_folder()) / "backups").is_dir()
 
 
@@ -556,3 +558,39 @@ def test_a_failure_nobody_expected_still_records_what_was_sent(
     written = (_run_folder() / "audit.log").read_text(encoding="utf-8")
     for secret in (CLIENT_ID, CLIENT_SECRET, TOKEN, PASS):
         assert secret not in written
+
+
+def test_two_software_suggestion_sources_unavailable_give_one_attention_line() -> None:
+    """Hand-built answers exercise the shared source name the two calls have (#131, #155)."""
+    lines = run_end.attention_lines(
+        CiscoAnswers(
+            suggestions=SourceUnavailable("Cisco returned HTTP 400"),
+            compatible=SourceUnavailable("Cisco returned HTTP 503"),
+        )
+    )
+
+    assert lines == ("Cisco Software Suggestion did not run: Cisco returned HTTP 400.",)
+
+
+def test_a_rejected_compatible_source_still_gives_the_key_line_after_another_failure() -> None:
+    """The rejected case is decided first, so a shared source name cannot hide it (#155)."""
+    lines = run_end.attention_lines(
+        CiscoAnswers(
+            suggestions=SourceUnavailable("Cisco returned HTTP 400"),
+            compatible=SourceUnavailable(REJECTED),
+        )
+    )
+
+    assert len(lines) == 2, lines
+    assert lines[0].startswith(f"Cisco lookups stopped: {REJECTED}.")
+    assert "cisco-key set" in lines[0]
+    assert lines[1] == "Cisco Software Suggestion did not run: Cisco returned HTTP 400."
+
+
+def test_a_rejected_key_never_says_the_lookups_did_not_run_after_an_answer() -> None:
+    """A rejected key can stop a later source, so the line says the lookups stopped (#155)."""
+    (line,) = run_end.attention_lines(CiscoAnswers(compatible=SourceUnavailable(REJECTED)))
+
+    assert line.startswith(f"Cisco lookups stopped: {REJECTED}.")
+    assert "did not run" not in line
+    assert "cisco-key set" in line

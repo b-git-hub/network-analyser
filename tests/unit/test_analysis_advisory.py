@@ -758,3 +758,29 @@ def test_every_advisory_check_runs_when_the_source_answers() -> None:
     runs = {run.check.id: run for run in results.checks}
     assert runs["advisory-openvuln"].ran is True
     assert runs["advisory-could-not-check"].ran is True
+
+
+@pytest.mark.parametrize(
+    ("code", "reason"),
+    [
+        (
+            "INVALID_IOS_VERSION",
+            "Cisco openVuln does not know release 17.9.4a (INVALID_IOS_VERSION)",
+        ),
+        ("HTTP 404", "Cisco openVuln could not answer for release 17.9.4a (HTTP 404)"),
+    ],
+)
+def test_a_per_release_failure_says_does_not_know_only_for_an_unknown_release(
+    code: str, reason: str
+) -> None:
+    """Every other per-release failure reads "could not answer", not "does not know" (#155)."""
+    results = _results(
+        _device(A, "S1", "sw-a", release="17.9.4a"),
+        answers=(_answer(OsType.IOS_XE, "17.9.4a", unavailable=code),),
+    )
+
+    (advice,) = results.advice
+    assert advice.advisory_outcome.kind is AdvisoryOutcomeKind.COULD_NOT_CHECK
+    assert advice.advisory_outcome.reason == reason
+    (finding,) = _could_not_check(results)
+    assert finding.what_was_found == f"Could not check the release's Advisories: {reason}."

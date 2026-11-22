@@ -47,7 +47,7 @@ Decided on [Latest Release and Upgrade Target, given what Cisco provides](https:
 - **Software Suggestion** is asked for the Latest Release through its compatible-releases call, which takes **one chassis PID per call** and is paged, at most 20 pages per PID. The "10 PIDs per Suggestion call" batch applies only to the Suggested-releases call.
 - **`currentRelease` is never sent.** It would pair a model with the release it runs, and every value goes out on its own.
 
-## Amendment (2026-11-22)
+## Amendment (2026-11-21)
 
 Decided on [one PID and release pattern for analysis and advisories](https://github.com/b-git-hub/network-analyser/issues/130). The decision is unchanged; two points of wording change.
 
