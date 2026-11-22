@@ -23,7 +23,8 @@ from network_analyser.records.analysis import (
 from network_analyser.records.device import DeviceRecord
 from network_analyser.records.platform import Platform
 from network_analyser.records.topology import NOT_AVAILABLE, AnalysisResults
-from tests.support.topology_records import visited
+from tests.support.analysis_records import collected_of
+from tests.support.topology_records import chassis_inventory, visited
 
 A = "192.0.2.1"
 B = "192.0.2.2"
@@ -31,7 +32,8 @@ C = "192.0.2.3"
 MODEL = "C9300-48P"
 OTHER_MODEL = "C9300-24T"
 LINE_CARD = "C9300-NM-8X"
-NEXUS_MODEL = "N9K-C93180YC-FX"
+NEXUS_MODEL = "C93180YC-FX"
+NEXUS_CHASSIS = "N9K-C93180YC-FX"
 NEWER = "running release is newer than Cisco's list"
 
 
@@ -43,8 +45,10 @@ def _device(  # noqa: PLR0913 (every device field the tests read, by name)
     platform: Platform = Platform.IOS_XE,
     model: str = MODEL,
     release: str = "17.12.4",
+    chassis: str | None = None,
 ) -> DeviceRecord:
-    record = visited(address, serial, hostname, platform=platform)
+    inventory = chassis_inventory(chassis) if chassis is not None else None
+    record = visited(address, serial, hostname, platform=platform, inventory=inventory)
     version = record.version
     assert version is not None
     return replace(record, version=replace(version, model=model, software_version=release))
@@ -69,6 +73,7 @@ def _results(
     return analysis.analyse(
         AnalysisInput(
             topology=topology.build(records),
+            collected=collected_of(*records),
             answers=CiscoAnswers(compatible=compatible),
         )
     )
@@ -123,11 +128,12 @@ def test_an_old_nxos_train_is_the_devices_own_train() -> None:
             "nx-a",
             platform=Platform.NX_OS,
             model=NEXUS_MODEL,
+            chassis=NEXUS_CHASSIS,
             release="7.0(3)I7(9)",
         ),
         compatible=(
             _compatible(
-                NEXUS_MODEL,
+                NEXUS_CHASSIS,
                 ("7.0(3)I7(10)", "MD"),
                 ("10.4(8)", "ED"),
             ),

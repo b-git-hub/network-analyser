@@ -77,7 +77,7 @@ class FakeCisco:
     compatible_pages: dict[tuple[str, int], list[dict[str, Any]]] = field(default_factory=dict)
     """Compatible-release entries for one PID's page, when a test needs paging."""
 
-    compatible_last_page: dict[str, int] = field(default_factory=dict)
+    compatible_last_page: dict[str, object] = field(default_factory=dict)
     """The `paginationResponseRecord.lastIndex` one PID reports."""
 
     advisory_errors: dict[tuple[str, str, str | None], tuple[int, str]] = field(
@@ -91,7 +91,7 @@ class FakeCisco:
     page_records: dict[tuple[str, int], list[dict[str, Any]]] = field(default_factory=dict)
     """Records for one EoX page, when a test needs paging instead of the maps above."""
 
-    last_page: dict[str, int] = field(default_factory=dict)
+    last_page: dict[str, object] = field(default_factory=dict)
     """The `LastIndex` one EoX lookup kind reports."""
 
     scripted: list[tuple[str, HttpResponse | TransportFailed]] = field(default_factory=list)
@@ -100,6 +100,8 @@ class FakeCisco:
     token_status: int = 200
     token_error: str = ""
     token_headers: tuple[tuple[str, str], ...] = ()
+    token_expires_in: object = 3600
+    """The token's `expires_in`, in seconds; any other shape stands for an odd reply."""
 
     outage: bool = False
     """Answer every request as if the connection failed."""
@@ -176,7 +178,7 @@ class FakeCisco:
             {
                 "access_token": TOKEN,
                 "token_type": "Bearer",
-                "expires_in": 3600,
+                "expires_in": self.token_expires_in,
                 "scope": "customscope",
             },
         )
@@ -335,14 +337,32 @@ class FakeResponse:
     status: int
     body: bytes = b"{}"
     headers: tuple[tuple[str, str], ...] = ()
+    on_read: Callable[[], None] | None = None
+    """Called on every read, so a test can let time pass while a reply trickles in."""
+    reads: list[int] = field(default_factory=list)
+    """The size asked for by each read, in order."""
+    _position: int = 0
 
     def getheaders(self) -> list[tuple[str, str]]:
         """Return the reply headers."""
         return list(self.headers)
 
     def read(self, amt: int | None = None) -> bytes:
-        """Return at most `amt` bytes of the body."""
-        return self.body if amt is None else self.body[:amt]
+        """Return at most `amt` of the body that has not been read yet."""
+        end = len(self.body) if amt is None else self._position + amt
+        return self._take(end)
+
+    def read1(self, amt: int) -> bytes:
+        """Return at most `amt` bytes, as one read of the socket would."""
+        return self._take(self._position + amt)
+
+    def _take(self, end: int) -> bytes:
+        self.reads.append(end - self._position)
+        if self.on_read is not None:
+            self.on_read()
+        chunk = self.body[self._position : end]
+        self._position += len(chunk)
+        return chunk
 
 
 @dataclass

@@ -224,6 +224,7 @@ def test_every_shipped_check_runs_and_one_advice_record_exists_per_visited_devic
         "config-ntp-synchronised",
         "config-snmpv3-user-crypto",
         "config-ssh-key-size",
+        "lifecycle-hardware-eox",
     }
     assert [advice.device for advice in results.advice] == ["dev-S1", "dev-S2"]
 

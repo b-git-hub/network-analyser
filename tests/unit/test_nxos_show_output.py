@@ -285,6 +285,36 @@ def test_a_printed_bit_count_is_read_too() -> None:
     assert _value(_collected({SSH: reply}).ssh).key_bits == 4096
 
 
+_ECDSA_SECTION = (
+    "ecdsa Keys generated:Thu Jan  1 00:00:00 2026\n"
+    "\n"
+    "ecdsa-sha2-nistp521 AAAAE2VjZHNhLXNoYTItbmlzdHA1MjFTRVNUS0VZTUFURVJJQUw=\n"
+    "\n"
+    "bitcount:521\n"
+    "fingerprint:\n"
+    "SHA256:CANARY-cfg-142-fingerprint\n"
+)
+
+
+def test_an_ecdsa_only_key_cannot_decide_the_rsa_size() -> None:
+    reply = _ECDSA_SECTION + "\ncould not retrieve rsa key information\n"
+
+    assert _collected({SSH: reply}).ssh == Unknown(f"{SSH}: not understood")
+
+
+def test_the_rsa_size_is_read_from_the_rsa_section_not_another_key_type() -> None:
+    rsa = nxos_show.ssh_key_reply(2048)
+
+    for reply in (rsa + "\n" + _ECDSA_SECTION, _ECDSA_SECTION + "\n" + rsa):
+        assert _value(_collected({SSH: reply}).ssh).key_bits == 2048
+
+
+def test_a_printed_bit_count_in_the_rsa_section_wins_over_the_other_sections() -> None:
+    reply = _ECDSA_SECTION + "\nrsa Keys generated:Thu Jan  1 00:00:00 2026\nbitcount:3072\n"
+
+    assert _value(_collected({SSH: reply}).ssh).key_bits == 3072
+
+
 def test_a_key_that_is_not_rsa_cannot_decide_the_size() -> None:
     reply = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTKEYMATERIALONLY\n"
 
@@ -303,6 +333,23 @@ def test_guest_shell_absent_is_false() -> None:
 
 def test_guest_shell_present_is_true() -> None:
     assert _value(_collected({GUESTSHELL: nxos_show.GUESTSHELL_PRESENT}).guest_shell) is True
+
+
+def test_a_deactivated_guest_shell_is_not_present() -> None:
+    for reply in ("guestshell is deactivated\n", "Guest Shell: Deactivated\n"):
+        assert _value(_collected({GUESTSHELL: reply}).guest_shell) is False
+
+
+def test_a_deactivated_guest_shell_in_the_virtual_service_list_is_not_present() -> None:
+    listed = nxos_show.VIRTUAL_SERVICE_LIST_PRESENT.replace("Activated", "Deactivated")
+    collected = _collected({GUESTSHELL: nxos_json.INVALID, VIRTUAL_SERVICE_LIST: listed})
+
+    assert _value(collected.guest_shell) is False
+
+
+def test_an_activated_guest_shell_is_still_present() -> None:
+    for reply in ("guestshell is activated\n", "Guest Shell: Activated\n"):
+        assert _value(_collected({GUESTSHELL: reply}).guest_shell) is True
 
 
 def test_a_refused_first_command_falls_back_to_the_virtual_service_list() -> None:

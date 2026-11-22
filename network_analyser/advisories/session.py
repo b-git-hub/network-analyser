@@ -2,10 +2,16 @@
 
 The token is requested at most once per Session, and only when a call needs it. An auth
 rejection from Cisco stops the Session: no further request is made, so a bad or revoked key is
-never hammered (story 36). A key problem is only a 401, an auth-coded 403 or a 400
-`invalid_client` from the token endpoint; any other 4xx from `apix.cisco.com` fails that one
-call and the Session carries on (#131). Only a rate limit, a 5xx or a connection failure is
-retried, and only once, after `Retry-After` when Cisco sends it (story 19).
+never hammered (story 36). A key problem is only a 401 or a 400 `invalid_client` from the
+token endpoint, or an auth-coded 403; any other 4xx from `apix.cisco.com` fails that one
+call and the Session carries on (#131). Only a rate limit, a 5xx or a connection failure that
+can pass is retried, and only once, after `Retry-After` when Cisco sends it and after the
+pacing wait (story 19).
+
+A 401 from `apix.cisco.com` comes after a token was issued, so it means the token expired, not
+that the key is bad (#133). The spec allows one token a Run, so a second is never requested:
+the Session stops, and says so in fixed text that never blames the key. It also stops by
+itself shortly before the token's `expires_in` runs out, so a long Run does not reach the 401.
 
 Everything kept for the Audit log is a count (`CiscoCallTally`); the client ID, the secret and
 the token never leave this object except as the `Authorization` header of a request. All three
@@ -20,6 +26,7 @@ from enum import Enum, unique
 from typing import Final
 
 from network_analyser.advisories.fence import API_HOST, TOKEN_HOST, TOKEN_PATH
+from network_analyser.advisories.numbers import whole_number
 from network_analyser.advisories.pacing import Pacer, retry_delay
 from network_analyser.advisories.proxy import ProxyConfig
 from network_analyser.advisories.transport import (
@@ -53,6 +60,13 @@ RATE_LIMIT_CODES: Final = frozenset({"ERR_403_DEVELOPER_OVER_QPS", "ERR_403_DEVE
 REJECTED: Final = "Cisco rejected the API key"
 """Fixed text for a refused key; the Run turns it into a Needs-attention line (story 36)."""
 
+TOKEN_EXPIRED: Final = "Cisco's token expired"  # noqa: S105 (fixed text, not a secret)
+"""Fixed text for a token that ran out mid-Run. It never says the key was rejected, because it
+was not, and the Run never tells the operator to run `cisco-key set` for it (#133)."""
+
+TOKEN_MARGIN_S: Final = 30.0
+"""No call is sent in the last seconds of the token's life, so none is cut off by its expiry."""
+
 _ERROR_CODE: Final = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
 """Cisco's error codes are letters, digits, `_`, `.` and `-`; nothing else is ever shown."""
 
@@ -79,6 +93,7 @@ class CallOutcome(Enum):
 
     OK = "ok"
     REJECTED = "rejected"
+    TOKEN_EXPIRED = "token expired"  # noqa: S105 (an outcome name, never a secret)
     UNAVAILABLE = "unavailable"
     CALL_FAILED = "call failed"
 
@@ -89,7 +104,9 @@ class Call:
 
     Attributes:
         outcome: ok; rejected (the key is not usable, never retried, stops every call);
-            call failed (Cisco refused this one call, so the others carry on); or unavailable.
+            token expired (a 401 after the token was issued, or no time left on it: nothing
+            more is sent, and the key is not blamed); call failed (Cisco refused this one
+            call, so the others carry on); or unavailable.
         response: the reply, when one came.
         reason: fixed text for an unavailable call.
         retryable: whether the single retry may be made (a limit, a 5xx or no connection).
@@ -126,6 +143,8 @@ class Session:
         self._token_result: TokenResult | None = None
         self._token_reason = ""
         self._auth_rejected = False
+        self._token_expired = False
+        self._expires_at: float | None = None
         self._counts: dict[CiscoEndpoint, list[int]] = {
             endpoint: [0, 0, 0, 0] for endpoint in CiscoEndpoint
         }
@@ -143,6 +162,18 @@ class Session:
         """Whether Cisco refused the key, so nothing more may be sent."""
         return self._auth_rejected
 
+    @property
+    def token_expired(self) -> bool:
+        """Whether the token ran out, so nothing more may be sent (#133)."""
+        return self._token_expired
+
+    @property
+    def stop_reason(self) -> str | None:
+        """Why no further call will be sent, in fixed text; None while calls may go on."""
+        if self._auth_rejected:
+            return REJECTED
+        return TOKEN_EXPIRED if self._token_expired else None
+
     def token(self) -> TokenResult:
         """Return the token request's result, requesting the token at most once."""
         if self._token_result is None:
@@ -150,9 +181,13 @@ class Session:
         return self._token_result
 
     def tally(self) -> CiscoCallTally:
-        """Return the counts for the Audit log: counts only, never a value or a secret."""
+        """Return the counts for the Audit log: counts only, never a value or a secret.
+
+        It never asks for the token: a Session that stopped before the token was requested
+        says `not requested`.
+        """
         return CiscoCallTally(
-            token=self.token(),
+            token=self._token_result or TokenResult(TokenOutcome.NOT_REQUESTED),
             endpoints=tuple(
                 EndpointUse(
                     endpoint=endpoint,
@@ -223,6 +258,9 @@ class Session:
         self._token = Secret(token)
         if self._scan is not None:
             self._scan.watch(self._token)
+        lifetime = _expires_in(reply.response)
+        if lifetime is not None:
+            self._expires_at = self._pacer.now() + lifetime - TOKEN_MARGIN_S
         return TokenResult(TokenOutcome.OK, reply.response.status)
 
     def _call(
@@ -230,6 +268,8 @@ class Session:
     ) -> Call:
         if self._auth_rejected:
             return Call(CallOutcome.REJECTED, reason=REJECTED)
+        if self._token_expired:
+            return Call(CallOutcome.TOKEN_EXPIRED, reason=TOKEN_EXPIRED)
         token = self.token()
         if self._token is None or token.outcome is not TokenOutcome.OK:
             return Call(CallOutcome.UNAVAILABLE, reason=self._token_reason)
@@ -244,42 +284,58 @@ class Session:
             ),
             max_bytes=DEFAULT_MAX_REPLY_BYTES,
         )
-        reply = self._send(endpoint, request)
-        if reply.response is not None:
-            self._counts[endpoint][1] += values
+        reply = self._send(endpoint, request, values=values)
+        if reply.outcome is CallOutcome.OK:
             self._counts[endpoint][3] += pages
         if reply.outcome is CallOutcome.REJECTED:
             self._auth_rejected = True
             self._token_reason = REJECTED
+        if reply.outcome is CallOutcome.TOKEN_EXPIRED:
+            self._token_expired = True
         return reply
 
-    def _send(self, endpoint: CiscoEndpoint, request: HttpRequest) -> Call:
+    def _send(self, endpoint: CiscoEndpoint, request: HttpRequest, *, values: int = 0) -> Call:
         self._pacer.ready(endpoint)
-        reply = self._attempt(endpoint, request, retry=False)
+        reply = self._attempt(endpoint, request, retry=False, values=values)
         if not _may_retry(reply):
             return reply
         delay = retry_delay(_retry_after(reply.response))
         if delay is None:
             return Call(CallOutcome.UNAVAILABLE, reply.response, "Cisco asked for a long wait")
         self._pacer.back_off(delay)
-        return self._attempt(endpoint, request, retry=True)
+        self._pacer.ready(endpoint)
+        return self._attempt(endpoint, request, retry=True, values=values)
 
-    def _attempt(self, endpoint: CiscoEndpoint, request: HttpRequest, *, retry: bool) -> Call:
-        self._counts[endpoint][0] += 1
+    def _attempt(
+        self, endpoint: CiscoEndpoint, request: HttpRequest, *, retry: bool, values: int
+    ) -> Call:
+        if self._token_has_run_out(endpoint):
+            return Call(CallOutcome.TOKEN_EXPIRED, reason=TOKEN_EXPIRED)
+        counts = self._counts[endpoint]
+        counts[0] += 1
         if retry:
-            self._counts[endpoint][2] += 1
+            counts[2] += 1
+        else:
+            counts[1] += values
         reply = self._transport(request)
         if isinstance(reply, TransportFailed):
-            return Call(CallOutcome.UNAVAILABLE, None, reply.reason, retryable=True)
+            return Call(CallOutcome.UNAVAILABLE, None, reply.reason, retryable=reply.retryable)
         return _classified(endpoint, reply)
+
+    def _token_has_run_out(self, endpoint: CiscoEndpoint) -> bool:
+        """Whether the token has no safe time left, judged just before a request is sent."""
+        if endpoint is CiscoEndpoint.TOKEN or self._expires_at is None:
+            return False
+        return self._pacer.now() >= self._expires_at
 
 
 def _classified(endpoint: CiscoEndpoint, reply: HttpResponse) -> Call:
     """Say what one reply means: only a key problem is `REJECTED`, which stops every call.
 
-    A 401, an auth-coded 403 and, from the token endpoint, a 400 `invalid_client` mean the key
-    is not usable. A rate limit and a 5xx may be tried once more. Any other client error is that
-    one call's failure: `CALL_FAILED` from `apix.cisco.com`, never a rejected key (#131).
+    A 401 from the token endpoint, an auth-coded 403 and a 400 `invalid_client` there mean the
+    key is not usable. A 401 from `apix.cisco.com` comes after a token was issued, so it is an
+    expired token (#133). A rate limit and a 5xx may be tried once more. Any other client error
+    is that one call's failure: `CALL_FAILED` from `apix.cisco.com`, never a rejected key (#131).
     """
     if reply.status == _HTTP_OK:
         return Call(CallOutcome.OK, reply)
@@ -294,12 +350,16 @@ def _classified(endpoint: CiscoEndpoint, reply: HttpResponse) -> Call:
     return Call(CallOutcome.UNAVAILABLE, reply, reason)
 
 
-def _key_or_limit(endpoint: CiscoEndpoint, reply: HttpResponse) -> Call | None:
+def _key_or_limit(  # noqa: PLR0911 (one return per reply shape, each named)
+    endpoint: CiscoEndpoint, reply: HttpResponse
+) -> Call | None:
     """Return the call for a key problem or a rate limit, or None for any other status."""
     rejected = Call(CallOutcome.REJECTED, reply, REJECTED)
     limited = Call(CallOutcome.UNAVAILABLE, reply, "Cisco rate limited the calls", retryable=True)
     if reply.status == _HTTP_UNAUTHORIZED:
-        return rejected
+        if endpoint is CiscoEndpoint.TOKEN:
+            return rejected
+        return Call(CallOutcome.TOKEN_EXPIRED, reply, TOKEN_EXPIRED)
     if reply.status == _HTTP_TOO_MANY_REQUESTS:
         return limited
     if reply.status == _HTTP_FORBIDDEN:
@@ -323,6 +383,15 @@ def _may_retry(reply: Call) -> bool:
 
 def _retry_after(response: HttpResponse | None) -> str | None:
     return None if response is None else header(response, "Retry-After")
+
+
+def _expires_in(response: HttpResponse) -> int | None:
+    """The seconds the token lives, when the reply says so as a plain whole number."""
+    try:
+        document = json.loads(response.body)
+    except ValueError, RecursionError:
+        return None
+    return whole_number(document.get("expires_in")) if isinstance(document, dict) else None
 
 
 def _status(response: HttpResponse | None) -> int | None:

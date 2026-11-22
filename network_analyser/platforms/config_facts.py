@@ -10,9 +10,14 @@ read exactly these.
 """
 
 import re
+from dataclasses import dataclass
+from ipaddress import ip_address
+from itertools import pairwise
 from typing import Final
 
+from network_analyser.platforms.routing_auth import routing_authentication_missing
 from network_analyser.records import Platform
+from network_analyser.records.analysis import SNMP_V3_USER_CRYPTO
 from network_analyser.records.config_facts import (
     AAA_ACCOUNTING,
     AAA_AUTHORIZATION,
@@ -66,18 +71,28 @@ from network_analyser.records.unknown import Unknown
 _LINE_HEADER: Final = re.compile(r"line\s+(con(?:sole)?|vty|aux|tty)\b", re.IGNORECASE)
 _TRANSPORT_INPUT: Final = re.compile(r"transport\s+input\s+(.+)", re.IGNORECASE)
 _ACCESS_CLASS_IN: Final = re.compile(r"^access-class\s+\S+\s+in(?:\s|$)", re.IGNORECASE)
-_EXEC_TIMEOUT: Final = re.compile(r"^exec-timeout\s+(\S+)", re.IGNORECASE)
+_EXEC_TIMEOUT: Final = re.compile(r"^exec-timeout\s+(\S+)(?:\s+(\S+))?", re.IGNORECASE)
 _SSH_VERSION: Final = re.compile(r"^ip\s+ssh\s+version\s+([12])\s*$", re.IGNORECASE)
 _AAA_LOGIN: Final = re.compile(r"^aaa\s+authentication\s+login\s+\S+\s+(.*)$", re.IGNORECASE)
-_AAA_AUTHORIZATION: Final = re.compile(r"^aaa\s+authorization\b", re.IGNORECASE)
+_AAA_ENABLE: Final = re.compile(r"^aaa\s+authentication\s+enable\s+\S+\s+(.*)$", re.IGNORECASE)
+_AAA_AUTHORIZATION: Final = re.compile(r"^aaa\s+authorization\b(.*)$", re.IGNORECASE)
+_NXAPI_HTTP_PORT: Final = re.compile(r"^nxapi\s+http\s+port\s+\d+\s*$", re.IGNORECASE)
 _AAA_ACCOUNTING: Final = re.compile(r"^aaa\s+accounting\b", re.IGNORECASE)
-_SECRET_LINE: Final = re.compile(r"(?<![\w-])(?:password|secret)\s+([0-9])(?=\s|$)", re.IGNORECASE)
+_SECRET_LINE: Final = re.compile(
+    r"(?<![\w-])(?:password|secret)\s+(?:level\s+\d+\s+)?([0-9])(?=\s|$)", re.IGNORECASE
+)
+_KEY_LINE: Final = re.compile(
+    r"(?<![\w-])(?:key|key-string|md5|authentication-key)\s+([0-9])(?=\s+\S)", re.IGNORECASE
+)
+_CLEARTEXT_LINE_PASSWORD: Final = re.compile(r"^password\s+(?![0-9](?:\s|$))\S", re.IGNORECASE)
 _ENABLE_SECRET: Final = re.compile(r"^enable\s+secret(?:\s|$)", re.IGNORECASE)
 _ENABLE_PASSWORD: Final = re.compile(r"^enable\s+password(?:\s|$)", re.IGNORECASE)
 _SNMP_COMMUNITY: Final = re.compile(r"^snmp-server\s+community\s+(\S+)(.*)$", re.IGNORECASE)
 _SNMP_USER: Final = re.compile(r"^snmp-server\s+user\s+\S+\s+(.*)$", re.IGNORECASE)
 _SNMP_GROUP: Final = re.compile(r"^snmp-server\s+group\s+\S+\s+(.*)$", re.IGNORECASE)
 _DEFAULT_COMMUNITY_NAMES: Final = frozenset({"public", "private"})
+_SNMP_V1_V2C_KEYWORDS: Final = frozenset({"v1", "v2c"})
+_NXOS_ACL_KEYWORDS: Final = frozenset({"use-acl", "use-ipv4acl", "use-ipv6acl"})
 _SECRET_TYPES: Final = (
     (0, SECRET_TYPE_0),
     (4, SECRET_TYPE_4),
@@ -88,6 +103,8 @@ _SECRET_TYPES: Final = (
     (9, SECRET_TYPE_9),
 )
 _NO_VTY: Final = "no line vty block in the running config"
+_NXOS_AUTH: Final = {"md5": "MD5", "sha": "SHA", "sha-256": "SHA-256"}
+_NXOS_SNMP_USER_UNREADABLE: Final = "an NX-OS snmp-server user line was not understood"
 _NXOS_TYPE_6_UNKNOWN: Final = (
     "the NX-OS command that enables AES type 6 encryption is not confirmed"
 )
@@ -109,39 +126,11 @@ _LEGACY_PREFIXES: Final = (
 _NTP_SERVER: Final = re.compile(r"^ntp\s+(?:server|peer)\s+\S+(.*)$", re.IGNORECASE)
 _NTP_MASTER: Final = re.compile(r"^ntp\s+master(?:\s|$)", re.IGNORECASE)
 _NTP_KEY: Final = re.compile(r"^ntp\s+authentication-key\s+(\d+)\s+(\S+)", re.IGNORECASE)
-_NTP_TRUSTED_KEY: Final = re.compile(r"^ntp\s+trusted-key\s+(\d+)", re.IGNORECASE)
-_LOGGING_KEYWORDS: Final = frozenset(
-    {
-        "buffered",
-        "console",
-        "discriminator",
-        "event",
-        "exception",
-        "facility",
-        "file",
-        "filter",
-        "format",
-        "history",
-        "interface",
-        "level",
-        "logfile",
-        "message-counter",
-        "module",
-        "monitor",
-        "origin-id",
-        "persistent",
-        "queue-limit",
-        "rate-limit",
-        "snmp-trap",
-        "source-interface",
-        "synchronous",
-        "system-message",
-        "timestamp",
-        "trap",
-    }
+_NTP_TRUSTED_KEY: Final = re.compile(
+    r"^ntp\s+trusted-key\s+(\d+)(?:\s*-\s*(\d+))?\s*$", re.IGNORECASE
 )
+_NTP_AUTHENTICATE: Final = re.compile(r"^ntp\s+authenticate\s*$", re.IGNORECASE)
 _L3_ADDRESS: Final = re.compile(r"^ip\s+(?:address|unnumbered)\s+", re.IGNORECASE)
-_ROUTER_PROTOCOL: Final = re.compile(r"^router\s+(ospf|eigrp|bgp)(?:\s|$)", re.IGNORECASE)
 _FLAT_FHRP: Final = re.compile(r"^(standby|vrrp|glbp)\s+(\d+)\s+(.+)$", re.IGNORECASE)
 _BLOCK_FHRP: Final = re.compile(r"^(hsrp|vrrp)\s+(\d+)\s*$", re.IGNORECASE)
 
@@ -157,17 +146,17 @@ def read_config_facts(platform: Platform, text: str) -> tuple[ConfigFact, ...]:
     lines = [line.rstrip() for line in text.splitlines()]
     facts: dict[str, FactValue] = {
         **_secret_facts(lines),
-        IP_SOURCE_ROUTE: _source_routing(lines),
         LEGACY_SERVICES: _legacy_services(lines),
         HTTP_SERVER: _http_server(lines),
         TELNET_LINES: _telnet_lines(platform, lines),
         VTY_ACCESS_CLASS_MISSING_LINES: _vty_access_class_missing(lines),
         EXEC_TIMEOUT_DISABLED_LINES: _exec_timeout_disabled(lines),
         **_aaa_facts(lines),
-        **_snmp_facts(lines),
+        **_snmp_facts(platform, lines),
         **_service_facts(platform, lines),
     }
     if platform is Platform.IOS_XE:
+        facts[IP_SOURCE_ROUTE] = _source_routing(lines)
         facts[ENABLE_SECRET] = any(_ENABLE_SECRET.match(line.strip()) for line in lines)
         facts[ENABLE_PASSWORD] = any(_ENABLE_PASSWORD.match(line.strip()) for line in lines)
         facts[INSECURE_MODE] = any(line.strip().lower() == "system mode insecure" for line in lines)
@@ -180,6 +169,7 @@ def read_config_facts(platform: Platform, text: str) -> tuple[ConfigFact, ...]:
             line.strip().lower() == "password encryption aes" for line in lines
         )
     else:
+        facts[SNMP_V3_USER_CRYPTO] = _nxos_snmp_user_crypto(lines)
         facts[SNMP_GLOBAL_ENFORCE_PRIV] = any(
             line.strip().lower() == "snmp-server globalenforcepriv" for line in lines
         )
@@ -191,18 +181,47 @@ def read_config_facts(platform: Platform, text: str) -> tuple[ConfigFact, ...]:
 
 
 def _secret_facts(lines: list[str]) -> dict[str, int]:
-    """Count the numbered `password`/`secret` lines by their type number."""
+    """Count secrets by their type number: `password`/`secret` lines, keys, cleartext lines.
+
+    Three forms are read. A `password` or `secret` line carries a type number, with an optional
+    `level N` before it. A `key`, `key-string`, `md5` or `authentication-key` keyword followed
+    by a type number and a value is a typed key (a bare `key 7` is a key id, and an NTP key
+    line puts its key number there, so neither counts). A `password` line under `line` with no
+    type number is cleartext, because IOS prints it that way without `service
+    password-encryption`.
+    """
     counts = dict.fromkeys((number for number, _ in _SECRET_TYPES), 0)
     for line in lines:
-        for match in _SECRET_LINE.finditer(line):
-            number = int(match.group(1))
-            if number in counts:
-                counts[number] += 1
+        patterns = (_SECRET_LINE,) if _is_ntp_line(line) else (_SECRET_LINE, _KEY_LINE)
+        for pattern in patterns:
+            for match in pattern.finditer(line):
+                number = int(match.group(1))
+                if number in counts:
+                    counts[number] += 1
+    counts[0] += _cleartext_line_passwords(lines)
     return {name: counts[number] for number, name in _SECRET_TYPES}
 
 
+def _is_ntp_line(line: str) -> bool:
+    return line.strip().lower().startswith("ntp ")
+
+
+def _cleartext_line_passwords(lines: list[str]) -> int:
+    """How many `line` blocks hold a `password` with no type number."""
+    return sum(
+        1
+        for _, _, settings in _line_blocks(lines)
+        for setting in settings
+        if _CLEARTEXT_LINE_PASSWORD.match(setting)
+    )
+
+
 def _source_routing(lines: list[str]) -> bool:
-    """Whether IP source routing is on. Its default is on, so only the `no` form turns it off."""
+    """Whether IP source routing is on, on IOS/IOS-XE only.
+
+    The IOS default is on, so only the `no` form turns it off. NX-OS has no such default we
+    can prove, so it is not read there.
+    """
     for line in lines:
         text = line.strip().lower()
         if text == "no ip source-route":
@@ -222,7 +241,17 @@ def _legacy_services(lines: list[str]) -> tuple[str, ...]:
 
 
 def _http_server(lines: list[str]) -> bool:
-    return any(line.strip().lower() in {"ip http server", "feature http-server"} for line in lines)
+    """Plain HTTP is on: `ip http server`, `feature http-server`, or NX-API on an HTTP port.
+
+    `nxapi http port` only counts with `feature nxapi`, since the port line means nothing
+    while the feature is off.
+    """
+    stripped = [line.strip() for line in lines]
+    if any(line.lower() in {"ip http server", "feature http-server"} for line in stripped):
+        return True
+    return any(line.lower() == "feature nxapi" for line in stripped) and any(
+        _NXAPI_HTTP_PORT.match(line) for line in stripped
+    )
 
 
 def _telnet_lines(platform: Platform, lines: list[str]) -> tuple[str, ...] | Unknown:
@@ -309,7 +338,8 @@ def _exec_timeout_disabled(lines: list[str]) -> tuple[str, ...]:
     """The console and vty blocks that explicitly disable the idle timeout (`exec-timeout 0`).
 
     An absent line is the vendor default (10 minutes on IOS/IOS-XE), not a hit; an AUX line's
-    `exec-timeout 0 1` is a hardening recommendation (research #76, X12), not a hit.
+    `exec-timeout 0 1` is a hardening recommendation (research #76, X12), not a hit. A timeout
+    of 0 minutes and some seconds (`exec-timeout 0 30`) is a real timeout, not a disabled one.
     """
     disabled: list[str] = []
     for kind, header, settings in _line_blocks(lines):
@@ -317,7 +347,7 @@ def _exec_timeout_disabled(lines: list[str]) -> tuple[str, ...]:
             continue
         setting = _setting(settings, "exec-timeout")
         match = None if setting is None else _EXEC_TIMEOUT.match(setting)
-        if match is not None and match.group(1) == "0":
+        if match is not None and match.group(1) == "0" and match.group(2) in {None, "0"}:
             disabled.append(header)
     return tuple(disabled)
 
@@ -341,12 +371,18 @@ def _aaa_facts(lines: list[str]) -> dict[str, FactValue]:
     for line in lines:
         text = line.strip()
         login = _AAA_LOGIN.match(text)
+        enable = _AAA_ENABLE.match(text)
+        authorize = _AAA_AUTHORIZATION.match(text)
         if login is not None:
             methods = {token.lower() for token in login.group(1).split()}
             fallback_none += int("none" in methods)
             central_login = central_login or "group" in methods
-        elif _AAA_AUTHORIZATION.match(text):
-            authorization = True
+        elif enable is not None:
+            fallback_none += int("none" in {token.lower() for token in enable.group(1).split()})
+        elif authorize is not None:
+            authorization = authorization or "group" in {
+                token.lower() for token in authorize.group(1).split()
+            }
         elif _AAA_ACCOUNTING.match(text):
             accounting = True
     return {
@@ -373,7 +409,7 @@ def _service_facts(platform: Platform, lines: list[str]) -> dict[str, FactValue]
     return {
         **_ntp_facts(lines),
         REMOTE_SYSLOG_SERVERS: _remote_syslog_servers(lines),
-        ROUTING_AUTHENTICATION_MISSING: _routing_authentication_missing(lines),
+        ROUTING_AUTHENTICATION_MISSING: routing_authentication_missing(lines),
         **_fhrp_facts(lines),
         **_icmp_facts(platform, lines),
     }
@@ -382,15 +418,19 @@ def _service_facts(platform: Platform, lines: list[str]) -> dict[str, FactValue]
 def _ntp_facts(lines: list[str]) -> dict[str, FactValue]:
     """Whether NTP is configured, and whether its used key authenticates it, and how.
 
-    An NTP server or peer must name a key that is also trusted; a key line alone authenticates
-    nothing. MD5 is reported separately so the Check can name it.
+    NTP authenticates only with `ntp authenticate` set and a server or peer that names a key
+    that is also trusted (`ntp trusted-key 1 - 3` trusts every key from 1 to 3); a key line
+    alone authenticates nothing. MD5 is reported separately so the Check can name it.
     """
-    configured = False
+    configured = authenticate = False
     keys: dict[int, str] = {}
-    trusted: set[int] = set()
+    trusted: list[tuple[int, int]] = []
     referenced: list[int] = []
     for line in lines:
         text = line.strip()
+        if _NTP_AUTHENTICATE.match(text):
+            authenticate = True
+            continue
         if _NTP_MASTER.match(text):
             configured = True
             continue
@@ -407,8 +447,13 @@ def _ntp_facts(lines: list[str]) -> dict[str, FactValue]:
             continue
         trusted_line = _NTP_TRUSTED_KEY.match(text)
         if trusted_line is not None:
-            trusted.add(int(trusted_line.group(1)))
-    algorithms = {keys[key] for key in referenced if key in keys and key in trusted}
+            first = int(trusted_line.group(1))
+            trusted.append((first, int(trusted_line.group(2) or first)))
+    algorithms = {
+        keys[key]
+        for key in referenced
+        if authenticate and key in keys and any(low <= key <= high for low, high in trusted)
+    }
     return {
         NTP_CONFIGURED: configured,
         NTP_AUTHENTICATED: bool(algorithms),
@@ -426,77 +471,50 @@ def _ntp_key_reference(tail: str) -> int | None:
 
 
 def _remote_syslog_servers(lines: list[str]) -> int:
-    """How many remote syslog servers are configured, never counting local logging."""
+    """How many remote syslog servers are configured, never counting local logging.
+
+    Only a top-level `logging host <x>`, `logging server <x>` or `logging <IP address>` is a
+    server. Every other `logging` word (`on`, `userinfo`, `buffered`) and every indented line,
+    such as `logging enable` under `archive` / `log config`, is local.
+    """
     count = 0
     for line in lines:
+        if line[:1].isspace():
+            continue
         tokens = line.strip().lower().split()
-        if not tokens or tokens[0] != "logging":
+        if len(tokens) < 2 or tokens[0] != "logging":  # noqa: PLR2004 (`logging` and a value)
             continue
-        rest = tokens[1:]
-        if not rest:
-            continue
-        if rest[0] in {"host", "server"}:
-            count += int(bool(rest[1:]))
-        elif rest[0] not in _LOGGING_KEYWORDS:
+        if tokens[1] in {"host", "server"}:
+            count += int(len(tokens) > 2)  # noqa: PLR2004 (a named server follows)
+        elif _is_ip_address(tokens[1]):
             count += 1
     return count
 
 
-def _routing_authentication_missing(lines: list[str]) -> tuple[str, ...]:
-    """The routing protocols configured with no authentication, by fixed keyword."""
-    configured: set[str] = set()
-    authenticated: set[str] = set()
-    for line in lines:
-        text = line.strip()
-        protocol = _ROUTER_PROTOCOL.match(text)
-        if protocol is not None:
-            configured.add(protocol.group(1).upper())
-            continue
-        tokens = text.lower().split()
-        if _ospf_authenticated(tokens):
-            authenticated.add("OSPF")
-        if _eigrp_authenticated(tokens):
-            authenticated.add("EIGRP")
-        if tokens[:1] == ["neighbor"] and "password" in tokens[1:]:
-            authenticated.add("BGP")
-    return tuple(sorted(configured - authenticated))
-
-
-def _ospf_authenticated(tokens: list[str]) -> bool:
-    """Whether an OSPF line turns authentication on, in an area, a virtual link or an interface."""
-    if tokens[:1] == ["area"] and "authentication" in tokens[2:]:
-        return True
-    if tokens[:3] != ["ip", "ospf", "authentication"]:
+def _is_ip_address(text: str) -> bool:
+    try:
+        ip_address(text)
+    except ValueError:
         return False
-    return not tokens[3:] or tokens[3] != "null"
-
-
-def _eigrp_authenticated(tokens: list[str]) -> bool:
-    """Whether an EIGRP line turns authentication on, in the router or on an interface."""
-    if tokens[:2] in (["authentication", "mode"], ["authentication", "key-chain"]):
-        return True
-    return tokens[:3] in (
-        ["ip", "authentication", "mode"],
-        ["ip", "authentication", "key-chain"],
-    )
+    return True
 
 
 def _fhrp_facts(lines: list[str]) -> dict[str, FactValue]:
     """How many FHRP groups are configured, and how many have no authentication."""
-    groups: dict[tuple[str, int], list[bool]] = {}
-    for _, body in _interface_blocks(lines):
-        current: tuple[str, int] | None = None
+    groups: dict[tuple[str, str, int], list[bool]] = {}
+    for header, body in _interface_blocks(lines):
+        current: tuple[str, str, int] | None = None
         current_indent = -1
         for indent, text in body:
             block = _BLOCK_FHRP.match(text)
             if block is not None:
-                current = (block.group(1).upper(), int(block.group(2)))
+                current = (header.lower(), block.group(1).upper(), int(block.group(2)))
                 groups.setdefault(current, [False, False])
                 current_indent = indent
                 continue
             flat = _FLAT_FHRP.match(text)
             if flat is not None:
-                key = (flat.group(1).upper(), int(flat.group(2)))
+                key = (header.lower(), flat.group(1).upper(), int(flat.group(2)))
                 state = groups.setdefault(key, [False, False])
                 command = flat.group(3).lower()
                 if command.startswith("ip "):
@@ -523,10 +541,16 @@ def _fhrp_facts(lines: list[str]) -> dict[str, FactValue]:
 
 
 def _icmp_facts(platform: Platform, lines: list[str]) -> dict[str, FactValue]:
-    """How many L3 interfaces have each insecure ICMP setting, by the Platform's default."""
+    """How many live L3 interfaces have each insecure ICMP setting, by the Platform's default.
+
+    A shut-down interface and a loopback send no ICMP to a neighbour, so neither is counted.
+    The running config cannot show line state, so the Check also needs a live L3 interface.
+    """
     redirects = unreachables = proxy_arp = 0
-    for _, body in _interface_blocks(lines):
+    for header, body in _interface_blocks(lines):
         commands = {text.lower() for _, text in body}
+        if "shutdown" in commands or _is_loopback(header):
+            continue
         if not any(_L3_ADDRESS.match(text) for _, text in body):
             continue
         redirects += int("no ip redirects" not in commands)
@@ -540,6 +564,11 @@ def _icmp_facts(platform: Platform, lines: list[str]) -> dict[str, FactValue]:
         ICMP_UNREACHABLES_L3_INTERFACES: unreachables,
         PROXY_ARP_L3_INTERFACES: proxy_arp,
     }
+
+
+def _is_loopback(header: str) -> bool:
+    """Whether an `interface <name>` header names a loopback."""
+    return header.lower().startswith("interface loopback")
 
 
 def _interface_blocks(lines: list[str]) -> list[tuple[str, list[tuple[int, str]]]]:
@@ -565,28 +594,20 @@ def _interface_blocks(lines: list[str]) -> list[tuple[str, list[tuple[int, str]]
     return blocks
 
 
-def _snmp_facts(lines: list[str]) -> dict[str, FactValue]:
+def _snmp_facts(platform: Platform, lines: list[str]) -> dict[str, FactValue]:
     """Count SNMPv1/v2c communities and SNMPv3 users and groups, without any name."""
-    communities = read_write = default_name = no_acl = 0
+    communities = _snmp_communities(platform, lines)
+    read_write = [community for community in communities if community.writable]
     users = users_without_priv = groups = groups_without_priv = 0
     for line in lines:
         text = line.strip()
-        community = _SNMP_COMMUNITY.match(text)
-        if community is not None:
-            communities += 1
-            name, tail = community.group(1).strip('"'), community.group(2).split()
-            writable, acl = _community_access(tail)
-            if writable:
-                read_write += 1
-                default_name += int(name.lower() in _DEFAULT_COMMUNITY_NAMES)
-                no_acl += int(acl is None)
-            continue
         user = _SNMP_USER.match(text)
         if user is not None:
+            words = {token.lower() for token in user.group(1).split()}
+            if words & _SNMP_V1_V2C_KEYWORDS:
+                continue
             users += 1
-            users_without_priv += int(
-                "priv" not in {token.lower() for token in user.group(1).split()}
-            )
+            users_without_priv += int("priv" not in words)
             continue
         group = _SNMP_GROUP.match(text)
         if group is not None:
@@ -597,10 +618,10 @@ def _snmp_facts(lines: list[str]) -> dict[str, FactValue]:
                 level = tokens[after] if after < len(tokens) else ""
                 groups_without_priv += int(level != "priv")
     return {
-        SNMP_V1_V2C_COMMUNITIES: communities,
-        SNMP_V1_V2C_READ_WRITE_COMMUNITIES: read_write,
-        SNMP_V1_V2C_READ_WRITE_DEFAULT_NAME: default_name,
-        SNMP_V1_V2C_READ_WRITE_NO_ACL: no_acl,
+        SNMP_V1_V2C_COMMUNITIES: len(communities),
+        SNMP_V1_V2C_READ_WRITE_COMMUNITIES: len(read_write),
+        SNMP_V1_V2C_READ_WRITE_DEFAULT_NAME: sum(1 for item in read_write if item.default_name),
+        SNMP_V1_V2C_READ_WRITE_NO_ACL: sum(1 for item in read_write if not item.has_acl),
         SNMP_V3_CONFIGURED: users + groups > 0,
         SNMP_V3_USERS: users,
         SNMP_V3_USERS_WITHOUT_PRIV: users_without_priv,
@@ -608,10 +629,83 @@ def _snmp_facts(lines: list[str]) -> dict[str, FactValue]:
     }
 
 
-def _community_access(tail: list[str]) -> tuple[bool, str | None]:
-    """Whether an `snmp-server community` tail is read-write, and its access list if any."""
+def _nxos_snmp_user_crypto(lines: list[str]) -> FactValue:
+    """One `<auth>/<privacy>` keyword pair per NX-OS `snmp-server user` line (story 60).
+
+    The line reads `snmp-server user <name> [<role>] auth {md5|sha|sha-256} <key> [priv
+    [aes-128] <key>] ...`. A `priv` with no `aes-128` is DES, the NX-OS default. The pair is
+    read by position, so a key can never be mistaken for a keyword, and it holds no name or
+    key. A line that cannot be read makes the whole fact `Unknown`, never a pass.
+    """
+    pairs: list[str] = []
+    for line in lines:
+        user = _SNMP_USER.match(line.strip())
+        if user is None:
+            continue
+        pair = _nxos_user_pair(user.group(1).lower().split())
+        if pair is None:
+            return Unknown(_NXOS_SNMP_USER_UNREADABLE)
+        pairs.append(pair)
+    return tuple(pairs)
+
+
+def _nxos_user_pair(tokens: list[str]) -> str | None:
+    """`<auth>/<privacy>` from the tokens after an NX-OS user's name, or None if unreadable."""
+    if "auth" not in tokens:
+        return None if "priv" in tokens else "none/none"
+    after = tokens.index("auth") + 1
+    auth = _NXOS_AUTH.get(tokens[after]) if after < len(tokens) else None
+    if auth is None:
+        return None
+    privacy = "none"
+    if tokens[after + 2 : after + 3] == ["priv"]:
+        privacy = "AES128" if tokens[after + 3 : after + 4] == ["aes-128"] else "DES"
+    return f"{auth}/{privacy}"
+
+
+@dataclass(slots=True)
+class _Community:
+    """One SNMPv1/v2c community's access, with no name kept beyond whether it is a default."""
+
+    default_name: bool
+    writable: bool = False
+    has_acl: bool = False
+
+
+def _snmp_communities(platform: Platform, lines: list[str]) -> list[_Community]:
+    """Every community once, with its access merged from all the lines that name it.
+
+    NX-OS prints the access list as a second line (`snmp-server community X use-ipv4acl A`),
+    so its lines are joined by community name. IOS puts everything on one line, so each line
+    is its own community.
+    """
+    found: dict[str | tuple[str, int], _Community] = {}
+    for index, line in enumerate(lines):
+        match = _SNMP_COMMUNITY.match(line.strip())
+        if match is None:
+            continue
+        name = match.group(1).strip('"')
+        key = name if platform is Platform.NX_OS else (name, index)
+        community = found.setdefault(key, _Community(name.lower() in _DEFAULT_COMMUNITY_NAMES))
+        writable, has_acl = _community_access(match.group(2).lower().split())
+        community.writable = community.writable or writable
+        community.has_acl = community.has_acl or has_acl
+    return list(found.values())
+
+
+def _community_access(tail: list[str]) -> tuple[bool, bool]:
+    """Whether an `snmp-server community` tail is read-write, and whether it names an ACL.
+
+    IOS says `RO` or `RW` and then the access list. NX-OS says `group <role>`, where
+    `network-admin` is the read-write role, and names the access list after `use-acl`,
+    `use-ipv4acl` or `use-ipv6acl`. NX-OS never prints `RW`.
+    """
+    writable = "rw" in tail or any(
+        first == "group" and second == "network-admin" for first, second in pairwise(tail)
+    )
+    has_acl = any(token in _NXOS_ACL_KEYWORDS for token in tail[:-1])
     for index, token in enumerate(tail):
-        if token.upper() in {"RO", "RW"}:
-            acl = tail[index + 1] if index + 1 < len(tail) else None
-            return token.upper() == "RW", acl
-    return False, None
+        if token in {"ro", "rw"}:
+            has_acl = has_acl or index + 1 < len(tail)
+            break
+    return writable, has_acl

@@ -111,7 +111,9 @@ EXCEPTION_SAFE_CALLS = frozenset(
     }
 )
 # `lineno` and `colno` are where a TOML run file failed to parse (#41): numbers only.
-EXCEPTION_SAFE_ATTRIBUTES = frozenset({"code", "errno", "winerror", "lineno", "colno"})
+# `tally` is `LookupInterrupted`'s counts of what was sent to Cisco (#133): counts only, never a
+# value, a client ID or a token, so the Audit log can still say what left the PC.
+EXCEPTION_SAFE_ATTRIBUTES = frozenset({"code", "errno", "winerror", "lineno", "colno", "tally"})
 
 
 def exception_text_used(relative: str, tree: ast.Module) -> list[str]:

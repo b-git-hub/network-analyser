@@ -24,8 +24,8 @@ from pathlib import Path
 from typing import Final
 
 from network_analyser import backup_store
-from network_analyser.advisories import ProxyConfig
-from network_analyser.advisories.session import REJECTED
+from network_analyser.advisories import LookupInterrupted, ProxyConfig
+from network_analyser.advisories.session import REJECTED, TOKEN_EXPIRED
 from network_analyser.cli import run_analysis, run_topology
 from network_analyser.cli.parser import PROG
 from network_analyser.credentials import CredentialSets, SecretScan
@@ -37,7 +37,6 @@ from network_analyser.records.topology import (
     AnalysisResults,
     CiscoLookups,
     FindingLevel,
-    Topology,
 )
 from network_analyser.run_output import AuditLog, RunFolder
 
@@ -68,6 +67,12 @@ _REJECTED: Final = REJECTED
 _ALL_SOURCES: Final = "Cisco lookups"
 """The subject of the one line a rejected key gives, however many sources it stopped."""
 _KEY_STEP: Final = f'Run "{PROG} cisco-key set" to store a working key.'
+_EXPIRED_LINE: Final = (
+    f"{_ALL_SOURCES} stopped early: {TOKEN_EXPIRED}. "
+    "Answers already received were kept; run again for the rest."
+)
+"""The one line an expired token gives, however many sources it stopped. It does not blame the key
+or send the operator to cisco-key set: Cisco's token is issued once a Run (#133)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,7 +134,12 @@ def finish(  # noqa: PLR0913 (the Run's end, every dependency explicit)
 
     built = run_topology.build_topology(collected.records(), scope)
     try:
-        answers, lookups, replies = _ask(built, key, scan=scan, proxy=proxy, now=now)
+        known = AnalysisInput(
+            topology=built,
+            collected=run_analysis.collected_from(collected.records()),
+            inventory=run_analysis.inventories(built, collected.records()),
+        )
+        answers, lookups, replies = _ask(known, key, scan=scan, proxy=proxy, now=now)
         results = run_analysis.analysed(built, answers, records=collected.records())
         audit.record(analysis_event(results, lookups, replies))
         written = run_topology.save_all(
@@ -158,7 +168,7 @@ def finish(  # noqa: PLR0913 (the Run's end, every dependency explicit)
 
 
 def _ask(
-    built: Topology,
+    known: AnalysisInput,
     key: backup_store.CiscoKey | None,
     *,
     scan: SecretScan,
@@ -172,7 +182,7 @@ def _ask(
             CiscoLookups(ran=False),
             None,
         )
-    asked = run_analysis.lookup_questions(AnalysisInput(topology=built))
+    asked = run_analysis.lookup_questions(known)
     if not _has_questions(asked):
         return (
             CiscoAnswers.unavailable(run_analysis.LOOKUPS_DID_NOT_RUN),
@@ -183,14 +193,25 @@ def _ask(
     try:
         replies = run_analysis.answers_for(asked, key, proxy=proxy, scan=scan)
         answers = run_analysis.analysis_answers(replies, asked)
-    except Exception:  # noqa: BLE001 (an outage must never cost the Run its outputs)
-        print(
-            "Warning: Cisco lookups did not finish; the Run's Backups and other outputs are "
-            "unaffected.",
-            file=sys.stderr,
+    except LookupInterrupted as stopped:
+        _warn_lookups_did_not_finish()
+        return (
+            CiscoAnswers.unavailable(LOOKUPS_FAILED),
+            CiscoLookups(ran=True, when=when),
+            stopped.tally,
         )
+    except Exception:  # noqa: BLE001 (an outage must never cost the Run its outputs)
+        _warn_lookups_did_not_finish()
         return CiscoAnswers.unavailable(LOOKUPS_FAILED), CiscoLookups(ran=True, when=when), None
     return answers, CiscoLookups(ran=True, when=when), replies.tally
+
+
+def _warn_lookups_did_not_finish() -> None:
+    print(
+        "Warning: Cisco lookups did not finish; the Run's Backups and other outputs are "
+        "unaffected.",
+        file=sys.stderr,
+    )
 
 
 def _has_questions(asked: LookupQuestions) -> bool:
@@ -222,19 +243,35 @@ def _attention(
         return ()  # there was nothing Cisco could be asked, so no source was down
     lines: list[str] = []
     named: set[str] = set()
-    key_rejected = False
     for name, shown in _SOURCES:
         source = getattr(answers, name)
+        if _is_expired(source) and _EXPIRED_LINE not in lines:
+            lines.append(_EXPIRED_LINE)
         if not isinstance(source, SourceUnavailable) or shown in named:
             continue
         named.add(shown)
-        if source.reason == _REJECTED:
-            if not key_rejected:
-                lines.append(f"{_ALL_SOURCES} did not run: {_REJECTED}. {_KEY_STEP}")
-                key_rejected = True
-            continue
-        lines.append(f"{shown} did not run: {source.reason}.")
+        line = _source_line(shown, source.reason)
+        if line not in lines:
+            lines.append(line)
     return tuple(lines)
+
+
+def _is_expired(source: object) -> bool:
+    """Whether a source says the token expired: whole, or for some of its chassis PIDs."""
+    if isinstance(source, SourceUnavailable):
+        return source.reason == TOKEN_EXPIRED
+    if isinstance(source, tuple):
+        return any(getattr(item, "unanswered", None) == TOKEN_EXPIRED for item in source)
+    return False
+
+
+def _source_line(shown: str, reason: str) -> str:
+    """The Needs-attention line for one source that did not run; a shared cause shares a line."""
+    if reason == _REJECTED:
+        return f"{_ALL_SOURCES} did not run: {_REJECTED}. {_KEY_STEP}"
+    if reason == TOKEN_EXPIRED:
+        return _EXPIRED_LINE
+    return f"{shown} did not run: {reason}."
 
 
 def analysis_event(

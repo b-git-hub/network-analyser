@@ -10,6 +10,24 @@ The release workflow publishes a version's entry as its release notes, so every 
 
 The workflow adds the system requirements, the unsigned-build warning, the download check, the sizes and the install steps itself.
 
+## [Unreleased]
+
+### Breaking changes
+
+None.
+
+### Allow-list and Device Role
+
+None.
+
+### Changed
+
+- **Behaviour change: type 5 secrets are now flagged on IOS-XE too** (#142): the weak-secret-types Check raised type 5 (MD5-crypt) only on classic IOS. Research #76 says it is weak on IOS-XE as well, and the operator decided on #142 to flag it there, so an IOS-XE device with a type 5 secret now gets the High Finding it did not get before. NX-OS type 5 is SHA-256 and is still not flagged. A Platform that was not identified still reads "could not decide".
+
+### Fixed
+
+- **Hardening config facts miss fewer insecure configs and raise fewer false results** (#142): cleartext `line` passwords, `enable secret level 15 5 ...` forms and type 7 in `key`, `key-string`, `md5` and `authentication-key` lines are counted; an NX-OS read-write community (`group network-admin`) is Critical when it has no ACL, and each community is counted once; NTP needs `ntp authenticate` and honours `ntp trusted-key 1 - 3`; only `logging host`, `logging server` and `logging <IP>` count as remote syslog; FHRP groups are counted per interface; OSPF and EIGRP authentication is judged per interface and BGP `password` under a neighbour or template is seen; `exec-timeout 0 30` is no longer a hit; ICMP counts skip shut-down and loopback interfaces; `aaa authentication enable ... none` counts as a fallback to none; `aaa authorization` counts as central only with a server group; `nxapi http port` with `feature nxapi` is a plain HTTP server; a device with no SNMP no longer raises a "could not decide" SNMPv3 Finding; the SSHv2 Check reads `show ip ssh`; and the NX-OS Guest Shell ("Deactivated") and SSH key-size (ECDSA-only) parsers read correctly. The lower-confidence items left unchanged, and why, are listed in [docs/config-facts.md](docs/config-facts.md).
+
 ## [0.3.0] - 2026-11-21
 
 ### Breaking changes

@@ -255,3 +255,133 @@ def test_an_explicit_proxy_must_be_a_host_and_port(text: str) -> None:
 def test_direct_is_its_own_mode() -> None:
     assert ProxyConfig.direct().mode is ProxyMode.DIRECT
     assert resolve_proxy(ProxyConfig.direct(), system=lambda: "proxy.example:1") is None
+
+
+@pytest.mark.parametrize(
+    ("overrides", "system"),
+    [
+        ({"host": "evil.example"}, None),
+        ({"port": 8443}, None),
+        ({"path": "/security?version=17.9.4a x"}, None),
+        ({}, "socks=proxy:1080"),
+    ],
+    ids=["host", "port", "path", "proxy"],
+)
+def test_a_refusal_before_any_connection_is_final(
+    monkeypatch: pytest.MonkeyPatch, overrides: dict[str, object], system: str | None
+) -> None:
+    opener = FakeOpener(connection=FakeConnection(response=FakeResponse(200)))
+    fenced = transport_with(monkeypatch, opener, proxy=ProxyConfig(), system=system)
+
+    reply = fenced(request(**overrides))
+
+    assert isinstance(reply, TransportFailed)
+    assert reply.retryable is False
+
+
+def test_a_refused_redirect_is_final(monkeypatch: pytest.MonkeyPatch) -> None:
+    connection = FakeConnection(response=FakeResponse(302, body=b""))
+    fenced = transport_with(monkeypatch, FakeOpener(connection=connection))
+
+    reply = fenced(request())
+
+    assert isinstance(reply, TransportFailed)
+    assert reply.retryable is False
+
+
+def test_an_over_cap_reply_is_final_and_is_not_read_past_the_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = FakeResponse(200, body=b"x" * 500)
+    fenced = transport_with(monkeypatch, FakeOpener(connection=FakeConnection(response=response)))
+
+    reply = fenced(request(max_bytes=10))
+
+    assert isinstance(reply, TransportFailed)
+    assert reply.retryable is False
+    assert sum(response.reads) <= 11  # the cap and one byte to prove it was passed
+
+
+def test_the_fence_refusal_from_open_https_is_final(monkeypatch: pytest.MonkeyPatch) -> None:
+    opener = FakeOpener(error=transport.NotFencedError("outside"))
+    fenced = transport_with(monkeypatch, opener)
+
+    reply = fenced(request())
+
+    assert isinstance(reply, TransportFailed)
+    assert reply.retryable is False
+
+
+@pytest.mark.parametrize(
+    "error",
+    [TimeoutError("timed out"), ConnectionRefusedError("refused"), OSError("network down")],
+)
+def test_a_connection_failure_may_be_tried_once_more(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    fenced = transport_with(monkeypatch, FakeOpener(error=error))
+
+    reply = fenced(request())
+
+    assert isinstance(reply, TransportFailed)
+    assert reply.retryable is True
+
+
+def test_a_reply_is_read_in_chunks_and_arrives_whole(monkeypatch: pytest.MonkeyPatch) -> None:
+    body = b"y" * (transport.READ_CHUNK_BYTES * 2 + 5)
+    response = FakeResponse(200, body=body)
+    fenced = transport_with(monkeypatch, FakeOpener(connection=FakeConnection(response=response)))
+
+    reply = fenced(request())
+
+    assert isinstance(reply, HttpResponse)
+    assert reply.body == body
+    assert max(response.reads) <= transport.READ_CHUNK_BYTES
+
+
+def test_a_reply_that_trickles_in_past_the_total_deadline_is_given_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [0.0]
+
+    def trickle() -> None:
+        now[0] += 50.0
+
+    response = FakeResponse(200, body=b"z" * (transport.READ_CHUNK_BYTES * 6), on_read=trickle)
+    connection = FakeConnection(response=response)
+    monkeypatch.setattr(transport, "open_https", FakeOpener(connection=connection))
+    fenced = HttpsTransport(
+        proxy=ProxyConfig.direct(), system_proxy=lambda: None, clock=lambda: now[0]
+    )
+
+    reply = fenced(request(total_timeout_s=120.0))
+
+    assert isinstance(reply, TransportFailed)
+    assert "too long" in reply.reason
+    assert len(response.reads) == 3  # 0 s, 50 s and 100 s are inside the 120 s; 150 s is not
+    assert connection.closed is True
+
+
+def test_a_reply_that_arrives_inside_the_deadline_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = [0.0]
+
+    def slow() -> None:
+        now[0] += 10.0
+
+    response = FakeResponse(200, body=b"ok", on_read=slow)
+    monkeypatch.setattr(
+        transport, "open_https", FakeOpener(connection=FakeConnection(response=response))
+    )
+    fenced = HttpsTransport(
+        proxy=ProxyConfig.direct(), system_proxy=lambda: None, clock=lambda: now[0]
+    )
+
+    reply = fenced(request(total_timeout_s=120.0))
+
+    assert isinstance(reply, HttpResponse)
+    assert reply.body == b"ok"
+
+
+def test_every_request_carries_a_total_deadline_by_default() -> None:
+    assert request().total_timeout_s == transport.TOTAL_TIMEOUT_S
+    assert transport.TOTAL_TIMEOUT_S >= transport.READ_TIMEOUT_S

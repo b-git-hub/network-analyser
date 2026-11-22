@@ -13,6 +13,7 @@ quote itself into the Audit log or a report (stories 16, 117).
 import http.client
 import socket
 import ssl
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Final, Protocol
@@ -39,6 +40,14 @@ CONNECT_TIMEOUT_S: Final = 10.0
 READ_TIMEOUT_S: Final = 60.0
 """How long to wait for each read of Cisco's reply."""
 
+TOTAL_TIMEOUT_S: Final = 120.0
+"""How long one reply may take in all. A read timeout is per read, so on its own a reply that
+trickles in keeps the call open; this is checked between every chunk (#133). A single read can
+still wait out its own timeout, so the longest a call can take is this plus one read timeout."""
+
+READ_CHUNK_BYTES: Final = 64 * 1024
+"""How much of a reply is read at a time, so the total deadline is checked often."""
+
 MINIMUM_TLS: Final = ssl.TLSVersion.TLSv1_2
 """Cisco serves TLS 1.2 and 1.3; older protocol versions are never offered."""
 
@@ -58,8 +67,9 @@ class HttpRequest:
         path: the path and query, starting with `/`. Every value in it passed its pattern.
         headers: the request headers, in order.
         body: the request body; empty when there is none.
-        timeout_s: how long to wait for the reply, in seconds.
+        timeout_s: how long to wait for each read of the reply, in seconds.
         max_bytes: the most reply bytes to accept.
+        total_timeout_s: how long the whole reply may take, in seconds.
     """
 
     host: str
@@ -70,6 +80,7 @@ class HttpRequest:
     body: bytes = b""
     timeout_s: float = READ_TIMEOUT_S
     max_bytes: int = DEFAULT_MAX_REPLY_BYTES
+    total_timeout_s: float = TOTAL_TIMEOUT_S
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,9 +105,12 @@ class TransportFailed:
     Attributes:
         reason: fixed text, never reply or exception text, such as
             `Cisco did not answer in time`.
+        retryable: whether trying again could help. A refused redirect, an over-cap reply, a
+            host outside the fence and an unusable proxy setting are final (#133).
     """
 
     reason: str
+    retryable: bool = True
 
 
 class Transport(Protocol):
@@ -119,8 +133,8 @@ class Response(Protocol):
         """The reply headers, in order."""
         ...
 
-    def read(self, amt: int | None = None) -> bytes:
-        """Read at most `amt` bytes of the body."""
+    def read1(self, amt: int) -> bytes:
+        """Read at most `amt` bytes of the body, with at most one read of the socket."""
         ...
 
 
@@ -228,18 +242,20 @@ class HttpsTransport:
 
     proxy: ProxyConfig = field(default_factory=ProxyConfig)
     system_proxy: Callable[[], str | None] = windows_proxy
+    clock: Callable[[], float] = time.monotonic
 
     def __call__(  # noqa: PLR0911 (one return per fixed outcome, each named)
         self, request: HttpRequest
     ) -> HttpResponse | TransportFailed:
         """Make the request, or say in fixed text why there is no reply."""
+        deadline = self.clock() + request.total_timeout_s
         if not is_fenced(request.host, request.port):
-            return TransportFailed(_NOT_FENCED)
+            return TransportFailed(_NOT_FENCED, retryable=False)
         if not _is_safe_path(request.path):
-            return TransportFailed("refused a request path the tool did not build")
+            return TransportFailed("refused a request path the tool did not build", retryable=False)
         target = resolve_proxy(self.proxy, system=self.system_proxy)
         if isinstance(target, ProxyNotUsable):
-            return TransportFailed(target.reason)
+            return TransportFailed(target.reason, retryable=False)
         try:
             connection = open_https(
                 request.host,
@@ -260,15 +276,34 @@ class HttpsTransport:
                 status = response.status
                 headers = tuple(response.getheaders())
                 if _REDIRECT_MIN <= status < _REDIRECT_MAX:
-                    return TransportFailed(f"refused a redirect (HTTP {status})")
-                body = response.read(request.max_bytes + 1)
+                    return TransportFailed(f"refused a redirect (HTTP {status})", retryable=False)
+                body = self._read_body(response, request, deadline)
             finally:
                 connection.close()
         except (OSError, http.client.HTTPException) as error:
             return _failure(error)
-        if len(body) > request.max_bytes:
-            return TransportFailed("the reply was larger than the tool accepts")
+        if isinstance(body, TransportFailed):
+            return body
         return HttpResponse(status=status, headers=headers, body=body)
+
+    def _read_body(
+        self, response: Response, request: HttpRequest, deadline: float
+    ) -> bytes | TransportFailed:
+        """Read the reply a chunk at a time, within the cap and the total deadline."""
+        chunks: list[bytes] = []
+        size = 0
+        while True:
+            if self.clock() >= deadline:
+                return TransportFailed("Cisco's reply took too long")
+            chunk = response.read1(min(READ_CHUNK_BYTES, request.max_bytes + 1 - size))
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+            size += len(chunk)
+            if size > request.max_bytes:
+                return TransportFailed(
+                    "the reply was larger than the tool accepts", retryable=False
+                )
 
 
 def _failure(  # noqa: PLR0911 (one return per fixed reason, so each is reviewable)
@@ -276,7 +311,7 @@ def _failure(  # noqa: PLR0911 (one return per fixed reason, so each is reviewab
 ) -> TransportFailed:
     """Map a connection failure to fixed text. Never its own text, which can quote a reply."""
     if isinstance(error, NotFencedError):
-        return TransportFailed(_NOT_FENCED)
+        return TransportFailed(_NOT_FENCED, retryable=False)
     if isinstance(error, ssl.SSLCertVerificationError):
         return TransportFailed("Cisco's certificate was not trusted")
     if isinstance(error, ssl.SSLError):
@@ -295,8 +330,10 @@ def _failure(  # noqa: PLR0911 (one return per fixed reason, so each is reviewab
 __all__ = [
     "CONNECT_TIMEOUT_S",
     "DEFAULT_MAX_REPLY_BYTES",
+    "READ_CHUNK_BYTES",
     "READ_TIMEOUT_S",
     "TOKEN_MAX_REPLY_BYTES",
+    "TOTAL_TIMEOUT_S",
     "Connection",
     "HttpRequest",
     "HttpResponse",

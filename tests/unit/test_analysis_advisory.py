@@ -33,13 +33,15 @@ from network_analyser.records.topology import (
     FindingLevel,
 )
 from network_analyser.records.unknown import Unknown
-from tests.support.topology_records import visited
+from tests.support.analysis_records import collected_of
+from tests.support.topology_records import chassis_inventory, visited
 
 A = "192.0.2.1"
 B = "192.0.2.2"
 C = "192.0.2.3"
 MODEL = "C9300-48P"
-NEXUS_MODEL = "N9K-C93180YC-FX"
+NEXUS_MODEL = "C93180YC-FX"
+NEXUS_CHASSIS = "N9K-C93180YC-FX"
 ADVISORY = "cisco-sa-example-abc123"
 
 
@@ -51,8 +53,10 @@ def _device(  # noqa: PLR0913 (every device field the Check reads, by name)
     platform: Platform | None = Platform.IOS_XE,
     model: str | Unknown = MODEL,
     release: str | Unknown = "17.9.4a",
+    chassis: str | None = None,
 ) -> DeviceRecord:
-    record = visited(address, serial, hostname)
+    inventory = chassis_inventory(chassis) if chassis is not None else None
+    record = visited(address, serial, hostname, inventory=inventory)
     version = record.version
     assert version is not None
     return replace(
@@ -111,6 +115,7 @@ def _results(
     return analysis.analyse(
         AnalysisInput(
             topology=topology.build(records),
+            collected=collected_of(*records),
             answers=CiscoAnswers(advisories=tuple(answers), compatible=compatible),
         )
     )
@@ -319,15 +324,17 @@ def test_a_family_the_table_does_not_hold_is_never_matched() -> None:
 
 
 def test_nxos_is_matched_on_its_nexus_hardware_family() -> None:
+    nexus = _device(
+        A,
+        "S1",
+        "sw-a",
+        platform=Platform.NX_OS,
+        model=NEXUS_MODEL,
+        chassis=NEXUS_CHASSIS,
+        release="9.3(10)",
+    )
     results = _results(
-        _device(
-            A,
-            "S1",
-            "sw-a",
-            platform=Platform.NX_OS,
-            model=NEXUS_MODEL,
-            release="9.3(10)",
-        ),
+        nexus,
         answers=(
             _answer(
                 OsType.NX_OS,
@@ -344,20 +351,7 @@ def test_nxos_is_matched_on_its_nexus_hardware_family() -> None:
     assert "hardware family not confirmed" not in finding.what_was_found
 
     questions = analysis.lookup_questions(
-        AnalysisInput(
-            topology=topology.build(
-                (
-                    _device(
-                        A,
-                        "S1",
-                        "sw-a",
-                        platform=Platform.NX_OS,
-                        model=NEXUS_MODEL,
-                        release="9.3(10)",
-                    ),
-                )
-            )
-        )
+        AnalysisInput(topology=topology.build((nexus,)), collected=collected_of(nexus))
     )
     assert [(q.os_type, q.release, q.hardware_family) for q in questions.releases] == [
         (OsType.NX_OS, "9.3(10)", "NEXUS9000")

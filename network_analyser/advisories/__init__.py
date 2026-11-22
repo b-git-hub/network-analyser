@@ -12,7 +12,9 @@ The safety envelope it owns:
   size caps and timeouts (stories 15-16);
 - the proxy: Windows' own setting or `--proxy host:port`, never an environment variable
   (story 17);
-- the token: a client-credentials grant with scope `customscope`, requested once per Run;
+- the token: a client-credentials grant with scope `customscope`, requested once per Run and
+  never again: calls stop before its `expires_in` runs out, and a 401 after it was issued means
+  it expired, not that the key is bad (#133);
 - batching (20 EoX, 10 Suggestion), pacing (openVuln 30 a minute), `Retry-After`, Cisco's
   rate-limit codes and exactly one retry, while a rejected key is never retried (stories
   19, 36);
@@ -24,7 +26,7 @@ The safety envelope it owns:
 """
 
 from network_analyser.advisories.fence import API_HOST, FENCED_HOSTS, HTTPS_PORT, TOKEN_HOST
-from network_analyser.advisories.lookup import ask_cisco, check_api_key
+from network_analyser.advisories.lookup import LookupInterrupted, ask_cisco, check_api_key
 from network_analyser.advisories.pacing import Pacer
 from network_analyser.advisories.patterns import (
     is_safe_pid,
@@ -54,6 +56,7 @@ __all__ = [
     "HttpRequest",
     "HttpResponse",
     "HttpsTransport",
+    "LookupInterrupted",
     "Pacer",
     "ProxyConfig",
     "ProxyMode",

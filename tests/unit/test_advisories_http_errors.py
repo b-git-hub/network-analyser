@@ -1,8 +1,11 @@
 """Cisco's HTTP errors are classified per call, and only a key problem stops every call (#131).
 
 A 400 or 404 from `apix.cisco.com` is that one call's answer, never "the key was rejected".
-Only a 400 `invalid_client` from the token endpoint, a 401 and an auth-coded 403 stop all calls;
-those are never retried. The fake Cisco scripts each error shape. All data is synthetic.
+Only a 400 `invalid_client` or a 401 from the token endpoint and an auth-coded 403 stop all
+calls as a rejected key; those are never retried. (A 401 from `apix.cisco.com` comes after a
+token was issued, so it is an expired token, not a rejected key: see
+`test_advisories_token_expiry.py`.) The fake Cisco scripts each error shape. All data is
+synthetic.
 """
 
 from typing import Any
@@ -268,7 +271,6 @@ def test_no_connection_still_makes_the_whole_compatible_source_unavailable() -> 
 @pytest.mark.parametrize(
     ("status", "headers"),
     [
-        (401, ()),
         (403, (("X-Mashery-Error-Code", "ERR_403_NOT_AUTHORIZED"),)),
         (403, (("X-Mashery-Error-Code", "ERR_403_DEVELOPER_INACTIVE"),)),
     ],

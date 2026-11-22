@@ -200,12 +200,37 @@ def test_type_5_is_weak_on_classic_ios() -> None:
     assert "type 5 x1" in finding.what_was_found
 
 
-def test_type_5_is_not_weak_on_ios_xe_or_nxos() -> None:
-    ios_xe = _analyse(Platform.IOS_XE, IOS_XE, {SECRET_TYPE_5: 1})
+def test_type_5_is_weak_on_ios_xe_too() -> None:
+    for release in (IOS_XE, Unknown("show version not read")):
+        finding = _only(
+            _analyse(Platform.IOS_XE, release, {SECRET_TYPE_5: 2}),
+            "hardening-weak-secret-types",
+        )
+
+        assert finding.level is FindingLevel.HIGH
+        assert "type 5 x2" in finding.what_was_found
+
+
+def test_type_5_is_not_weak_on_nxos() -> None:
     nxos = _analyse(Platform.NX_OS, NXOS, {SECRET_TYPE_5: 1})
 
-    assert _found(ios_xe, "hardening-weak-secret-types") == []
     assert _found(nxos, "hardening-weak-secret-types") == []
+
+
+def test_no_type_5_on_ios_xe_raises_nothing() -> None:
+    results = _analyse(Platform.IOS_XE, IOS_XE, {SECRET_TYPE_5: 0, SECRET_TYPE_9: 1})
+
+    assert _found(results, "hardening-weak-secret-types") == []
+
+
+def test_type_5_with_an_unread_count_on_ios_xe_could_not_decide() -> None:
+    finding = _only(
+        _analyse(Platform.IOS_XE, IOS_XE, {SECRET_TYPE_5: Unknown("config fact not collected")}),
+        "hardening-weak-secret-types",
+    )
+
+    assert finding.level is FindingLevel.LOW
+    assert finding.what_was_found.startswith("Could not decide:")
 
 
 def test_strong_secret_types_9_and_8_raise_nothing() -> None:
@@ -470,6 +495,34 @@ def test_source_routing_on_by_default_is_high() -> None:
 
     assert finding.level is FindingLevel.HIGH
     assert "ip source-route" in finding.what_was_found
+
+
+def test_a_plain_nxos_config_raises_no_legacy_services_finding() -> None:
+    config = "hostname nx-a\nfeature telnet\nline vty\n  access-class 10 in\n"
+    record = _record(Platform.NX_OS, NXOS)
+    facts = ConfigFacts("dev-S1", platforms.read_config_facts(Platform.NX_OS, config))
+
+    results = analysis.analyse(
+        AnalysisInput(topology=topology.build([record]), config_facts=(facts,))
+    )
+
+    assert _found(results, "hardening-legacy-services") == []
+
+
+def test_nxos_source_routing_is_never_judged_even_if_a_fact_says_on() -> None:
+    results = _analyse(Platform.NX_OS, NXOS, {IP_SOURCE_ROUTE: True})
+
+    assert _found(results, "hardening-legacy-services") == []
+
+
+def test_nxos_legacy_services_still_fire_without_the_source_route_item() -> None:
+    finding = _only(
+        _analyse(Platform.NX_OS, NXOS, {IP_SOURCE_ROUTE: True, LEGACY_SERVICES: ("FTP",)}),
+        "hardening-legacy-services",
+    )
+
+    assert "FTP" in finding.what_was_found
+    assert "ip source-route" not in finding.what_was_found
 
 
 def test_legacy_services_are_named_by_keyword_and_count() -> None:
