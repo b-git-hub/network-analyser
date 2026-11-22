@@ -701,6 +701,19 @@ def test_an_unresolved_upgrade_target_reads_not_available_not_an_upgrade() -> No
     assert "<td>not available</td>" in _section(page, "visited")
 
 
+def test_a_hostile_partial_upgrade_target_is_escaped_in_the_visited_table() -> None:
+    hostile = "</td><img src=x onerror=alert(1)>"
+    base = _analysis_report()
+    advice = (_advice("dev-S1", hostile, not_cleared=1),)
+    built = dataclasses.replace(base.topology, analysis=AnalysisSummary(advice=advice, checks=()))
+    page = report_page.render_run_report(dataclasses.replace(base, topology=built), SecretScan())
+
+    visited = _section(page, "visited")
+    assert "<img" not in page
+    assert "Upgrade to &lt;/td&gt;&lt;img" in visited
+    assert "does not clear 1 Advisories" in visited
+
+
 def _advice(device: str, target: str, *, not_cleared: int) -> DeviceAdvice:
     return DeviceAdvice(
         device=device,

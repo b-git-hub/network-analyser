@@ -69,6 +69,7 @@ _STYLE: Final = (
     ".callout{border-left:4px solid;padding:0.4rem 0.8rem;}"
     ".callout.upgrade{border-color:#2f8f4e;}"
     ".callout.no-fix,.callout.could-not-check{border-color:#b04040;}"
+    ".callout.not-available{border-color:#8a8a8a;}"
     ".latest{margin:0;}"
     ".fixed{font-style:italic;}"
     ".eox{margin:0.3rem 0 0;padding-left:1.2rem;}"
@@ -229,8 +230,15 @@ def _callout_text(
     advice: DeviceAdvice,
     advisories: Sequence[Mapping[str, Plain]],
 ) -> tuple[str, str]:
-    """One of the four callouts (story 106), decided from the recorded advice and Findings."""
-    if not advice.known or advice.outcome is None:
+    """One of the four callouts (story 106), decided from the recorded advice and Findings.
+
+    Advice this file does not hold (a v1/v2 file, or a device Analysis did not advise) reads
+    as a neutral "not available" rather than a red failure (#146); a recorded outcome that
+    says a check failed stays "could not check".
+    """
+    if not advice.known:
+        return ("not-available", NOT_AVAILABLE)
+    if advice.outcome is None:
         return ("could-not-check", f"could not check: {_NOT_SAFE}")
     outcome = advice.outcome
     lowered = outcome.lower()
@@ -277,7 +285,12 @@ def _target_callout(advice: DeviceAdvice) -> tuple[str, str]:
 
 
 def _leaves_open(advice: DeviceAdvice) -> str:
-    """What the target leaves open, or nothing when it clears every Advisory (#124)."""
+    """What the target leaves open, or nothing when it clears every Advisory (#124, #146)."""
+    if advice.not_cleared is None:
+        return (
+            " (count not recorded: it may still leave Advisories open, "
+            "so this target is not confirmed complete)"
+        )
     if advice.not_cleared <= 0:
         return ""
     return f" (does not clear {advice.not_cleared} Advisories: {_no_fix(advice)})"

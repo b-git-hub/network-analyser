@@ -47,6 +47,10 @@ FIXED_NOTE: Final = (
 NOT_RECORDED: Final = "not recorded"
 NOT_AVAILABLE: Final = "not available"
 """Shown for advice this topology.json does not hold, rather than guessing (#105, #89)."""
+NOT_APPLICABLE: Final = "\u2014"
+"""Shown where a number has no meaning, such as a count beside an unknown target (#146)."""
+COUNT_NOT_RECORDED: Final = "count not recorded"
+"""Shown for a target whose recorded count is missing or invalid, never as complete (#146)."""
 NEWER_THAN_LIST: Final = "running release is newer than Cisco's list"
 """The fixed text Analysis gives when the running release is above everything Cisco lists
 (#127). `analysis.advisory.NEWER_THAN_LIST` holds the same text; `diagram` may not import
@@ -98,7 +102,9 @@ class DeviceRow:
             there is a listed release for it to describe; None otherwise (#127, #139).
         latest_release_lifecycle: Cisco's lifecycle code beside `latest_release`, only when
             there is a listed release for it to describe; None otherwise (#127, #139).
-        not_cleared: how many Advisories its Upgrade Target leaves open (#124); 0 when none.
+        not_cleared: the count of Advisories its Upgrade Target leaves open (#124) as the page
+            shows it: the number, `count not recorded` when the file holds no usable count, or
+            `—` when the target is unknown, so a page never claims a complete target (#146).
     """
 
     hostname: str
@@ -110,7 +116,7 @@ class DeviceRow:
     latest_in_train: str
     latest_in_train_lifecycle: str | None
     latest_release_lifecycle: str | None
-    not_cleared: int
+    not_cleared: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -378,7 +384,7 @@ def _device_row(device: Mapping[str, Plain]) -> DeviceRow:
         latest_in_train=latest_in_train,
         latest_in_train_lifecycle=_lifecycle(latest_in_train, advice.latest_in_train_lifecycle),
         latest_release_lifecycle=_lifecycle(latest_release, advice.latest_release_lifecycle),
-        not_cleared=advice.not_cleared,
+        not_cleared=_not_cleared_label(advice),
     )
 
 
@@ -408,6 +414,32 @@ def _latest_in_train(advice: DeviceAdvice) -> str:
     if advice.known and advice.latest_in_train:
         return advice.latest_in_train
     return NOT_AVAILABLE
+
+
+def _not_cleared_label(advice: DeviceAdvice) -> str:
+    """The Not cleared cell (#146).
+
+    `—` unless the target is a release or "no fix in Train T", because a count beside an
+    unknown target says nothing. `count not recorded` when the target is known but the file
+    holds no usable count, so the pane never claims a complete target it cannot support.
+    """
+    if not _target_has_a_count(advice):
+        return NOT_APPLICABLE
+    if advice.not_cleared is None:
+        return COUNT_NOT_RECORDED
+    return str(advice.not_cleared)
+
+
+def _target_has_a_count(advice: DeviceAdvice) -> bool:
+    if not advice.known:
+        return False
+    if advice.outcome is not None and advice.outcome.lower().startswith("could not check"):
+        return False
+    target = advice.upgrade_target
+    if target is not None:
+        lowered = target.lower()
+        return lowered != NOT_AVAILABLE and not lowered.startswith("no critical")
+    return advice.target_recorded
 
 
 def _lifecycle(release: str, lifecycle: str | None) -> str | None:

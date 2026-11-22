@@ -107,8 +107,9 @@ class DeviceAdvice:
         latest_in_train_lifecycle: Cisco's lifecycle code beside `latest_in_train`; None when
             the file records none (#127).
         train: the Train it is on, used by "no fix in Train T" (#107); None when not recorded.
-        not_cleared: how many Advisories the Upgrade Target leaves open (#124); 0 when the file
-            records none or the target clears every Advisory.
+        not_cleared: how many Advisories the Upgrade Target leaves open (#124); None when the
+            file records no usable count, so a page never claims a complete target it cannot
+            support (#146).
     """
 
     known: bool
@@ -120,7 +121,7 @@ class DeviceAdvice:
     latest_release_lifecycle: str | None
     latest_in_train_lifecycle: str | None
     train: str | None
-    not_cleared: int
+    not_cleared: int | None
 
 
 def device_advice(device: Mapping[str, Plain]) -> DeviceAdvice:
@@ -142,7 +143,7 @@ def device_advice(device: Mapping[str, Plain]) -> DeviceAdvice:
             latest_release_lifecycle=None,
             latest_in_train_lifecycle=None,
             train=None,
-            not_cleared=0,
+            not_cleared=None,
         )
     target = recorded.get("upgrade_target")
     return DeviceAdvice(
@@ -165,10 +166,14 @@ def _text_field(record: Mapping[str, Plain], field: str) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _count_field(record: Mapping[str, Plain], field: str) -> int:
-    """A non-negative whole number the file records, or 0 when it records none."""
+def _count_field(record: Mapping[str, Plain], field: str) -> int | None:
+    """A non-negative whole number the file records, or None when it records none.
+
+    Never 0 as a guess: 0 claims the Upgrade Target clears every Advisory, which is the one
+    claim the format bump exists to keep honest (#124, #146).
+    """
     value = record.get(field)
-    return value if type(value) is int and value >= 0 else 0
+    return value if type(value) is int and value >= 0 else None
 
 
 class _Leaf:
@@ -348,13 +353,17 @@ def read_topology(text: str) -> TopologyFile:
 
     Raises:
         NewerFormatError: a newer version of the tool wrote it.
-        TopologyFileError: it is not a `topology.json` this tool can draw.
+        TopologyFileError: it is not a `topology.json` this tool can draw. A file nested too
+            deeply to walk is one of these, so `render` refuses it (exit 2) instead of
+            crashing (#146).
     """
     try:
         data: object = json.loads(text, parse_constant=_refuse_constant)
     except ValueError as error:  # JSONDecodeError, or NaN/Infinity
         msg = "topology.json is not valid JSON"
         raise TopologyFileError(msg) from error
+    except RecursionError as error:
+        raise _too_deep() from error
     if not isinstance(data, dict):
         msg = "topology.json does not hold an object"
         raise TopologyFileError(msg)
@@ -365,8 +374,16 @@ def read_topology(text: str) -> TopologyFile:
     if version > KNOWN_FORMAT_VERSION:
         msg = "topology.json was written by a newer version of Network Analyser"
         raise NewerFormatError(msg)
-    content = _record(data, _TOP)
+    try:
+        content = _record(data, _TOP)
+    except RecursionError as error:
+        raise _too_deep() from error
     return TopologyFile(format_version=version, content=content)
+
+
+def _too_deep() -> TopologyFileError:
+    msg = "topology.json is nested too deeply to draw"
+    return TopologyFileError(msg)
 
 
 def _refuse_constant(_name: str) -> object:
