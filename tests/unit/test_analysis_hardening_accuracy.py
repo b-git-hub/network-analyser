@@ -19,6 +19,7 @@ from network_analyser.records.config_facts import (
     SECRET_TYPE_5,
     SNMP_V1_V2C_COMMUNITIES,
     SSH_VERSION,
+    FactValue,
 )
 from network_analyser.records.device import DeviceRecord
 from network_analyser.records.topology import Finding, FindingLevel
@@ -126,7 +127,7 @@ def test_the_configured_version_wins_over_show_ip_ssh() -> None:
     ],
 )
 def test_an_unread_config_fact_makes_its_check_could_not_decide(check_id: str, fact: str) -> None:
-    unread = {fact: Unknown(f"config fact not collected: {fact}")}
+    unread: dict[str, FactValue] = {fact: Unknown(f"config fact not collected: {fact}")}
     if check_id == "hardening-weak-secret-types":
         unread = {"secret_type_0": 0, "secret_type_4": 0, "secret_type_7": 0, **unread}
     results = analysed(_device(EARLY), facts=facts("dev-S1", **unread))
