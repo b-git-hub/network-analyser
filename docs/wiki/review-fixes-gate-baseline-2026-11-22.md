@@ -40,7 +40,7 @@ baseline.
 - `tests/unit/test_trust_folder_check.py::test_another_account_that_can_change_the_folder_refuses[other0]`
 - `tests/unit/test_trust_folder_check.py::test_another_account_that_can_change_the_folder_refuses[other1]`
 - `tests/unit/test_trust_folder_check.py::test_another_account_that_can_change_the_folder_refuses[other2]`
-- `tests/unit/test_trust_folder_check.py::test_an_account_that_can_only_read_the_folder_refuses_too`
+- `tests/unit/test_trust_folder_check.py::test_another_account_that_can_only_read_the_folder_refuses_too`
 - `tests/unit/test_trust_folder_check.py::test_an_account_on_the_known_hosts_file_itself_is_caught`
 - `tests/unit/test_trust_folder_check.py::test_before_the_first_run_the_folder_it_will_inherit_from_is_read`
 - `tests/unit/test_trust_folder_check.py::test_permissions_windows_will_not_give_refuse[modify]`

@@ -83,3 +83,6 @@ last on the integration branch.
 - 2026-11-22: a baseline gate run crashed at pytest session finish on the shared
   `pytest-current` link when several gates ran at once. #167 opened and Wave A agents told to
   set `PYTEST_DEBUG_TEMPROOT` per worktree.
+- 2026-11-22: merged #139 at `a308ac2`; gate: ruff/format/mypy pass, pytest 2978 passed, 1
+  skipped, 21 failed (all Windows baseline; #158 and #160 passed); baseline page's
+  `test_an_account_that_can_only_read_the_folder_refuses_too` corrected to `test_another_...`.
