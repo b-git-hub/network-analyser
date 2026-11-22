@@ -146,6 +146,31 @@ def test_an_old_nxos_train_is_the_devices_own_train() -> None:
     assert advice.latest_release == "10.4(8)"
 
 
+def test_an_nxos_release_number_that_moves_stays_in_the_same_train() -> None:
+    results = _results(
+        _device(
+            A,
+            "N1",
+            "nx-a",
+            platform=Platform.NX_OS,
+            model=NEXUS_MODEL,
+            chassis=NEXUS_CHASSIS,
+            release="7.3(2)D1(1)",
+        ),
+        compatible=(
+            _compatible(
+                NEXUS_CHASSIS,
+                ("7.3(5)D1(1)", "MD"),
+                ("9.3(10)", "ED"),
+            ),
+        ),
+    )
+
+    (advice,) = results.advice
+    assert advice.latest_release_in_train == "7.3(5)D1(1)"
+    assert advice.latest_release == "9.3(10)"
+
+
 def test_a_lifecycle_code_that_fails_the_pattern_is_dropped() -> None:
     results = _results(
         _device(A, "S1", "sw-a", release="17.12.4"),

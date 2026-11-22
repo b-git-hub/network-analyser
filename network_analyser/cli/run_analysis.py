@@ -396,7 +396,7 @@ def _compatible(
 
 
 def _train(release: str, os_type: OsType) -> str | None:
-    """The Train a release belongs to, such as `17.9` or `7.0(3)I7`; None if unreadable."""
+    """The Train a release belongs to, such as `17.9` or `7.0I7`; None if unreadable."""
     normalised = normalise_release(release)
     if _TRAIN.match(normalised) is None:
         return None

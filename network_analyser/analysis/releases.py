@@ -89,8 +89,11 @@ _NEXUS_FAMILIES: Final = (
 )
 _BASE_TRAIN: Final = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}")
 _CLASSIC_TRAIN: Final = re.compile(r"\)([A-Za-z]+)")
-_NXOS_LETTER_TRAIN: Final = re.compile(
-    r"[0-9]{1,3}\.[0-9]{1,3}\([0-9]{1,3}[a-z]{0,2}\)[A-Z][0-9]{1,3}"
+# The NX-OS hardware line: the capital letter and number Cisco calls the platform designator,
+# such as `I7`, `U6` or `D1`, which follows the first parenthesised number (`7.0(3)I7(9)`,
+# `7.3(2)D1(1)`). It stays in the Train; the number before it does not (#157).
+_NXOS_HARDWARE_LINE: Final = re.compile(
+    r"[0-9]{1,3}\.[0-9]{1,3}\([0-9]{1,3}[a-z]{0,2}\)([A-Z][0-9]{1,3})"
 )
 # The `platforms[].name` text Cisco's openVuln reply gives each Nexus series (#126). The names
 # are Cisco's own, as its samples and the 2026 live replies show; a series whose text cannot be
@@ -231,11 +234,16 @@ def train_of(release: str, os_type: OsType) -> str:
 
     IOS-XE and NX-OS use the first two dotted numbers, and an IOS-XE 3.x release keeps the
     Train letter that follows its rebuild (`3.6.8E` is in Train `3.6E`, #151). Classic IOS
-    keeps the Train letter that follows the maintenance rebuild. An NX-OS release with a
-    hardware-line segment, a capital letter and a number such as `I7`, `U6`, `A8`, `F3` or
-    `N1`, keeps everything up to and including it, so `7.0(3)I7(9)` is in Train `7.0(3)I7`
-    and `6.0(2)U6(10)` in `6.0(2)U6` (#137): releases built for different hardware lines are
-    never lumped (story 19).
+    keeps the Train letter that follows the maintenance rebuild.
+
+    An NX-OS release with a hardware line keeps that line's capital letter and number, and
+    drops the first parenthesised number (#157). Cisco names a release by its major and minor
+    numbers, a maintenance release number, the platform designator and, if present, a rebuild
+    identifier; the maintenance number is a release step within the Train, not a new Train. So
+    `7.0(3)I7(9)` is in Train `7.0I7` and `6.0(2)U6(10)` in `6.0U6`, while `7.3(2)D1(1)` and
+    `7.3(5)D1(1)` are both in `7.3D1` and `7.3(0)N1(1)` and `7.3(13)N1(1)` both in `7.3N1`
+    (decided on #157). Releases built for different hardware lines, such as `7.0(3)I7(9)` and
+    `7.0(3)I6(1)`, are never lumped (stories 19 of #122, #137).
     """
     match = _BASE_TRAIN.match(release)
     base = match.group(0) if match else release
@@ -248,9 +256,9 @@ def train_of(release: str, os_type: OsType) -> str:
         if letter_train is not None:
             return f"{base}{letter_train.group(1)}"
     if os_type is OsType.NX_OS:
-        letter_train = _NXOS_LETTER_TRAIN.match(release)
-        if letter_train is not None:
-            return letter_train.group(0)
+        hardware_line = _NXOS_HARDWARE_LINE.match(release)
+        if hardware_line is not None:
+            return f"{base}{hardware_line.group(1)}"
     return base
 
 
