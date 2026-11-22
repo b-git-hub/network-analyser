@@ -125,9 +125,15 @@ def _canary_cisco() -> FakeCisco:
             ]
         },
     )
+    padded = _json(
+        200, {"EOXRecord": [{"EOLProductID": SLASHED_PID, "EOXInputValue": f"{SLASHED_PID} "}]}
+    )
+    compatible = "/software/suggestion/v2/suggestions/compatible/productId/"
     fake.scripted.extend(
         [
-            (f"{eox}{SLASHED_PID}", refused),
+            (f"{eox}{SLASHED_PID},CISCO3925/K9", refused),
+            (f"{eox}{SLASHED_PID}", padded),
+            (f"{compatible}{SLASHED_PID}?", refused),
             (f"{eox}SYNTH-PID-3%252FK9", refused),
             (f"{eox}SYNTH-PID-3*", wildcard),
             (f"{releases}{SLASHED_PID}", refused),
@@ -264,8 +270,17 @@ def test_a_slashed_pid_is_also_asked_raw_double_encoded_and_as_a_base_wildcard()
         f"{eox}SYNTH-PID-3*",
         f"{releases}SYNTH-PID-3/K9",
         f"{releases}SYNTH-PID-3%252FK9",
+        f"{eox}SYNTH-PID-3/K9,CISCO3925/K9",
+        "/software/suggestion/v2/suggestions/compatible/productId/SYNTH-PID-3/K9?pageIndex=1",
     ):
         assert path in paths
+
+
+def test_an_echo_that_differs_from_the_pid_is_described_by_class_never_by_value() -> None:
+    summary = collect_summary(_session(_canary_cisco()), Inputs(pid=SLASHED_PID))
+
+    assert "EOXInputValue extra text: before none; after 1 characters (whitespace) x1" in summary
+    assert SLASHED_PID not in summary
 
 
 def test_the_wildcard_probe_counts_records_naming_the_pid_and_never_prints_it() -> None:

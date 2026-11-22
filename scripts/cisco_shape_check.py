@@ -88,6 +88,9 @@ SAMPLE_PID: Final = "SYNTH-PID-1"
 SAMPLE_SLASH_PID: Final = "SYNTH-PID-2/K9"
 """A synthetic PID with a licence suffix, for the `%2F` question."""
 
+DOC_SLASH_PID: Final = "CISCO3925/K9"
+"""The slashed PID in Cisco's own Software Suggestion example, so a batch has two real ones."""
+
 SAMPLE_RELEASE: Final = "1.2.3"
 """A synthetic release Cisco cannot know: the unknown-release error shape."""
 
@@ -484,6 +487,14 @@ def _eox_probes(inputs: Inputs) -> list[Probe]:
                         Kind.EOX_WILDCARD,
                         (inputs.pid,),
                     ),
+                    Probe(
+                        "hardware EoX, operator PID and Cisco's documented slashed sample "
+                        "comma-joined, raw slashes (the tool batches PIDs)",
+                        CiscoEndpoint.EOX,
+                        f"/supporttools/eox/rest/5/EOXByProductID/1/{inputs.pid},{DOC_SLASH_PID}",
+                        Kind.EOX,
+                        (inputs.pid, DOC_SLASH_PID),
+                    ),
                 ]
             )
         # The production hardware path (`advisories/lookup.py`), with the operator's own PID,
@@ -592,6 +603,12 @@ def _suggestion_probes(inputs: Inputs) -> list[Probe]:
                         CiscoEndpoint.SUGGESTION,
                         f"{releases}{_double_encoded(inputs.pid)}",
                         Kind.SUGGESTIONS,
+                    ),
+                    Probe(
+                        "Software Suggestion compatible list, operator PID, raw slash, page 1",
+                        CiscoEndpoint.COMPATIBLE,
+                        f"{compatible}{inputs.pid}?pageIndex=1",
+                        Kind.COMPATIBLE,
                     ),
                 ]
             )
@@ -779,6 +796,7 @@ def _eox_lines(document: object, sent: tuple[str, ...]) -> list[str]:
     if not isinstance(records, list):
         return ["    EOXRecord: not an array"]
     exact = contains = unrelated = absent = 0
+    extras: Counter[str] = Counter()
     for record in records:
         value = record.get("EOXInputValue") if isinstance(record, dict) else None
         if not isinstance(value, str):
@@ -787,13 +805,38 @@ def _eox_lines(document: object, sent: tuple[str, ...]) -> list[str]:
             exact += 1
         elif any(release in value for release in sent):
             contains += 1
+            extras[_extra_text(value, sent)] += 1
         else:
             unrelated += 1
     echo = (
         f"    EOXInputValue: equals a value sent {exact}, contains one but differs {contains}, "
         f"unrelated {unrelated}, absent or not text {absent}"
     )
-    return [f"    EOXRecord: {len(records)} records for {len(sent)} values sent", echo]
+    lines = [f"    EOXRecord: {len(records)} records for {len(sent)} values sent", echo]
+    lines.extend(f"    EOXInputValue extra text: {what} x{n}" for what, n in sorted(extras.items()))
+    return lines
+
+
+def _extra_text(value: str, sent: tuple[str, ...]) -> str:
+    """Where the text around a sent value sits, by length and character class only."""
+    inner = max((item for item in sent if item in value), key=len)
+    before, _, after = value.partition(inner)
+    return f"before {_char_classes(before)}; after {_char_classes(after)}"
+
+
+def _char_classes(text: str) -> str:
+    if not text:
+        return "none"
+    classes = sorted({_char_class(char) for char in text})
+    return f"{len(text)} characters ({', '.join(classes)})"
+
+
+def _char_class(char: str) -> str:
+    if char.isspace():
+        return "whitespace"
+    if char.isalnum():
+        return "letter or digit"
+    return {",": "comma", "*": "asterisk", "/": "slash"}.get(char, "other punctuation")
 
 
 def _wildcard_lines(document: object, sent: tuple[str, ...]) -> list[str]:
