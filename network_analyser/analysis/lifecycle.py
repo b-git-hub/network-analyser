@@ -18,7 +18,9 @@ can never make a Check read the other's dates (stories 74-75). A date Cisco did 
 that cannot be read, is never guessed at: it raises no level and no advice.
 
 A source marked unavailable raises no per-device Finding for it; its Check is skipped with the
-reason, so an outage reads as one problem rather than hundreds (story 118).
+reason, so an outage reads as one problem rather than hundreds (story 118). A PID or release
+Cisco could not be asked about, or had no record for, is a Low "could not check" under its own
+Check, so a gap never reads as "no EoX announced" (#153).
 """
 
 from dataclasses import replace
@@ -29,6 +31,7 @@ from network_analyser.analysis.chassis import chassis_pid
 from network_analyser.analysis.ids import finding_id
 from network_analyser.analysis.outcome import NOT_COLLECTED_REASON
 from network_analyser.analysis.releases import (
+    family_of,
     normalise_listed_release,
     normalise_release,
     release_key,
@@ -36,11 +39,13 @@ from network_analyser.analysis.releases import (
 )
 from network_analyser.records.analysis import (
     AnalysisInput,
+    EoxAnswers,
+    HardwareEox,
     HardwareItem,
     SoftwareEox,
     SourceUnavailable,
 )
-from network_analyser.records.lookup_values import is_safe_pid
+from network_analyser.records.lookup_values import is_safe_pid, is_safe_release
 from network_analyser.records.topology import (
     Check,
     CheckSkip,
@@ -69,6 +74,20 @@ SOFTWARE_EOX_CHECK: Final = Check(
 )
 """Story 75: one Finding per device for its release's end-of-life dates."""
 
+HARDWARE_EOX_COULD_NOT_CHECK_CHECK: Final = Check(
+    "lifecycle-hardware-eox-could-not-check",
+    "Hardware EoX could not check",
+    CheckType.LIFECYCLE,
+)
+"""The Low Finding that keeps an unchecked hardware PID from reading as "no EoX" (#153)."""
+
+SOFTWARE_EOX_COULD_NOT_CHECK_CHECK: Final = Check(
+    "lifecycle-software-eox-could-not-check",
+    "Software EoX could not check",
+    CheckType.LIFECYCLE,
+)
+"""The Low Finding that keeps an unchecked release from reading as "no EoX" (#153)."""
+
 SUGGESTED_RELEASE_CHECK: Final = Check(
     "lifecycle-suggested-release",
     "Suggested Release",
@@ -77,6 +96,13 @@ SUGGESTED_RELEASE_CHECK: Final = Check(
 """Story 77: a Low Finding when the release is not one Cisco suggests for its PID."""
 
 _PID_NOT_SENT: Final = "the PID was not sent to Cisco because it does not match the safe pattern"
+_NOT_SENT: Final = "was not sent to Cisco because it does not match the safe pattern"
+_RELEASE_NOT_READABLE: Final = "the release is not readable"
+_RELEASE_FAMILY_UNKNOWN: Final = "the release's OS family is not one Cisco EoX is asked about"
+_EOX_COULD_NOT_CHECK_TODO: Final = (
+    "Make sure the device's inventory and release are readable, then run the tool with Cisco "
+    "lookups on so the dates can be read."
+)
 _EOX_SOURCE: Final = "Cisco EoX"
 _SUGGESTION_SOURCE: Final = "Cisco Software Suggestion"
 _REPLACE: Final = (
@@ -165,6 +191,48 @@ def software_eox(data: AnalysisInput) -> tuple[Finding, ...]:
                 cisco_detail=EoxDetail(kind=CiscoDetailKind.EOX, items=items),
             )
         )
+    return tuple(findings)
+
+
+def hardware_eox_could_not_check(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Return one Low Finding per device with a hardware PID whose EoX data was not checked.
+
+    A PID the safe pattern refused, a PID Cisco had no record for and a PID Cisco was never
+    asked are each a gap, so the device never reads as "no EoX announced" (#153). A PID Cisco
+    answered with no EoX dates is an answer, not a gap, and raises nothing here.
+    """
+    source = data.answers.eox
+    if isinstance(source, SourceUnavailable):
+        return ()
+    answers = _hardware_answers_by_pid(source)
+    findings: list[Finding] = []
+    for device in data.topology.devices:
+        gaps = _hardware_gaps(data, device, answers)
+        if gaps:
+            findings.append(
+                _eox_could_not_check(device, "hardware", gaps, HARDWARE_EOX_COULD_NOT_CHECK_CHECK)
+            )
+    return tuple(findings)
+
+
+def software_eox_could_not_check(data: AnalysisInput) -> tuple[Finding, ...]:
+    """Return one Low Finding per device whose release's EoX data was not checked (#153).
+
+    A release that cannot be read, whose OS family the tool never asks EoX about, that the
+    safe pattern refused or that Cisco had no record for is a gap, so it never reads as "no
+    EoX announced".
+    """
+    source = data.answers.eox
+    if isinstance(source, SourceUnavailable):
+        return ()
+    answers = _software_answers_by_release(source)
+    findings: list[Finding] = []
+    for device in data.topology.devices:
+        gap = _software_gap(device, answers)
+        if gap is not None:
+            findings.append(
+                _eox_could_not_check(device, "release", (gap,), SOFTWARE_EOX_COULD_NOT_CHECK_CHECK)
+            )
     return tuple(findings)
 
 
@@ -321,6 +389,24 @@ def _hardware_answers(data: AnalysisInput) -> dict[str, tuple[EoxItem, ...]]:
     return {pid: tuple(items) for pid, items in answers.items()}
 
 
+def _hardware_answers_by_pid(source: tuple[EoxAnswers, ...]) -> dict[str, HardwareEox]:
+    """Each hardware PID's answer, as the Run adapted it from Cisco's reply (#153)."""
+    answers: dict[str, HardwareEox] = {}
+    for entry in source:
+        for hardware in entry.hardware:
+            answers.setdefault(hardware.pid, hardware)
+    return answers
+
+
+def _software_answers_by_release(source: tuple[EoxAnswers, ...]) -> dict[str, SoftwareEox]:
+    """Each release's answer, as the Run adapted it from Cisco's reply (#153)."""
+    answers: dict[str, SoftwareEox] = {}
+    for entry in source:
+        for software in entry.software:
+            answers.setdefault(software.release, software)
+    return answers
+
+
 def _software_answers(data: AnalysisInput) -> tuple[SoftwareEox, ...]:
     """Every software EoX answer Cisco gave, one per release asked about."""
     source = data.answers.eox
@@ -337,6 +423,48 @@ def _software_for(answers: tuple[SoftwareEox, ...], release: str) -> tuple[EoxIt
         if normalise_release(answer.release) == normalised:
             items.extend(answer.items)
     return tuple(items)
+
+
+def _hardware_gaps(
+    data: AnalysisInput, device: VisitedDevice, answers: dict[str, HardwareEox]
+) -> tuple[str, ...]:
+    """Why each of a device's hardware PIDs has no EoX answer, skipping the ones that do (#153)."""
+    gaps: list[str] = []
+    for item in _inventory_for(data, device.id):
+        gap = _hardware_gap(item.pid, answers)
+        if gap is not None:
+            gaps.append(gap)
+    return tuple(gaps)
+
+
+def _hardware_gap(pid: str, answers: dict[str, HardwareEox]) -> str | None:
+    """Why one PID's EoX dates were not checked, or None when Cisco answered for it (#153)."""
+    if not is_safe_pid(pid):
+        return f"PID {pid} {_NOT_SENT}"
+    answer = answers.get(pid)
+    if answer is None:
+        return f"Cisco EoX gave no answer for PID {pid}"
+    if answer.unanswered is not None:
+        return f"Cisco EoX has no record for PID {pid} ({answer.unanswered})"
+    return None
+
+
+def _software_gap(device: VisitedDevice, answers: dict[str, SoftwareEox]) -> str | None:
+    """Why a device's release has no EoX answer, or None when Cisco answered for it (#153)."""
+    release = device.software_version
+    if not isinstance(release, str) or not release:
+        return _RELEASE_NOT_READABLE
+    if family_of(device.platform, release) is None:
+        return _RELEASE_FAMILY_UNKNOWN
+    normalised = normalise_release(release)
+    if not is_safe_release(normalised):
+        return f"release {normalised} {_NOT_SENT}"
+    answer = answers.get(normalised)
+    if answer is None:
+        return f"Cisco EoX gave no answer for release {normalised}"
+    if answer.unanswered is not None:
+        return f"Cisco EoX has no record for release {normalised} ({answer.unanswered})"
+    return None
 
 
 def _passed_hardware_items(
@@ -527,6 +655,25 @@ def _suggested_finding(
         what_was_found=what,
         what_to_do=_SUGGESTED_TODO,
         source=_SUGGESTION_SOURCE,
+        summary=what,
+    )
+
+
+def _eox_could_not_check(
+    device: VisitedDevice, subject: str, gaps: tuple[str, ...], check: Check
+) -> Finding:
+    """The Low Finding that keeps an unchecked EoX value from reading as "no EoX" (#153)."""
+    what = f"Could not check the {subject}'s end-of-life dates: {'; '.join(gaps)}."
+    return Finding(
+        id=finding_id(check.id, f"device:{device.id}"),
+        devices=(device.id,),
+        items=(),
+        evidence=(),
+        level=FindingLevel.LOW,
+        check=check,
+        what_was_found=what,
+        what_to_do=_EOX_COULD_NOT_CHECK_TODO,
+        source=_EOX_SOURCE,
         summary=what,
     )
 
