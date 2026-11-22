@@ -17,7 +17,8 @@ The safety envelope it owns:
   it expired, not that the key is bad (#133);
 - batching (20 EoX, 10 Suggestion), pacing (openVuln 30 a minute), `Retry-After`, Cisco's
   rate-limit codes and exactly one retry, while a rejected key is never retried (stories
-  19, 36);
+  19, 36); a source that keeps refusing is not asked again, and its remaining values read
+  "Cisco kept refusing the calls" (#154);
 - strict patterns on every outbound value, so an odd string is refused rather than sent
   (story 13).
 
