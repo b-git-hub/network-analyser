@@ -216,6 +216,16 @@ def test_the_slash_pid_is_also_asked_in_the_query_form_raw_and_encoded() -> None
     assert any("EOXByProductID/1?input1=SYNTH-PID-2%2FK9" in path for path in paths)
 
 
+def test_the_base_pid_without_the_licence_suffix_is_also_asked() -> None:
+    fake = _canary_cisco()
+
+    collect_summary(_session(fake), Inputs(pid="SYNTH-PID-3/K9"))
+
+    paths = fake.paths()
+    assert "/supporttools/eox/rest/5/EOXByProductID/1/SYNTH-PID-3" in paths
+    assert "/software/suggestion/v2/suggestions/releases/productIds/SYNTH-PID-3" in paths
+
+
 def test_the_software_eox_is_also_asked_with_the_ios_xe_os_type() -> None:
     fake = _canary_cisco()
 

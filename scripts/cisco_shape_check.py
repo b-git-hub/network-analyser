@@ -441,6 +441,18 @@ def _eox_probes(inputs: Inputs) -> list[Probe]:
         ]
     )
     if inputs.pid is not None:
+        # Cisco's Suggestion API asks for a `basePID`: the PID without the licence suffix.
+        base = inputs.pid.split("/", 1)[0]
+        if base != inputs.pid:
+            probes.append(
+                Probe(
+                    "hardware EoX, operator base PID without the licence suffix",
+                    CiscoEndpoint.EOX,
+                    f"/supporttools/eox/rest/5/EOXByProductID/1/{wire_pid(base)}",
+                    Kind.EOX,
+                    (base,),
+                )
+            )
         # The production hardware path (`advisories/lookup.py`), with the operator's own PID,
         # then the same PID in the query form, raw and encoded.
         probes.extend(
@@ -496,6 +508,16 @@ def _suggestion_probes(inputs: Inputs) -> list[Probe]:
     ]
     if inputs.pid is not None:
         pid = wire_pid(inputs.pid)
+        base = inputs.pid.split("/", 1)[0]
+        if base != inputs.pid:
+            probes.append(
+                Probe(
+                    "Software Suggestion, operator base PID without the licence suffix",
+                    CiscoEndpoint.SUGGESTION,
+                    f"{releases}{base}",
+                    Kind.SUGGESTIONS,
+                )
+            )
         probes.extend(
             [
                 Probe(
