@@ -29,8 +29,9 @@ One package, `network_analyser/`, with the eleven modules from the spec plus two
 | Module | May import (package modules) |
 |---|---|
 | `records`, `_winsys` (leaves) | nothing |
-| `scope`, `credentials`, `trust_store`, `platforms`, `topology`, `analysis`, `diagram` | `records` |
-| `backup_store` | `records`, `credentials` |
+| `scope`, `credentials`, `platforms`, `topology`, `analysis`, `diagram` | `records` |
+| `trust_store` | `records`, `_winsys` |
+| `backup_store` | `records`, `credentials`, `_winsys` |
 | `run_output` | `records`, `credentials`, `_winsys` |
 | `device_gateway` | `records`, `scope`, `trust_store`, `credentials`, `platforms` |
 | `discovery` | `records`, `scope`, `credentials`, `device_gateway`, `platforms`, `backup_store`, `topology` |
@@ -65,9 +66,9 @@ Changing the import table or an owner is a design decision: say why in the commi
 ## 5. Output
 
 - Only `cli` writes to the console [ruff T201]. Device text is escaped (control characters as `\xNN`) before it is printed.
-- Everything `run` prints passes through the secret scan: `cli.console.scanned_console` puts a scanning stream in front of standard output and standard error, and each secret joins the `credentials.SecretScan` the moment it is typed (#48). A match shows as `[blocked]`, with one warning and a hit count at the end, never naming the set. Text that must not be written with a part blocked (a path the tool needs again) is refused instead, through `SecretScan.holds_secret` [tests/security/test_5_canary.py].
+- Everything `run` prints passes through the secret scan: `cli.console.scanned_console` puts a scanning stream in front of standard output and standard error, and each secret joins the `credentials.SecretScan` the moment it is typed (#48). The scan keeps only a keyed fingerprint and the length of each value, never the value itself, so the wipe before the Cisco step leaves nothing recoverable in it (#145). A match shows as `[blocked]`, with one warning and a hit count at the end, never naming the set. Text that must not be written with a part blocked (a path the tool needs again) is refused instead, through `SecretScan.holds_secret` [tests/security/test_5_canary.py].
 - `audit.log` takes only the events in `records/events.py`, each with its fixed field list in `run_output.AUDIT_SCHEMA`; the writer refuses anything else, and any value that is not plain data. A ticket that emits a new kind of event adds both. No event carries device output: a parser problem is the command, the parser and a fixed reason; a caught exception is `records.events.error_event` (its type and a fixed message, never its text) [tests/unit/test_audit_log.py].
-- Files are written only by named writer helpers, which pass text through the secret scan and write temp-then-rename. A plaintext file in the Run folder (`topology.json`, the diagrams, the Run report) is written with `run_output.write_scanned_text` or `write_scanned_json` (#52); scan each value before HTML, XML or JSON escaping, which could hide a secret from a scan of the finished text. A new writer adds its file to `WRITE_OWNERS` in tests/arch/test_secret_rules.py, with the reason in the commit. Never write plaintext config or device output.
+- Files are written only by named writer helpers, which pass text through the secret scan and write temp-then-rename. The rename goes through `_winsys.retry_rename`, which retries only a Windows `PermissionError` a bounded number of times and then raises, so another process holding the new file for a moment does not end a Run (#158). A plaintext file in the Run folder (`topology.json`, the diagrams, the Run report) is written with `run_output.write_scanned_text` or `write_scanned_json` (#52); scan each value before HTML, XML or JSON escaping, which could hide a secret from a scan of the finished text. A new writer adds its file to `WRITE_OWNERS` in tests/arch/test_secret_rules.py, with the reason in the commit. Never write plaintext config or device output.
 - The tool never deletes a Run folder or a Backup (story 104). Removing a file or folder is allowed only in the files listed in `DELETE_OWNERS`, each for a named file of the tool's own [tests/arch/test_no_deletes.py].
 - Paths under the Run folder go to file calls in their `_winsys.os_path` form (`\\?\` on Windows), so paths over 260 characters work (#42). Show and register the plain path.
 - Names put on disk from operator or device text pass `records.safe_names` (letters, digits, `-`, `.`, `_`; no trailing `.`).

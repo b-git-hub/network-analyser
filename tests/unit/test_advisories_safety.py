@@ -6,6 +6,8 @@ these tests concentrate on what comes back: the keys, the token, the counts and 
 text.
 """
 
+import base64
+
 from network_analyser.advisories import Pacer, ask_cisco
 from network_analyser.advisories.transport import HttpResponse
 from network_analyser.credentials import BLOCKED, Secret, SecretScan
@@ -16,6 +18,7 @@ from network_analyser.records.cisco import (
     CiscoOsType,
     LookupQuestions,
     ReleaseQuestion,
+    SoftwareEoxQuestion,
     SourceUnavailable,
     TokenOutcome,
 )
@@ -83,7 +86,7 @@ def answers_with(scan: SecretScan | None = None) -> CiscoAnswers:
         LookupQuestions(
             releases=(ReleaseQuestion(CiscoOsType.IOS_XE, "17.9.4a"),),
             hardware_pids=("C9300-48P",),
-            software_releases=("17.9.4a",),
+            software_releases=(SoftwareEoxQuestion(CiscoOsType.IOS_XE, "17.9.4a"),),
             suggestion_pids=("C9300-48P",),
         ),
         Secret(CLIENT_ID),
@@ -113,6 +116,18 @@ def test_the_three_secrets_join_the_scan_as_soon_as_they_exist() -> None:
     blocked, hits = scan.contains_secret(f"{CLIENT_ID} {CLIENT_SECRET} {TOKEN}")
     assert blocked == f"{BLOCKED} {BLOCKED} {BLOCKED}"
     assert hits == 3
+
+
+def test_the_basic_authorization_value_joins_the_scan_too() -> None:
+    """The header holds the pair base64-encoded, which carries neither secret literally (#150)."""
+    scan = SecretScan()
+
+    answers_with(scan)
+
+    basic = base64.b64encode(f"{CLIENT_ID}:{CLIENT_SECRET}".encode()).decode()
+    blocked, hits = scan.contains_secret(f"Authorization: Basic {basic}")
+    assert blocked == f"Authorization: Basic {BLOCKED}"
+    assert hits == 1
 
 
 def test_the_tally_is_counts_only() -> None:

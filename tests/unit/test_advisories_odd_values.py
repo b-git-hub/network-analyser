@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from network_analyser.advisories import Pacer, ask_cisco
+from network_analyser.advisories import HttpRequest, Pacer, ask_cisco
 from network_analyser.credentials import Secret
 from network_analyser.records.cisco import (
     AdvisoriesAnswer,
@@ -20,11 +20,18 @@ from network_analyser.records.cisco import (
     EoxAnswer,
     LookupQuestions,
     ReleaseQuestion,
+    SoftwareEoxQuestion,
     SourceUnavailable,
     SuggestionsAnswer,
     TokenOutcome,
 )
-from tests.support.fake_cisco import CLIENT_ID, CLIENT_SECRET, FakeCisco
+from tests.support.fake_cisco import (
+    CLIENT_ID,
+    CLIENT_SECRET,
+    TOKEN,
+    FakeCisco,
+    UnsafeValueSentError,
+)
 
 GOOD = "C9300-48P"
 ROUTER = "ISR4451-X/K9"
@@ -117,7 +124,7 @@ def asking(*pids: str, release: str = "17.9.4a") -> LookupQuestions:
     return LookupQuestions(
         releases=(ReleaseQuestion(CiscoOsType.IOS_XE, release),),
         hardware_pids=pids,
-        software_releases=(release,),
+        software_releases=(SoftwareEoxQuestion(CiscoOsType.IOS_XE, release),),
         suggestion_pids=pids,
         compatible_pids=pids,
     )
@@ -158,7 +165,11 @@ def test_an_odd_release_is_refused_alone_and_the_good_release_is_still_asked() -
             ReleaseQuestion(CiscoOsType.IOS_XE, "17.9.4a\r\nHost: evil.example"),
             ReleaseQuestion(CiscoOsType.IOS_XE, "../17.9"),
         ),
-        software_releases=("17.9.4a", "17.9.4a%0d%0a", "17.9.4a/.."),
+        software_releases=(
+            SoftwareEoxQuestion(CiscoOsType.IOS_XE, "17.9.4a"),
+            SoftwareEoxQuestion(CiscoOsType.IOS_XE, "17.9.4a%0d%0a"),
+            SoftwareEoxQuestion(CiscoOsType.IOS_XE, "17.9.4a/.."),
+        ),
     )
 
     answers = lookup(cisco, asked)
@@ -167,7 +178,7 @@ def test_an_odd_release_is_refused_alone_and_the_good_release_is_still_asked() -
         "/security/advisories/v2/OSType/iosxe?version=17.9.4a"
     ]
     assert [path for path in cisco.paths() if "EOXBySW" in path] == [
-        "/supporttools/eox/rest/5/EOXBySWReleaseString/1/17.9.4a"
+        "/supporttools/eox/rest/5/EOXBySWReleaseString/1?input1=17.9.4a,IOS-XE"
     ]
     assert isinstance(answers.advisories[0], AdvisoriesAnswer)
     assert answers.advisories[0].question.release == "17.9.4a"
@@ -257,3 +268,25 @@ def test_when_every_value_is_odd_nothing_is_sent_and_every_source_says_why() -> 
     assert isinstance(answers.hardware_eox, SourceUnavailable)
     assert isinstance(answers.suggestions, SourceUnavailable)
     assert isinstance(answers.compatible, SourceUnavailable)
+
+
+def test_the_fake_has_its_own_pid_path_rule_not_the_codes_safe_pattern(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A loosened code pattern must not make the fake accept an odd PID (#155).
+
+    The fake's rule is its own literal path check, so it never imports `is_safe_pid`. The
+    planted violation below makes the code's pattern accept anything, and the fake must
+    ignore it.
+    """
+    monkeypatch.setattr("tests.support.fake_cisco.is_safe_pid", lambda _value: True, raising=False)
+    request = HttpRequest(
+        host="apix.cisco.com",
+        port=443,
+        method="GET",
+        path="/supporttools/eox/rest/5/EOXByProductID/1/C9300;48P",
+        headers=(("Authorization", f"Bearer {TOKEN}"),),
+    )
+
+    with pytest.raises(UnsafeValueSentError):
+        FakeCisco()(request)

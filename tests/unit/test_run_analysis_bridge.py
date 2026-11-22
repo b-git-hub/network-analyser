@@ -1,8 +1,12 @@
 """The bridge from Analysis's questions to `advisories`, and Cisco's answers back (#104)."""
 
 from dataclasses import replace
+from datetime import UTC, datetime
 
-from network_analyser import topology
+import pytest
+
+from network_analyser import analysis, topology
+from network_analyser.advisories.replies import NOT_UNDERSTOOD
 from network_analyser.cli import run_analysis
 from network_analyser.records import Platform
 from network_analyser.records.analysis import (
@@ -25,8 +29,10 @@ from network_analyser.records.cisco import (
     EndpointUse,
     EoxAnswer,
     EoxRecord,
+    EoxUnanswered,
     LookupQuestions,
     ReleaseQuestion,
+    SoftwareEoxQuestion,
     SuggestedRelease,
     SuggestionAnswer,
     SuggestionsAnswer,
@@ -39,7 +45,13 @@ from network_analyser.records.cisco import (
 from network_analyser.records.cisco import (
     SourceUnavailable as CiscoUnavailable,
 )
-from network_analyser.records.topology import EoxKind, FindingLevel, Topology
+from network_analyser.records.topology import (
+    AdvisoryOutcomeKind,
+    AnalysisResults,
+    EoxKind,
+    FindingLevel,
+    Topology,
+)
 from tests.support.analysis_records import collected_of
 from tests.support.topology_records import chassis_inventory, visited
 
@@ -132,12 +144,19 @@ def _replies() -> CiscoAnswers:
     )
 
 
+def _answered(question: ReleaseQuestion) -> AdvisoriesAnswer:
+    """The synthetic Advisory, re-asked for another release, so a reply keeps its shape."""
+    reply = _replies().advisories[0]
+    assert isinstance(reply, AdvisoriesAnswer)
+    return AdvisoriesAnswer(question, reply.advisories)
+
+
 def test_the_questions_are_only_de_duplicated_pids_and_releases() -> None:
     asked = _asked()
 
     assert asked.releases == (ReleaseQuestion(CiscoOsType.IOS_XE, "17.9.4"),)
     assert asked.hardware_pids == ("C9300-48P",)
-    assert asked.software_releases == ("17.9.4",)
+    assert asked.software_releases == (SoftwareEoxQuestion(CiscoOsType.IOS_XE, "17.9.4"),)
     assert asked.suggestion_pids == ("C9300-48P",)
     assert asked.compatible_pids == ("C9300-48P",)
 
@@ -165,6 +184,115 @@ def test_advisories_become_analysis_answers_with_cisco_s_detail() -> None:
     )
 
 
+def test_a_503_on_one_release_leaves_the_other_releases_answered() -> None:
+    second = ReleaseQuestion(CiscoOsType.IOS_XE, "17.12.1")
+    asked = replace(_asked(), releases=(ReleaseQuestion(CiscoOsType.IOS_XE, "17.9.4"), second))
+    replies = replace(
+        _replies(),
+        advisories=(
+            CiscoUnavailable("Cisco returned HTTP 503"),
+            _answered(second),
+        ),
+    )
+
+    answers = run_analysis.analysis_answers(replies, asked)
+
+    assert isinstance(answers.advisories, tuple)
+    failed, good = answers.advisories
+    assert (failed.release, failed.advisories, failed.unavailable) == (
+        "17.9.4",
+        (),
+        "Cisco returned HTTP 503",
+    )
+    assert good.release == "17.12.1"
+    assert good.unavailable is None
+    assert len(good.advisories) == 1
+
+
+def test_an_unreadable_200_on_one_release_leaves_the_other_releases_answered() -> None:
+    second = ReleaseQuestion(CiscoOsType.IOS_XE, "17.12.1")
+    asked = replace(_asked(), releases=(ReleaseQuestion(CiscoOsType.IOS_XE, "17.9.4"), second))
+    replies = replace(
+        _replies(),
+        advisories=(
+            CiscoUnavailable(NOT_UNDERSTOOD),
+            _answered(second),
+        ),
+    )
+
+    answers = run_analysis.analysis_answers(replies, asked)
+
+    assert isinstance(answers.advisories, tuple)
+    failed, good = answers.advisories
+    assert (failed.release, failed.advisories, failed.unavailable) == (
+        "17.9.4",
+        (),
+        NOT_UNDERSTOOD,
+    )
+    assert good.release == "17.12.1"
+    assert good.unavailable is None
+    assert len(good.advisories) == 1
+
+
+def test_every_release_failing_still_collapses_the_source() -> None:
+    second = ReleaseQuestion(CiscoOsType.IOS_XE, "17.12.1")
+    asked = replace(_asked(), releases=(ReleaseQuestion(CiscoOsType.IOS_XE, "17.9.4"), second))
+    replies = replace(
+        _replies(),
+        advisories=(
+            CiscoUnavailable("Cisco returned HTTP 503"),
+            CiscoUnavailable("Cisco returned HTTP 503"),
+        ),
+    )
+
+    answers = run_analysis.analysis_answers(replies, asked)
+
+    assert answers.advisories == SourceUnavailable("Cisco returned HTTP 503")
+
+
+def test_a_rejected_key_still_collapses_the_source_with_every_release() -> None:
+    second = ReleaseQuestion(CiscoOsType.IOS_XE, "17.12.1")
+    asked = replace(_asked(), releases=(ReleaseQuestion(CiscoOsType.IOS_XE, "17.9.4"), second))
+    replies = replace(
+        _replies(),
+        advisories=(
+            AdvisoriesAnswer(ReleaseQuestion(CiscoOsType.IOS_XE, "17.9.4"), ()),
+            CiscoUnavailable("Cisco rejected the API key"),
+        ),
+    )
+
+    answers = run_analysis.analysis_answers(replies, asked)
+
+    assert answers.advisories == SourceUnavailable("Cisco rejected the API key")
+
+
+def test_a_device_whose_own_release_had_a_503_reads_could_not_check() -> None:
+    first = visited("192.0.2.1", "TEST0000A01", hostname="sw-a")
+    second_record = visited("192.0.2.2", "TEST0000A02", hostname="sw-b")
+    version = second_record.version
+    assert version is not None
+    second = replace(second_record, version=replace(version, software_version="17.12.1"))
+    built = topology.build([first, second])
+    asked = run_analysis.lookup_questions(AnalysisInput(topology=built))
+    replies = replace(
+        _replies(),
+        advisories=tuple(
+            CiscoUnavailable("Cisco returned HTTP 503")
+            if question.release == "17.12.1"
+            else _answered(question)
+            for question in asked.releases
+        ),
+    )
+
+    answers = run_analysis.analysis_answers(replies, asked)
+    results = run_analysis.analysed(built, answers)
+    advice = {item.device: item.advisory_outcome for item in results.advice}
+    ids = {device.management_ip: device.id for device in built.devices}
+
+    assert advice[ids[first.ip]].kind is AdvisoryOutcomeKind.MATCHES
+    assert advice[ids[second.ip]].kind is AdvisoryOutcomeKind.COULD_NOT_CHECK
+
+
 def test_one_release_cisco_does_not_know_leaves_the_other_releases_answered() -> None:
     unknown = ReleaseQuestion(CiscoOsType.IOS_XE, "17.99.1")
     replies = _replies()
@@ -185,6 +313,26 @@ def test_one_release_cisco_does_not_know_leaves_the_other_releases_answered() ->
     assert len(good.advisories) == 1
 
 
+def test_analysed_pins_the_reference_date_it_is_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Run hands Analysis one moment, so every Lifecycle Check judges the same day (#150)."""
+    seen: list[AnalysisInput] = []
+    real = analysis.analyse
+
+    def spy(data: AnalysisInput) -> AnalysisResults:
+        seen.append(data)
+        return real(data)
+
+    monkeypatch.setattr(analysis, "analyse", spy)
+    moment = datetime(2026, 11, 21, 23, 30, tzinfo=UTC)
+
+    run_analysis.analysed(_built(), as_of=moment)
+
+    (data,) = seen
+    assert data.as_of == moment
+
+
 def test_eox_becomes_one_answer_per_pid_and_per_release_asked() -> None:
     answers = run_analysis.analysis_answers(_replies(), _asked())
 
@@ -196,7 +344,108 @@ def test_eox_becomes_one_answer_per_pid_and_per_release_asked() -> None:
     assert hardware.items[0].kind is EoxKind.HARDWARE
     assert hardware.items[0].last_date_of_support == "2027-01-01"
     assert software.release == "17.9.4"
-    assert software.items[0].kind is EoxKind.SOFTWARE
+    assert software.items == ()
+    assert software.unanswered == run_analysis.SOFTWARE_EOX_MATCH_PENDING
+
+
+def test_an_eox_no_record_becomes_that_pids_unanswered_reason() -> None:
+    replies = replace(
+        _replies(),
+        hardware_eox=EoxAnswer(
+            records=(_eox(input_type="PID"),),
+            unanswered=(EoxUnanswered("C9300-24P", "SSA_ERR_026"),),
+        ),
+    )
+    asked = replace(_asked(), hardware_pids=("C9300-48P", "C9300-24P"))
+
+    answers = run_analysis.analysis_answers(replies, asked)
+
+    assert isinstance(answers.eox, tuple)
+    (eox,) = answers.eox
+    assert [(item.pid, item.unanswered) for item in eox.hardware] == [
+        ("C9300-48P", None),
+        ("C9300-24P", "SSA_ERR_026"),
+    ]
+
+
+def test_an_eox_value_outside_the_safe_pattern_is_marked_not_sent() -> None:
+    asked = replace(_asked(), hardware_pids=("C9300 48P",))
+
+    answers = run_analysis.analysis_answers(_replies(), asked)
+
+    assert isinstance(answers.eox, tuple)
+    (eox,) = answers.eox
+    (hardware,) = eox.hardware
+    assert hardware.pid == "C9300 48P"
+    assert hardware.items == ()
+    assert hardware.unanswered is not None
+    assert "safe pattern" in hardware.unanswered
+
+
+def test_a_software_release_no_record_becomes_that_release_s_unanswered_reason() -> None:
+    replies = replace(
+        _replies(),
+        software_eox=EoxAnswer(
+            records=(_eox(input_type="Software"),),
+            unanswered=(EoxUnanswered("17.12.1", "SSA_ERR_026"),),
+        ),
+    )
+    asked = replace(
+        _asked(),
+        software_releases=(
+            SoftwareEoxQuestion(CiscoOsType.IOS_XE, "17.9.4"),
+            SoftwareEoxQuestion(CiscoOsType.IOS_XE, "17.12.1"),
+        ),
+    )
+
+    answers = run_analysis.analysis_answers(replies, asked)
+
+    assert isinstance(answers.eox, tuple)
+    (eox,) = answers.eox
+    assert [(item.release, item.unanswered) for item in eox.software] == [
+        ("17.9.4", run_analysis.SOFTWARE_EOX_MATCH_PENDING),
+        ("17.12.1", "SSA_ERR_026"),
+    ]
+
+
+def test_a_software_record_the_match_rule_cannot_name_is_could_not_check_not_no_eox() -> None:
+    replies = replace(
+        _replies(),
+        software_eox=EoxAnswer(
+            records=(replace(_eox(input_type="Software"), input_value="17.9.4,IOS-XE"),),
+            unanswered=(),
+        ),
+    )
+
+    answers = run_analysis.analysis_answers(replies, _asked())
+
+    assert isinstance(answers.eox, tuple)
+    (eox,) = answers.eox
+    (software,) = eox.software
+    assert software.items == ()
+    assert software.unanswered == run_analysis.SOFTWARE_EOX_MATCH_PENDING
+
+
+def test_an_unavailable_software_eox_leaves_the_hardware_eox_answered() -> None:
+    replies = replace(_replies(), software_eox=CiscoUnavailable("Cisco did not answer"))
+
+    answers = run_analysis.analysis_answers(replies, _asked())
+
+    assert isinstance(answers.eox, tuple)
+    (eox,) = answers.eox
+    assert [(item.pid, item.unanswered) for item in eox.hardware] == [("C9300-48P", None)]
+    assert [item.unanswered for item in eox.software] == ["Cisco did not answer"]
+
+
+def test_an_unavailable_hardware_eox_leaves_the_software_eox_answered() -> None:
+    replies = replace(_replies(), hardware_eox=CiscoUnavailable("Cisco did not answer"))
+
+    answers = run_analysis.analysis_answers(replies, _asked())
+
+    assert isinstance(answers.eox, tuple)
+    (eox,) = answers.eox
+    assert [item.unanswered for item in eox.hardware] == ["Cisco did not answer"]
+    assert [item.unanswered for item in eox.software] == [run_analysis.SOFTWARE_EOX_MATCH_PENDING]
 
 
 def test_suggestions_keep_only_the_releases_cisco_suggests() -> None:
@@ -310,6 +559,6 @@ def test_an_nxos_i_series_release_keeps_its_own_train() -> None:
     assert release.advisories[0].platforms == (
         AdvisoryPlatform(
             name="Cisco Nexus 9000 Series Switches",
-            first_fixed=(FixedRelease("7.0(3)I7", "7.0(3)I7(10)"),),
+            first_fixed=(FixedRelease("7.0I7", "7.0(3)I7(10)"),),
         ),
     )

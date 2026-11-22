@@ -148,7 +148,7 @@ def test_a_finding_from_before_the_scale_does_not_count_towards_a_badge() -> Non
     ("advice", "tag", "kind"),
     [
         (
-            {"outcome": "1 Advisory matches", "upgrade_target": "17.12.8"},
+            {"outcome": "1 Advisory matches", "upgrade_target": "17.12.8", "not_cleared": 0},
             "\u2191 17.12.8",
             "target",
         ),
@@ -159,10 +159,24 @@ def test_a_finding_from_before_the_scale_does_not_count_towards_a_badge() -> Non
                 "not_cleared": 1,
             },
             "\u2191 17.12.8 (no fix in Train)",
-            "target",
+            "target-partial",
         ),
         (
-            {"outcome": "2 Advisories match", "upgrade_target": None},
+            {"outcome": "3 Advisories match", "upgrade_target": "17.12.8"},
+            "\u2191 17.12.8 (count not recorded)",
+            "target-partial",
+        ),
+        (
+            {
+                "outcome": "3 Advisories match",
+                "upgrade_target": "17.12.8",
+                "not_cleared": True,
+            },
+            "\u2191 17.12.8 (count not recorded)",
+            "target-partial",
+        ),
+        (
+            {"outcome": "2 Advisories match", "upgrade_target": None, "not_cleared": 2},
             "no fix in Train",
             "no-fix",
         ),
@@ -218,6 +232,55 @@ def test_a_device_s_tag_shows_its_upgrade_path(
     assert (marker["tag"], marker["tag_kind"]) == (tag, kind)
 
 
+def test_a_partial_target_carries_its_gap_as_a_second_line_in_the_warn_colour() -> None:
+    data = document(
+        [
+            _advised(
+                "dev-S1",
+                "sw-a",
+                outcome="3 Advisories match",
+                upgrade_target="15.2(7)E10",
+                not_cleared=1,
+            )
+        ]
+    )
+
+    marker = _marker(data, "dev-S1")
+    page = _page(data)
+    script = _script(page)
+
+    assert marker["tag"] == "\u2191 15.2(7)E10 (no fix in Train)"
+    assert marker["tag_kind"] == "target-partial"
+    assert marker["tag_note"] == "(no fix in Train)"
+    assert "short(tag" not in script  # the gap is never truncated away
+    assert "tag_note" in script
+    assert ".marker.tag.target-partial{color:var(--warn)}" in page
+    assert ".marker-key.target-partial{color:var(--warn)}" in page
+    assert "marker-key target-partial" in script  # the legend uses the warn key
+
+
+def test_a_complete_target_carries_no_second_line() -> None:
+    data = document(
+        [
+            _advised(
+                "dev-S1",
+                "sw-a",
+                outcome="1 Advisory matches",
+                upgrade_target="17.12.8",
+                not_cleared=0,
+            )
+        ]
+    )
+
+    marker = _marker(data, "dev-S1")
+
+    assert (marker["tag"], marker["tag_kind"], marker["tag_note"]) == (
+        "\u2191 17.12.8",
+        "target",
+        None,
+    )
+
+
 def test_a_device_with_no_advice_gets_no_tag() -> None:
     data = document([device("dev-S1", "sw-a")])
 
@@ -259,6 +322,7 @@ def test_hostile_device_and_advice_text_never_reaches_the_page_as_markup() -> No
                 outcome=HOSTILE,
                 upgrade_target=HOSTILE,
                 latest_release=HOSTILE,
+                not_cleared=0,
             )
         ],
         findings=[_finding("finding-1", "High", "dev-S1")],
@@ -302,6 +366,7 @@ def test_render_redraws_the_markers_from_topology_json(tmp_path: Path) -> None:
     data["devices"][0]["advice"] = {  # type: ignore[index]
         "outcome": "1 Advisory matches",
         "upgrade_target": "17.12.8",
+        "not_cleared": 0,
     }
     data["devices"][1]["advice"] = {  # type: ignore[index]
         "outcome": "2 Advisories match",

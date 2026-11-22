@@ -237,6 +237,22 @@ def test_a_control_plane_without_a_service_policy_has_none() -> None:
     assert value(collect(Device(replies)).collected.control_plane) == ControlPlanePolicy(())
 
 
+def test_a_blank_control_plane_reply_means_no_policy_is_applied() -> None:
+    replies = dict(ios_xe_text.REPLIES)
+    replies[c.SHOW_POLICY_MAP_CONTROL_PLANE] = ""
+
+    assert value(collect(Device(replies)).collected.control_plane) == ControlPlanePolicy(())
+
+
+def test_a_percent_line_control_plane_reply_stays_unknown() -> None:
+    replies = dict(ios_xe_text.REPLIES)
+    replies[c.SHOW_POLICY_MAP_CONTROL_PLANE] = "% Control plane policy is not configured\n"
+
+    assert collect(Device(replies)).collected.control_plane == Unknown(
+        f"{c.SHOW_POLICY_MAP_CONTROL_PLANE}: not understood"
+    )
+
+
 # -- SSH --------------------------------------------------------------------------------------
 
 

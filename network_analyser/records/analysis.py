@@ -236,28 +236,34 @@ class ReleaseAdvisories:
 
 @dataclass(frozen=True, slots=True)
 class HardwareEox:
-    """Cisco's EoX answer for one hardware PID (stories 73-74).
+    """Cisco's EoX answer for one hardware PID (stories 73-74; #153).
 
     Attributes:
         pid: the PID asked about.
-        items: the EoX items Cisco named for it.
+        items: the EoX items Cisco named for it; empty when Cisco answered and named none.
+        unanswered: why Cisco gave no answer for this PID, such as `SSA_ERR_026` or fixed
+            text; None when it answered (#153).
     """
 
     pid: str
     items: tuple[EoxItem, ...] = ()
+    unanswered: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class SoftwareEox:
-    """Cisco's EoX answer for one release (story 75).
+    """Cisco's EoX answer for one release (story 75; #153).
 
     Attributes:
         release: the release asked about.
-        items: the EoX items Cisco named for it.
+        items: the EoX items Cisco named for it; empty when Cisco answered and named none.
+        unanswered: why Cisco gave no answer for this release, such as `SSA_ERR_026` or fixed
+            text; None when it answered (#153).
     """
 
     release: str
     items: tuple[EoxItem, ...] = ()
+    unanswered: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -393,9 +399,9 @@ class AnalysisInput:
             (#102), keyed by the address logged into.
         inventory: each device's hardware PIDs, once #97 and #98 fill them.
         answers: Cisco's answers, or why each source could not be asked.
-        as_of: the moment the Lifecycle Checks judge EoX dates against, as an aware UTC
-            datetime; None means now, so a Run uses its own end and a test can pin a date
-            without reaching for the clock (#106).
+        as_of: the moment the Lifecycle Checks judge EoX dates against, as an aware datetime;
+            None means now. A Run pins the operator's local day once, so every Check uses the
+            same date, and a test can pin one without reaching for the clock (#106, #150).
     """
 
     topology: Topology

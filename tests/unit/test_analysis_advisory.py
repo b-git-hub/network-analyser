@@ -7,9 +7,12 @@ hand-written synthetic data; no real Cisco reply, device output or advisory text
 from collections.abc import Iterable
 from dataclasses import replace
 
+import pytest
+
 from network_analyser import analysis, topology
 from network_analyser.records.analysis import (
     AdvisoryAnswer,
+    AdvisoryPlatform,
     AnalysisInput,
     CiscoAnswers,
     CompatibleRelease,
@@ -43,6 +46,8 @@ MODEL = "C9300-48P"
 NEXUS_MODEL = "C93180YC-FX"
 NEXUS_CHASSIS = "N9K-C93180YC-FX"
 ADVISORY = "cisco-sa-example-abc123"
+SERIES_3000 = "Cisco Nexus 3000 Series Switches"
+SERIES_9000 = "Cisco Nexus 9000 Series Switches"
 
 
 def _device(  # noqa: PLR0913 (every device field the Check reads, by name)
@@ -54,6 +59,7 @@ def _device(  # noqa: PLR0913 (every device field the Check reads, by name)
     model: str | Unknown = MODEL,
     release: str | Unknown = "17.9.4a",
     chassis: str | None = None,
+    router_operating_mode: str | None = None,
 ) -> DeviceRecord:
     inventory = chassis_inventory(chassis) if chassis is not None else None
     record = visited(address, serial, hostname, inventory=inventory)
@@ -62,7 +68,12 @@ def _device(  # noqa: PLR0913 (every device field the Check reads, by name)
     return replace(
         record,
         platform=platform,
-        version=replace(version, model=model, software_version=release),
+        version=replace(
+            version,
+            model=model,
+            software_version=release,
+            router_operating_mode=router_operating_mode,
+        ),
     )
 
 
@@ -74,6 +85,7 @@ def _advisory(  # noqa: PLR0913 (every Cisco field the Check reads, by name)
     cvss: str = "8.1",
     cves: tuple[str, ...] = ("CVE-2026-0001",),
     first_fixed: tuple[FixedRelease, ...] = (FixedRelease("17.9", "17.9.5"),),
+    platforms: tuple[AdvisoryPlatform, ...] = (),
 ) -> AdvisoryAnswer:
     return AdvisoryAnswer(
         detail=AdvisoryDetail(
@@ -88,6 +100,7 @@ def _advisory(  # noqa: PLR0913 (every Cisco field the Check reads, by name)
             first_fixed=None,
         ),
         first_fixed=first_fixed,
+        platforms=platforms,
     )
 
 
@@ -119,6 +132,23 @@ def _results(
             answers=CiscoAnswers(advisories=tuple(answers), compatible=compatible),
         )
     )
+
+
+def _nexus_9000() -> DeviceRecord:
+    """A Nexus 9000 whose series is confirmed from `show inventory`."""
+    return _device(
+        A,
+        "S1",
+        "sw-a",
+        platform=Platform.NX_OS,
+        model=NEXUS_MODEL,
+        chassis=NEXUS_CHASSIS,
+        release="9.3(10)",
+    )
+
+
+def _nxos_answer(*advisories: AdvisoryAnswer) -> ReleaseAdvisories:
+    return _answer(OsType.NX_OS, "9.3(10)", *advisories, hardware_family="NEXUS9000")
 
 
 def _advisory_findings(results: AnalysisResults) -> list[Finding]:
@@ -181,6 +211,17 @@ def test_a_critical_and_a_high_advisory_each_raise_one_full_finding() -> None:
     assert advice.advisory_outcome.kind is AdvisoryOutcomeKind.MATCHES
     assert advice.advisory_outcome.matched == 2
     assert advice.advisory_outcome.text == "2 Advisories match"
+
+
+def test_an_advisory_id_outside_the_cisco_sa_pattern_gets_no_stable_check() -> None:
+    """#78's pattern is `cisco-sa-[a-z0-9-]+`: a dot or underscore is not a Cisco id (#150)."""
+    odd = _advisory("cisco-sa-example.a_b", sir=FindingLevel.HIGH, title="Odd id")
+    results = _results(_device(A, "S1", "sw-a"), answers=(_answer(OsType.IOS_XE, "17.9.4a", odd),))
+
+    (finding,) = _advisory_findings(results)
+
+    assert finding.check.id == "advisory-unnamed"
+    assert finding.check.name == "Odd id"
 
 
 def test_one_finding_per_advisory_even_though_it_names_many_cves() -> None:
@@ -313,14 +354,47 @@ def test_a_family_the_table_does_not_hold_is_never_matched() -> None:
     assert outcomes["dev-S1"].kind is AdvisoryOutcomeKind.COULD_NOT_CHECK
     assert outcomes["dev-S1"].text == "could not check: NX-OS in ACI mode is not matched"
     assert outcomes["dev-S2"].kind is AdvisoryOutcomeKind.COULD_NOT_CHECK
-    assert "family" in (outcomes["dev-S2"].reason or "")
+    assert "IOS XE SD-WAN" in (outcomes["dev-S2"].reason or "")
     assert outcomes["dev-S3"].kind is AdvisoryOutcomeKind.COULD_NOT_CHECK
     assert "family" in (outcomes["dev-S3"].reason or "")
 
+
+def test_a_controller_managed_ios_xe_device_is_never_matched_as_ios_xe() -> None:
+    """An IOS XE SD-WAN edge router runs a 17.x release but is not a plain IOS-XE device.
+
+    Decision #78 lists IOS XE SD-WAN among the families the Advisory Check never matches, so
+    the device gets the "could not check" Finding with that reason, never IOS-XE Advisories.
+    """
+    edge = _device(A, "S1", "sw-a", release="17.9.4a", router_operating_mode="Controller-Managed")
+    results = _results(edge, answers=(_answer(OsType.IOS_XE, "17.9.4a", _advisory()),))
+
+    assert _advisory_findings(results) == []
+    (advice,) = results.advice
+    assert advice.advisory_outcome.kind is AdvisoryOutcomeKind.COULD_NOT_CHECK
+    assert advice.advisory_outcome.text == "could not check: IOS XE SD-WAN is not matched"
+    (finding,) = _could_not_check(results)
+    assert finding.level is FindingLevel.LOW
+    assert "IOS XE SD-WAN is not matched" in finding.what_was_found
+
+
+def test_a_controller_managed_ios_xe_device_asks_cisco_nothing() -> None:
+    edge = _device(A, "S1", "sw-a", release="17.9.4a", router_operating_mode="Controller-Managed")
+
     questions = analysis.lookup_questions(
-        AnalysisInput(topology=topology.build((aci, sdwan_controller, unknown_platform)))
+        AnalysisInput(topology=topology.build((edge,)), collected=collected_of(edge))
     )
+
     assert questions.releases == ()
+
+
+def test_an_autonomous_ios_xe_router_is_still_matched() -> None:
+    """Only Cisco's controller-managed mode marks SD-WAN: an autonomous router is IOS-XE."""
+    router = _device(A, "S1", "sw-a", release="17.9.4a", router_operating_mode="Autonomous")
+
+    results = _results(router, answers=(_answer(OsType.IOS_XE, "17.9.4a", _advisory()),))
+
+    (finding,) = _advisory_findings(results)
+    assert finding.devices == ("dev-S1",)
 
 
 def test_nxos_is_matched_on_its_nexus_hardware_family() -> None:
@@ -424,6 +498,7 @@ def test_no_fix_in_the_devices_train_says_so_and_never_picks_another_train() -> 
     (finding,) = _advisory_findings(results)
     assert isinstance(finding.cisco_detail, AdvisoryDetail)
     assert finding.cisco_detail.first_fixed is None
+    assert finding.cisco_detail.fix_unresolved is False
     assert "17.12.4" not in advice.upgrade_target
 
 
@@ -438,6 +513,90 @@ def test_the_nxos_upgrade_target_is_not_available_rather_than_guessed() -> None:
     (finding,) = _advisory_findings(results)
     assert isinstance(finding.cisco_detail, AdvisoryDetail)
     assert finding.cisco_detail.first_fixed is None
+    assert finding.cisco_detail.fix_unresolved is True
+    assert "First fixed in Train 9.3: not available" in finding.what_was_found
+    assert "No fix in Train" not in finding.what_was_found
+    assert "move to a newer Train" not in finding.what_to_do
+
+
+def test_an_nxos_series_with_no_matching_platform_entry_reads_not_available() -> None:
+    """A series Cisco's `platforms[]` never names has an unknown fix, not no fix (#136)."""
+    results = _results(
+        _nexus_9000(),
+        answers=(
+            _nxos_answer(
+                _advisory(
+                    platforms=(AdvisoryPlatform(SERIES_3000, (FixedRelease("9.3", "9.3(11)"),)),)
+                )
+            ),
+        ),
+    )
+
+    (advice,) = results.advice
+    assert advice.upgrade_target == "not available"
+    (finding,) = _advisory_findings(results)
+    assert isinstance(finding.cisco_detail, AdvisoryDetail)
+    assert finding.cisco_detail.first_fixed is None
+    assert finding.cisco_detail.fix_unresolved is True
+    assert "First fixed in Train 9.3: not available" in finding.what_was_found
+    assert "no single Cisco platform entry for this Nexus series" in finding.what_was_found
+    assert "No fix in Train" not in finding.what_was_found
+    assert "move to a newer Train" not in finding.what_to_do
+    assert "Cisco's page" in finding.what_to_do
+
+
+@pytest.mark.parametrize(
+    "platforms",
+    [
+        (),
+        (
+            AdvisoryPlatform(SERIES_9000, (FixedRelease("9.3", "9.3(11)"),)),
+            AdvisoryPlatform(SERIES_9000, (FixedRelease("9.3", "9.3(12)"),)),
+        ),
+    ],
+    ids=["no-entry", "two-entries"],
+)
+def test_no_single_platform_entry_for_the_series_never_claims_no_fix(
+    platforms: tuple[AdvisoryPlatform, ...],
+) -> None:
+    results = _results(
+        _nexus_9000(),
+        answers=(_nxos_answer(_advisory(platforms=platforms)),),
+    )
+
+    (advice,) = results.advice
+    assert advice.upgrade_target == "not available"
+    (finding,) = _advisory_findings(results)
+    assert isinstance(finding.cisco_detail, AdvisoryDetail)
+    assert finding.cisco_detail.fix_unresolved is True
+    assert "no single Cisco platform entry for this Nexus series" in finding.what_was_found
+    assert "No fix in Train" not in finding.what_was_found
+    assert "move to a newer Train" not in finding.what_to_do
+
+
+def test_one_unresolved_advisory_never_makes_another_claim_no_fix() -> None:
+    resolved = _advisory(
+        "cisco-sa-resolved-0001",
+        platforms=(AdvisoryPlatform(SERIES_9000, (FixedRelease("9.3", "9.3(11)"),)),),
+    )
+    unresolved = _advisory(
+        "cisco-sa-unresolved-0002",
+        platforms=(AdvisoryPlatform(SERIES_3000, (FixedRelease("9.3", "9.3(12)"),)),),
+    )
+    results = _results(_nexus_9000(), answers=(_nxos_answer(resolved, unresolved),))
+
+    findings = {finding.cisco_detail.id: finding for finding in _advisory_findings(results)}  # type: ignore[union-attr]
+    known = findings["cisco-sa-resolved-0001"]
+    unknown = findings["cisco-sa-unresolved-0002"]
+    assert known.cisco_detail.first_fixed == "9.3(11)"  # type: ignore[union-attr]
+    assert known.cisco_detail.fix_unresolved is False  # type: ignore[union-attr]
+    assert "First fixed in Train 9.3: 9.3(11)." in known.what_was_found
+    assert "No fix in Train" not in known.what_was_found
+    assert unknown.cisco_detail.fix_unresolved is True  # type: ignore[union-attr]
+    assert "no single Cisco platform entry for this Nexus series" in unknown.what_was_found
+    assert "No fix in Train" not in unknown.what_was_found
+    (advice,) = results.advice
+    assert advice.upgrade_target == "not available"
 
 
 def test_the_latest_release_is_advice_beside_the_target_not_a_finding() -> None:
@@ -604,9 +763,37 @@ def test_every_advisory_check_runs_when_the_source_answers() -> None:
         "hardening-vty-access-class",
         "hardening-weak-secret-types",
         "lifecycle-hardware-eox",
+        "lifecycle-hardware-eox-could-not-check",
         "lifecycle-software-eox",
+        "lifecycle-software-eox-could-not-check",
         "lifecycle-suggested-release",
     ]
     runs = {run.check.id: run for run in results.checks}
     assert runs["advisory-openvuln"].ran is True
     assert runs["advisory-could-not-check"].ran is True
+
+
+@pytest.mark.parametrize(
+    ("code", "reason"),
+    [
+        (
+            "INVALID_IOS_VERSION",
+            "Cisco openVuln does not know release 17.9.4a (INVALID_IOS_VERSION)",
+        ),
+        ("HTTP 404", "Cisco openVuln could not answer for release 17.9.4a (HTTP 404)"),
+    ],
+)
+def test_a_per_release_failure_says_does_not_know_only_for_an_unknown_release(
+    code: str, reason: str
+) -> None:
+    """Every other per-release failure reads "could not answer", not "does not know" (#155)."""
+    results = _results(
+        _device(A, "S1", "sw-a", release="17.9.4a"),
+        answers=(_answer(OsType.IOS_XE, "17.9.4a", unavailable=code),),
+    )
+
+    (advice,) = results.advice
+    assert advice.advisory_outcome.kind is AdvisoryOutcomeKind.COULD_NOT_CHECK
+    assert advice.advisory_outcome.reason == reason
+    (finding,) = _could_not_check(results)
+    assert finding.what_was_found == f"Could not check the release's Advisories: {reason}."

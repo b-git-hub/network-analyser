@@ -9,6 +9,8 @@ import socket
 
 import pytest
 
+from network_analyser.advisories import pacing
+
 
 class NetworkUsedInTestError(RuntimeError):
     """A test tried to open a network connection."""
@@ -32,3 +34,20 @@ def _own_per_user_folder(
 ) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path_factory.mktemp("LocalAppData")))
     monkeypatch.chdir(tmp_path_factory.mktemp("work"))
+
+
+@pytest.fixture(autouse=True)
+def _no_real_pacing_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Count every default Pacer's wait on a fake clock, so the gate never waits for real.
+
+    The Run's own online step builds a `Pacer` with no arguments; injecting the clock here
+    covers it, including the compatible list's page cap (about 2 s of real waits before #149).
+    A test that needs the waits themselves still builds its own `Pacer`, which is unaffected.
+    """
+    now = [0.0]
+
+    def wait(seconds: float) -> None:
+        now[0] += seconds
+
+    monkeypatch.setattr(pacing, "monotonic", lambda: now[0])
+    monkeypatch.setattr(pacing, "sleep", wait)

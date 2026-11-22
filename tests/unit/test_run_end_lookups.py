@@ -2,7 +2,9 @@
 
 Driven through `main(argv)` with fake devices and the fake Cisco at the `advisories` transport
 seam. The fake asserts on the state it observes, so no test can pass while an outbound
-connection opened with a device session or a typed secret still held.
+connection opened with a device session or a typed secret still held. It also walks the Run's
+`SecretScan` at that moment, proving the scan holds no typed password and no passphrase, only
+fingerprints, yet still redacts them (#145).
 """
 
 import json
@@ -14,22 +16,25 @@ from typing import Any
 
 import pytest
 
-from network_analyser import backup_store, device_gateway
-from network_analyser.advisories import HttpResponse
+from network_analyser import analysis, backup_store, device_gateway
+from network_analyser.advisories import HttpResponse, TransportFailed
 from network_analyser.cli import ExitCode, run_end
-from network_analyser.credentials import CredentialSets, Secret
+from network_analyser.credentials import CredentialSets, Secret, SecretScan
+from network_analyser.records.analysis import AnalysisInput, CiscoAnswers, SourceUnavailable
 from network_analyser.records.device import DeviceRecord
 from network_analyser.records.identity import Alias
 from tests.support import fake_age
 from tests.support.fake_cisco import CLIENT_ID, CLIENT_SECRET, TOKEN, FakeCisco
 from tests.support.run_driver import (
     BACKUP_CANARY,
+    DEVICE_CANARY,
     FLAGS,
     Runner,
     data_folder,
     first_run,
     later_run,
 )
+from tests.support.scan_state import reachable_text
 
 PASS = BACKUP_CANARY
 SET_AT = datetime(2026, 11, 21, 9, 0, 0, tzinfo=UTC)
@@ -142,11 +147,17 @@ class _Observed:
     visits: int = 0
     sets_wiped: bool | None = None
     passphrase_wiped: bool | None = None
+    scan: SecretScan | None = None
 
     def check(self, *_args: object) -> None:
         assert self.visits == 0, "Cisco was asked while a device session was open"
         assert self.sets_wiped, "Cisco was asked while a Credential Set password was held"
         assert self.passphrase_wiped, "Cisco was asked while the Backup Passphrase was held"
+        assert self.scan is not None
+        held = reachable_text(self.scan)
+        for canary in (DEVICE_CANARY, BACKUP_CANARY):
+            assert canary not in held, "the secret scan still held a typed secret while online"
+            assert self.scan.holds_secret(canary), "the secret scan stopped watching a secret"
 
 
 @pytest.fixture
@@ -181,6 +192,13 @@ def test_a_stored_key_asks_cisco_after_the_sessions_close_and_every_secret_is_wi
         observed.passphrase_wiped = passphrase.wiped
 
     monkeypatch.setattr(run_end, "wipe", observed_wipe)
+
+    def record_scan() -> SecretScan:
+        scan = SecretScan()
+        observed.scan = scan
+        return scan
+
+    monkeypatch.setattr("network_analyser.cli.cmd_run.SecretScan", record_scan)
 
     got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
 
@@ -240,25 +258,64 @@ def test_a_rejected_key_gives_exactly_one_attention_line_and_exit_1(
     lines = [line for line in got.out.splitlines() if REJECTED in line]
     assert len(lines) == 1, got.out
     assert "cisco-key set" in lines[0]
-    assert len([line for line in got.out.splitlines() if "did not run:" in line]) == 1
+    assert lines[0].startswith("  Cisco lookups stopped:")
+    assert not [line for line in got.out.splitlines() if "did not run:" in line]
     assert (Path(_run_folder()) / "backups").is_dir()
 
 
-def test_two_software_suggestion_failures_give_one_attention_line(
+def test_a_5xx_on_both_software_suggestion_calls_gives_one_attention_line(
+    run: Runner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _store_key()
+    fake = _serve(monkeypatch, _fake())
+    # The releases call fails both attempts, and the compatible PID's call loses the
+    # connection: both carry the one "Cisco Software Suggestion" name (#131).
+    fake.scripted.extend(
+        [
+            ("/software/suggestion/v2/suggestions/releases", _status(500)),
+            ("/software/suggestion/v2/suggestions/releases", _status(500)),
+            (
+                "/software/suggestion/v2/suggestions/compatible",
+                TransportFailed("Cisco did not answer in time"),
+            ),
+            (
+                "/software/suggestion/v2/suggestions/compatible",
+                TransportFailed("Cisco did not answer in time"),
+            ),
+        ]
+    )
+
+    got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
+
+    assert got.code == ExitCode.NEEDS_ATTENTION
+    lines = [line for line in got.out.splitlines() if "Cisco Software Suggestion" in line]
+    assert lines == ["  Cisco Software Suggestion did not run: Cisco returned HTTP 500."]
+    assert "cisco-key set" not in got.out
+
+
+def test_a_4xx_on_one_suggestion_batch_is_retried_per_pid_not_reported_as_an_outage(
     run: Runner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _store_key()
     fake = _serve(monkeypatch, _fake())
     fake.scripted.append(("/software/suggestion/v2/suggestions/releases", _status(400)))
-    fake.scripted.append(("/software/suggestion/v2/suggestions/compatible", _status(404)))
 
     got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
 
-    assert got.code == ExitCode.NEEDS_ATTENTION
-    lines = [line for line in got.out.splitlines() if "Cisco Software Suggestion" in line]
-    assert lines == ["  Cisco Software Suggestion did not run: Cisco returned HTTP 400."]
+    assert "Cisco Software Suggestion did not run" not in got.out
     assert "cisco-key set" not in got.out
+    split = [path for path in fake.paths() if "/suggestions/releases/productIds/" in path]
+    assert len(split) == 1  # the one chassis PID's refused batch is that PID's answer
+    document = _topology(_run_folder())
+    findings = [
+        item
+        for item in document["findings"]
+        if item["check"]["id"] == "lifecycle-suggested-release"
+    ]
+    assert findings
+    assert all(item["level"] == "Low" for item in findings)
 
 
 def test_a_400_on_a_release_is_that_devices_could_not_check_and_no_key_advice(
@@ -409,6 +466,23 @@ def test_a_key_locked_with_another_passphrase_is_reported_once(
     assert got.out.count(backup_store.KEY_LOCKED_ELSEWHERE) == 1
 
 
+def test_an_unreadable_key_file_has_its_own_needs_attention_line(
+    run: Runner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An oversized or held-open file is not a wrong passphrase, and says which it is (#150)."""
+    data = data_folder()
+    backup_store.create_check_file(data.check_file, Secret(PASS))
+    data.cisco_key_file.write_bytes(b"x" * (64 * 1024 + 1))
+    fake = _serve(monkeypatch, _fake())
+
+    got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
+
+    assert got.code == ExitCode.NEEDS_ATTENTION
+    assert fake.requests == []
+    assert got.out.count(backup_store.KEY_FILE_UNREADABLE) == 1
+    assert backup_store.KEY_LOCKED_ELSEWHERE not in got.out
+
+
 def test_the_run_report_carries_the_run_end_attention(
     run: Runner,
 ) -> None:
@@ -432,6 +506,29 @@ def test_a_recorded_run_time_is_utc(
     when = _topology(_run_folder())["cisco_lookups"]["when"]
     assert when.endswith("+00:00")
     assert datetime.fromisoformat(when).tzinfo is not None
+
+
+def test_a_run_pins_one_reference_date_on_the_operator_local_day(
+    run: Runner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every Lifecycle Check judges EoX dates against the day the Run started, once (#150)."""
+    _store_key()
+    _serve(monkeypatch, _fake())
+    seen: list[AnalysisInput] = []
+    real = analysis.analyse
+
+    def spy(data: AnalysisInput) -> object:
+        seen.append(data)
+        return real(data)
+
+    monkeypatch.setattr(analysis, "analyse", spy)
+
+    got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
+
+    assert got.code == ExitCode.CLEAN, got.err
+    (data,) = seen
+    assert data.as_of is not None
+    assert data.as_of.date() == datetime.now().astimezone().date()
 
 
 def test_the_proxy_flag_reaches_the_online_transport(
@@ -470,7 +567,7 @@ def test_the_key_file_is_not_read_when_lookups_are_off(
     def fail(*_args: object, **_kwargs: object) -> None:
         pytest.fail("the key file must not be opened with lookups off")
 
-    monkeypatch.setattr(backup_store, "unlock_key_file", fail)
+    monkeypatch.setattr(backup_store, "open_key_file", fail)
 
     got = run(*FLAGS, typed=later_run())
 
@@ -556,3 +653,39 @@ def test_a_failure_nobody_expected_still_records_what_was_sent(
     written = (_run_folder() / "audit.log").read_text(encoding="utf-8")
     for secret in (CLIENT_ID, CLIENT_SECRET, TOKEN, PASS):
         assert secret not in written
+
+
+def test_two_software_suggestion_sources_unavailable_give_one_attention_line() -> None:
+    """Hand-built answers exercise the shared source name the two calls have (#131, #155)."""
+    lines = run_end.attention_lines(
+        CiscoAnswers(
+            suggestions=SourceUnavailable("Cisco returned HTTP 400"),
+            compatible=SourceUnavailable("Cisco returned HTTP 503"),
+        )
+    )
+
+    assert lines == ("Cisco Software Suggestion did not run: Cisco returned HTTP 400.",)
+
+
+def test_a_rejected_compatible_source_still_gives_the_key_line_after_another_failure() -> None:
+    """The rejected case is decided first, so a shared source name cannot hide it (#155)."""
+    lines = run_end.attention_lines(
+        CiscoAnswers(
+            suggestions=SourceUnavailable("Cisco returned HTTP 400"),
+            compatible=SourceUnavailable(REJECTED),
+        )
+    )
+
+    assert len(lines) == 2, lines
+    assert lines[0].startswith(f"Cisco lookups stopped: {REJECTED}.")
+    assert "cisco-key set" in lines[0]
+    assert lines[1] == "Cisco Software Suggestion did not run: Cisco returned HTTP 400."
+
+
+def test_a_rejected_key_never_says_the_lookups_did_not_run_after_an_answer() -> None:
+    """A rejected key can stop a later source, so the line says the lookups stopped (#155)."""
+    (line,) = run_end.attention_lines(CiscoAnswers(compatible=SourceUnavailable(REJECTED)))
+
+    assert line.startswith(f"Cisco lookups stopped: {REJECTED}.")
+    assert "did not run" not in line
+    assert "cisco-key set" in line

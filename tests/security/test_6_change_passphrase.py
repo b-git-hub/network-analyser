@@ -9,11 +9,15 @@ covered by the same watch. The first test locks with real age, end to end. The s
 power at every single file write or rename in turn, with the fast fake age, and checks that
 each Backup and the key file is then wholly old or wholly new, that no plaintext is on disk,
 and that a rerun finishes the change.
+
+The crash-dump check reads a fake HKLM seam that reports no dump setting (#160): the answers
+below are the passphrases only, so this security test passes on any PC, whatever its own
+crash-dump configuration, and no other process can add a question to the scripted input.
 """
 
 import io
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,9 +25,13 @@ from pathlib import Path
 import pyrage
 import pytest
 
+import network_analyser.cli.cmd_change_passphrase as change_command
 from network_analyser import backup_store, run_output
+from network_analyser._winsys.wer import RegistryView
 from network_analyser.backup_store import ChangeStage, PassphraseFiles
 from network_analyser.cli import main
+from network_analyser.cli.crash_dump_guard import guard_crash_dumps
+from network_analyser.cli.prompts import Prompter
 from network_analyser.credentials import Secret
 from tests.support import fake_age
 from tests.support.run_driver import typed
@@ -43,6 +51,21 @@ _PLAINTEXT = (
     CLIENT_ID.encode(),
     CLIENT_SECRET.encode(),
 )
+
+
+def _pc_with_no_dump_setting(_path: str, _view: RegistryView) -> Mapping[str, object] | None:
+    """A fake HKLM reader: report no crash-dump setting, whatever this PC really holds."""
+    return None
+
+
+def _guard_with_no_dump_setting(ask: Prompter) -> bool:
+    return guard_crash_dumps(ask, read_machine_key=_pc_with_no_dump_setting)
+
+
+@pytest.fixture(autouse=True)
+def _known_crash_dump_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read a fake registry, so no PC setting can add a question to the scripted answers (#160)."""
+    monkeypatch.setattr(change_command, "guard_crash_dumps", _guard_with_no_dump_setting)
 
 
 class _PowerCut(BaseException):
@@ -115,7 +138,7 @@ def test_a_real_age_change_never_writes_the_config_in_the_clear(
     assert _plaintext_on_disk(data.root, folder) == []
 
     with _watched_writes(monkeypatch) as written:
-        code = _change(monkeypatch, typed("YES", OLD, NEW, NEW, "y"))
+        code = _change(monkeypatch, typed(OLD, NEW, NEW, "y"))
 
     assert code == 0, capsys.readouterr().err
     assert pyrage.passphrase.decrypt(backup.read_bytes(), NEW) == CONFIG.encode()
@@ -132,8 +155,8 @@ def _resume(monkeypatch: pytest.MonkeyPatch, files: PassphraseFiles) -> int:
     except backup_store.CheckFileError:
         pytest.fail("a power cut left no usable check file")
     if stage is ChangeStage.SWITCHED:
-        return _change(monkeypatch, typed("YES", OLD, NEW, "y"))
-    return _change(monkeypatch, typed("YES", OLD, NEW, NEW, "y"))
+        return _change(monkeypatch, typed(OLD, NEW, "y"))
+    return _change(monkeypatch, typed(OLD, NEW, NEW, "y"))
 
 
 def _opens(path: Path) -> Callable[[str], bytes | None]:
@@ -167,7 +190,7 @@ def test_a_power_cut_at_any_write_leaves_no_plaintext_and_each_file_old_or_new(
         try:
             with _watched_writes(monkeypatch, cut_at) as seen:
                 written = seen
-                _change(monkeypatch, typed("YES", OLD, NEW, NEW, "y"))
+                _change(monkeypatch, typed(OLD, NEW, NEW, "y"))
         except _PowerCut:
             pass
         else:

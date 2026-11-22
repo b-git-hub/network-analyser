@@ -92,7 +92,7 @@ def test_the_bridge_hands_every_value_analysis_asked_for_to_advisories() -> None
     assert all(is_safe_pid(pid) for pid in asked.hardware_pids)
     assert all(is_safe_pid(pid) for pid in asked.suggestion_pids)
     assert all(is_safe_pid(pid) for pid in asked.compatible_pids)
-    assert all(is_safe_release(release) for release in asked.software_releases)
+    assert all(is_safe_release(question.release) for question in asked.software_releases)
     assert ISR_4K in asked.hardware_pids
     assert ISR_4K in asked.compatible_pids
 

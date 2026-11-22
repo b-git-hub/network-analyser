@@ -190,7 +190,7 @@ def test_an_unknown_403_code_is_one_calls_failure_and_never_a_rejected_key() -> 
     assert uses(answers)[CiscoEndpoint.OPENVULN].retries == 0
 
 
-def test_a_400_on_eox_names_the_http_status_not_a_rejected_key() -> None:
+def test_a_400_on_a_one_pid_eox_call_is_that_pids_answer_not_a_rejected_key() -> None:
     fake = FakeCisco(suggestions={"C9300-48P": [{"relDispName": "17.9.5", "isSuggested": "Y"}]})
     fake.scripted.append(("/supporttools", HttpResponse(status=400, body=b"")))
 
@@ -199,7 +199,10 @@ def test_a_400_on_eox_names_the_http_status_not_a_rejected_key() -> None:
         questions(releases=(), hardware_pids=("C9300-48P",), suggestion_pids=("C9300-48P",)),
     )
 
-    assert answers.hardware_eox == SourceUnavailable("Cisco returned HTTP 400")
+    assert isinstance(answers.hardware_eox, EoxAnswer)
+    assert answers.hardware_eox.records == ()
+    (unanswered,) = answers.hardware_eox.unanswered
+    assert (unanswered.input_value, unanswered.reason) == ("C9300-48P", "HTTP 400")
     assert isinstance(answers.suggestions, SuggestionsAnswer)
 
 
@@ -328,3 +331,21 @@ def test_an_unknown_403_from_the_token_endpoint_is_not_a_rejected_key() -> None:
     assert answers.tally.token.outcome is TokenOutcome.UNAVAILABLE
     assert fake.token_calls() == 1
     assert all("rejected" not in item.reason for item in answers.advisories)  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize("status", [400, 403])
+def test_no_data_found_on_a_status_148_did_not_confirm_is_not_an_empty_answer(
+    status: int,
+) -> None:
+    """`NO_DATA_FOUND` means an empty answer only on 200 and 404, the statuses #148 confirmed.
+
+    On any other status the reply contradicts itself, so the release reads unavailable with
+    the HTTP status rather than as "no Advisories" (#155).
+    """
+    fake = FakeCisco(advisory_errors={GOOD: (status, "NO_DATA_FOUND")})
+
+    answers = lookup(fake, questions(releases=(ReleaseQuestion(CiscoOsType.IOS_XE, "17.9.4a"),)))
+
+    (answer,) = answers.advisories
+    assert isinstance(answer, AdvisoriesAnswer)
+    assert (answer.advisories, answer.unavailable) == ((), f"HTTP {status}")

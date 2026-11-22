@@ -42,6 +42,7 @@ from network_analyser.records.analysis import (
     ReleaseAdvisories,
     SourceUnavailable,
 )
+from network_analyser.records.lookup_values import is_safe_pid
 from network_analyser.records.topology import (
     ADVISORY_FIXED_LINE,
     ADVISORY_STATUS,
@@ -72,12 +73,25 @@ _SOURCE: Final = "Cisco openVuln"
 _FLAGGED: Final = frozenset({FindingLevel.CRITICAL, FindingLevel.HIGH})
 _NOT_READ: Final = "show version not read"
 """The fixed reason `topology` gives a device whose `show version` was never read."""
-_ADVISORY_ID: Final = re.compile(r"cisco-sa-[A-Za-z0-9._-]{1,160}")
-"""What an Advisory id must match to keep a Check's stable id safe (story 51)."""
+_ADVISORY_ID: Final = re.compile(r"cisco-sa-[A-Za-z0-9-]{1,160}")
+"""What an Advisory id must match to keep a Check's stable id safe (story 51).
+
+#78 allows letters, digits and hyphens after `cisco-sa-` (case-insensitive); a dot or
+underscore is not part of a Cisco id, so such an id gets the shared `advisory-unnamed` Check
+(#150)."""
 _LIFECYCLE: Final = re.compile(r"[A-Z][A-Z0-9]{1,7}")
 """Cisco's lifecycle code shape: two to eight upper-case letters or digits, such as `ED`."""
 NEWER_THAN_LIST: Final = "running release is newer than Cisco's list"
 """What a Latest Release value becomes when the device already runs something above it (#127)."""
+LATEST_PID_NOT_SENT: Final = (
+    f"{NOT_AVAILABLE}: Cisco was not asked about this device's chassis PID because it does not "
+    "match the safe pattern"
+)
+"""Both Latest Release values when the chassis PID failed the shared safe pattern, so the
+compatible-releases call was never asked about it (#155). The PID is never echoed (#130)."""
+_UNKNOWN_RELEASE: Final = "INVALID_IOS_VERSION"
+"""Cisco's code for a release it does not know: the one per-release failure that reads
+`does not know`, not `could not answer` (#155)."""
 FAMILY_NOT_CONFIRMED: Final = (
     "hardware family not confirmed: the Nexus hardware family could not be worked out, "
     "so Cisco openVuln was not asked"
@@ -90,6 +104,8 @@ _WHAT_TO_DO_FAMILY: Final = (
     "Make sure show inventory | json is readable (the Device Role must allow it) and names the "
     "chassis, so the Nexus series can be worked out."
 )
+_UNRESOLVED_REASON: Final = "no single Cisco platform entry for this Nexus series"
+"""Why an NX-OS Advisory's first fix is unknown rather than absent (#136)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,10 +116,13 @@ class Match:
         answer: Cisco's answer, with the Advisory's own detail.
         first_fixed: the Advisory's lowest first-fixed release in the device's Train that is
             above the running release; None when it has no fix there (#124).
+        unresolved: True when an NX-OS Advisory's `platforms[]` holds no single entry for the
+            device's series, so its first fix is unknown rather than absent (#136).
     """
 
     answer: AdvisoryAnswer
     first_fixed: str | None
+    unresolved: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,9 +234,11 @@ def _readable_release(device: VisitedDevice) -> str | Unknown:
 
 
 def _resolve_release(data: AnalysisInput, device: VisitedDevice, release: str) -> DeviceAdvisory:
-    os_type = family_of(device.platform, release)
+    os_type = family_of(device.platform, release, device.router_operating_mode)
     if os_type is None:
-        return _unchecked(device, family_reason(release))
+        return _unchecked(
+            device, family_reason(device.platform, release, device.router_operating_mode)
+        )
     normalised = normalise_release(release)
     family = nexus_series(data, device) if os_type is OsType.NX_OS else None
     answer = _answer_for(data.answers.advisories, os_type, normalised, family)
@@ -226,10 +247,13 @@ def _resolve_release(data: AnalysisInput, device: VisitedDevice, release: str) -
     if answer is None:
         return _unchecked(device, f"Cisco openVuln gave no answer for release {normalised}")
     if answer.unavailable is not None:
-        return _unchecked(
-            device,
-            f"Cisco openVuln does not know release {normalised} ({answer.unavailable})",
-        )
+        if answer.unavailable == _UNKNOWN_RELEASE:
+            reason = f"Cisco openVuln does not know release {normalised} ({answer.unavailable})"
+        else:
+            reason = (
+                f"Cisco openVuln could not answer for release {normalised} ({answer.unavailable})"
+            )
+        return _unchecked(device, reason)
     train = train_of(normalised, os_type)
     series = platform_name(family)
     matches, unresolved = _matches(
@@ -296,14 +320,16 @@ def _matches(
     unresolved = False
     for advisory in advisories:
         fixes = advisory.first_fixed
+        fixes_unresolved = False
         if os_type is OsType.NX_OS:
             selected = _platform_fixes(advisory.platforms, series)
             if selected is None:
                 unresolved = True
+                fixes_unresolved = True
                 fixes = ()
             else:
                 fixes = selected
-        matches.append(_match(advisory, fixes, train, running))
+        matches.append(_match(advisory, fixes, train, running, unresolved=fixes_unresolved))
     return tuple(matches), unresolved
 
 
@@ -328,11 +354,15 @@ def _match(
     fixes: tuple[FixedRelease, ...],
     train: str,
     running: str,
+    *,
+    unresolved: bool = False,
 ) -> Match:
     """Keep the Advisory and its lowest first fix in `train` above the running release.
 
     A fix at or below the running release does not clear the Advisory (story 22): it is
     ignored, so the Advisory reads as having no fix in the Train when none is left (#124).
+    `unresolved` marks the fix as unknown rather than absent, so no surface says "no fix
+    in Train" when Cisco's own entry was never found (#136).
     """
     above = [
         entry.release
@@ -342,13 +372,13 @@ def _match(
         and release_key(entry.release) > release_key(running)
     ]
     fixed = min(above, key=release_key) if above else None
-    return Match(answer=answer, first_fixed=fixed)
+    return Match(answer=answer, first_fixed=fixed, unresolved=unresolved)
 
 
 def _advisory_finding(resolved: DeviceAdvisory, match: Match) -> Finding:
     detail = match.answer.detail
     check = _advisory_check(detail)
-    what = _what_was_found(resolved, detail, match.first_fixed)
+    what = _what_was_found(resolved, detail, match)
     return Finding(
         id=finding_id(check.id, f"{resolved.device.id}:{detail.id}"),
         devices=(resolved.device.id,),
@@ -357,7 +387,7 @@ def _advisory_finding(resolved: DeviceAdvisory, match: Match) -> Finding:
         level=detail.sir,
         check=check,
         what_was_found=what,
-        what_to_do=_what_to_do(resolved, match.first_fixed),
+        what_to_do=_what_to_do(resolved, match),
         source=_SOURCE,
         summary=(
             f"{detail.id}: {detail.title} (SIR {detail.sir.value}) "
@@ -366,6 +396,7 @@ def _advisory_finding(resolved: DeviceAdvisory, match: Match) -> Finding:
         cisco_detail=replace(
             detail,
             first_fixed=match.first_fixed,
+            fix_unresolved=match.unresolved,
             status=ADVISORY_STATUS,
             fixed_line=ADVISORY_FIXED_LINE,
             hardware_family_not_confirmed=resolved.hardware_family_not_confirmed,
@@ -380,27 +411,32 @@ def _advisory_check(detail: AdvisoryDetail) -> Check:
     return Check("advisory-unnamed", detail.title or "Advisory", CheckType.ADVISORY)
 
 
-def _what_was_found(
-    resolved: DeviceAdvisory, detail: AdvisoryDetail, first_fixed: str | None
-) -> str:
+def _what_was_found(resolved: DeviceAdvisory, detail: AdvisoryDetail, match: Match) -> str:
     cves = ", ".join(detail.cves) if detail.cves else "no CVEs named"
-    fit = (
-        f"First fixed in Train {resolved.train}: {first_fixed}."
-        if first_fixed is not None
-        else f"No fix in Train {resolved.train}."
-    )
     what = (
         f"{detail.id} ({detail.title}) affects release {resolved.release}: "
-        f"SIR {detail.sir.value}, CVSS {detail.cvss or 'not given'}, {cves}. {fit}"
+        f"SIR {detail.sir.value}, CVSS {detail.cvss or 'not given'}, {cves}. "
+        f"{_fix_line(resolved, match)}"
     )
     if resolved.hardware_family_not_confirmed:
         what = f"{what} Software-release match only: hardware family not confirmed."
     return what
 
 
-def _what_to_do(resolved: DeviceAdvisory, first_fixed: str | None) -> str:
-    if first_fixed is not None:
-        return f"Upgrade to {first_fixed} or later."
+def _fix_line(resolved: DeviceAdvisory, match: Match) -> str:
+    """The Advisory's first fix, or that it is unknown, or that the Train holds none (#136)."""
+    if match.unresolved:
+        return f"First fixed in Train {resolved.train}: not available ({_UNRESOLVED_REASON})."
+    if match.first_fixed is not None:
+        return f"First fixed in Train {resolved.train}: {match.first_fixed}."
+    return f"No fix in Train {resolved.train}."
+
+
+def _what_to_do(resolved: DeviceAdvisory, match: Match) -> str:
+    if match.unresolved:
+        return f"Check Cisco's page for the first fixed release: {_UNRESOLVED_REASON}."
+    if match.first_fixed is not None:
+        return f"Upgrade to {match.first_fixed} or later."
     return (
         f"No fix in Train {resolved.train}: move to a newer Train after checking that your "
         "hardware supports it."
@@ -483,9 +519,12 @@ def _latest(
     reads `running release is newer than Cisco's list` instead of being shown an older release
     (story 7), but only when its own release is in the family table: an ACI-mode device is
     never compared with a standalone list. An unanswered or rejected PID, an empty list, the
-    page cap and an outage all read `not available` (stories 9, 11-13).
+    page cap and an outage all read `not available` (stories 9, 11-13); a PID the safe pattern
+    refused says so, because Cisco was never asked about it (#155).
     """
     missing = LatestRelease()
+    if pid is not None and not is_safe_pid(pid):
+        return LatestRelease(in_train=LATEST_PID_NOT_SENT, overall=LATEST_PID_NOT_SENT)
     if isinstance(answers, SourceUnavailable) or pid is None:
         return missing
     answer = next((item for item in answers if item.pid == pid), None)
@@ -498,7 +537,7 @@ def _latest(
     running = _running_release(device)
     if (
         running is not None
-        and family_of(device.platform, running) is not None
+        and family_of(device.platform, running, device.router_operating_mode) is not None
         and release_key(running) > release_key(overall)
     ):
         overall, overall_lifecycle = NEWER_THAN_LIST, None
@@ -524,7 +563,7 @@ def _placed_releases(
     placed: list[tuple[str, str | None]] = []
     for item in releases:
         release = normalise_listed_release(item.release)
-        if family_of(device.platform, release) is not None:
+        if family_of(device.platform, release, device.router_operating_mode) is not None:
             placed.append((release, _lifecycle(item.lifecycle)))
     return tuple(placed)
 
@@ -537,7 +576,7 @@ def _latest_in_train(
     """The highest listed release in the device's Train, or `not available` (#127)."""
     if running is None:
         return NOT_AVAILABLE, None
-    os_type = family_of(device.platform, device.software_version)
+    os_type = family_of(device.platform, device.software_version, device.router_operating_mode)
     if os_type is None:
         return NOT_AVAILABLE, None
     train = train_of(running, os_type)

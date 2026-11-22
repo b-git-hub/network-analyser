@@ -21,10 +21,14 @@ Decided on #22 (with #27's correction: one file at a time) and ADR 0004. In orde
 - The end lists what was not re-locked or was flagged, and always shows the fixed warning
   of story 115. A forgotten passphrase has no reset command: the help text documents the
   manual reset, deleting the check file (story 116).
+- The change finishes only when every file and the Cisco API key file are re-locked (ADR
+  0008). A key file that was not re-locked leaves the marker and the old check file in
+  place, so the change stays pending, Runs are refused, and running this again resumes.
 
-Exit codes: 0 every file re-locked and nothing to look at; 1 the change finished but
-something needs attention (a file not re-locked or flagged, a folder not found); 2 refused
-before anything was changed; 3 cancelled at the confirm, or stopped by Ctrl+C part way.
+Exit codes: 0 every file re-locked and nothing to look at; 1 something needs attention (a
+file not re-locked or flagged, a folder not found, or the key file not re-locked so the
+change stays pending); 2 refused before anything was changed; 3 cancelled at the confirm,
+or stopped by Ctrl+C part way.
 """
 
 import argparse
@@ -96,6 +100,10 @@ _NOT_STARTED: Final = (
     "the change could not be started: a file in the per-user data folder could not be "
     f'written. Run "{PROG} change-passphrase" again.'
 )
+_KEY_UNFINISHED: Final = (
+    "The change stays pending and Runs are refused until the key file is re-locked. Run "
+    f'"{PROG} change-passphrase" again to resume; files already re-locked are skipped.'
+)
 
 
 def change_passphrase(args: argparse.Namespace) -> ExitCode:
@@ -111,6 +119,7 @@ def change_passphrase(args: argparse.Namespace) -> ExitCode:
             return ExitCode.REFUSED
         finally:
             _warn_of_scan_hits(scan)
+            scan.forget()  # no passphrase typed here outlives the command (#143)
 
 
 def _change(args: argparse.Namespace, data: run_output.DataFolder, scan: SecretScan) -> ExitCode:
@@ -133,7 +142,7 @@ def _change(args: argparse.Namespace, data: run_output.DataFolder, scan: SecretS
         raise RefusedError(_FOLDER_PATH_REFUSED)
     registered = backup_store.registered_run_folders(data.run_register)
     plan = backup_store.plan_relock([*registered, *extras], io_path=_winsys.os_path)
-    _show_summary(ask, plan, status)
+    _show_summary(ask, plan, status, data.cisco_key_file)
     if not ask.yes_no("Re-lock them with the new passphrase? [y/N] ", default=False):
         ask.say("Cancelled. Nothing was changed.")
         return ExitCode.STOPPED
@@ -212,7 +221,7 @@ def _choose(ask: Prompter, old: BackupPassphrase) -> Secret | ExitCode:
 # -- Summary and confirm (stories 107-108) --------------------------------------------------
 
 
-def _show_summary(ask: Prompter, plan: RelockPlan, status: ChangeStatus) -> None:
+def _show_summary(ask: Prompter, plan: RelockPlan, status: ChangeStatus, key_file: Path) -> None:
     runs = plan.runs_with_files
     to_do = max(plan.files - status.done, 0)
     lines = [
@@ -222,6 +231,11 @@ def _show_summary(ask: Prompter, plan: RelockPlan, status: ChangeStatus) -> None
             f"{_count(plan.files - plan.backups, 'manifest')} in {_count(runs, 'Run')}"
         ),
     ]
+    if key_file.is_file():
+        lines.append(
+            f"  The Cisco API key file is re-locked as part of the change: "
+            f"{console_text(str(key_file))}"
+        )
     if plan.not_found:
         lines.append(
             f"  Not found: {_count(len(plan.not_found), 'Run folder')}. Their Backups stay under "
@@ -313,8 +327,9 @@ def _relock_all(  # noqa: PLR0913, PLR0917 (the call's whole state, each part na
                 return ExitCode.STOPPED
             results.append(result)
     key_outcome = backup_store.relock_key_file(key_file, old, new)  # the Cisco API key (story 37)
-    backup_store.finish_change(files)
-    return _report(plan, results, key_outcome)
+    if key_outcome.rekeyed:
+        backup_store.finish_change(files)
+    return _report(plan, results, key_outcome, key_file)
 
 
 def _said(result: FileResult) -> str:
@@ -330,18 +345,28 @@ def _short(path: str) -> str:
 
 
 def _report(
-    plan: RelockPlan, results: list[RunResult], key_outcome: backup_store.KeyOutcome
+    plan: RelockPlan,
+    results: list[RunResult],
+    key_outcome: backup_store.KeyOutcome,
+    key_file: Path,
 ) -> ExitCode:
     files = [f for run in results for f in run.files]
     backups = [f for f in files if f.path.endswith(backup_store.locker.BACKUP_SUFFIX)]
     relocked = [f for f in backups if f.outcome is not FileOutcome.SKIPPED]
     runs = sum(1 for run in results if any(f.outcome is not FileOutcome.SKIPPED for f in run.files))
-    lines = [
-        (
-            f"Re-locked {_count(len(relocked), 'Backup')} in {_count(runs, 'Run')} under the "
-            "new Backup Passphrase. The change is finished."
-        )
-    ]
+    done = (
+        f"Re-locked {_count(len(relocked), 'Backup')} in {_count(runs, 'Run')} under the new "
+        "Backup Passphrase"
+    )
+    if key_outcome.rekeyed:
+        lines = [f"{done}. The change is finished."]
+    else:
+        lines = [
+            (
+                f"{done}, but the change is NOT finished: the Cisco API key file "
+                f"({console_text(str(key_file))}) was not re-locked."
+            )
+        ]
     skipped = [f for f in files if f.outcome is FileOutcome.SKIPPED]
     flagged = [f for f in files if f.flag is not None]
     unrecorded = [run for run in results if run.record_problem is not None]
@@ -359,6 +384,8 @@ def _report(
         lines.extend(f"  {console_text(str(run.folder))}" for run in unrecorded)
     if key_outcome.problem is not None:
         lines.append(f"{key_outcome.problem}.")
+    if not key_outcome.rekeyed:
+        lines.append(_KEY_UNFINISHED)
     lines.append(ROTATION_LIMITS)
     print("\n".join(lines))
     attention = (

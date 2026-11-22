@@ -39,6 +39,22 @@ class ReleaseQuestion:
 
 
 @dataclass(frozen=True, slots=True)
+class SoftwareEoxQuestion:
+    """One software EoX question: an OS type and a normalised release.
+
+    Cisco's query form takes `<release>,<OSType>`, so the OS type travels with the release.
+
+    Attributes:
+        os_type: the release's OS family. IOS and IOS-XE are sent; NX-OS is not until its
+            Cisco `OSType` name is confirmed (#165).
+        release: the release to ask about, already normalised for its family.
+    """
+
+    os_type: CiscoOsType
+    release: str
+
+
+@dataclass(frozen=True, slots=True)
 class LookupQuestions:
     """Everything one Run needs to ask Cisco, already de-duplicated by `analysis`.
 
@@ -46,7 +62,7 @@ class LookupQuestions:
         releases: one openVuln question per distinct OS type and release.
         hardware_pids: PIDs for the hardware EoX lookup: chassis, stack members,
             supervisors and line cards, never optics, PSUs or fans.
-        software_releases: release strings for the software EoX lookup.
+        software_releases: one software EoX question per distinct OS type and release.
         suggestion_pids: base PIDs for the Software Suggestion lookup.
         compatible_pids: chassis PIDs for the compatible-releases lookup (#127), never line
             cards or any other part.
@@ -54,7 +70,7 @@ class LookupQuestions:
 
     releases: tuple[ReleaseQuestion, ...] = ()
     hardware_pids: tuple[str, ...] = ()
-    software_releases: tuple[str, ...] = ()
+    software_releases: tuple[SoftwareEoxQuestion, ...] = ()
     suggestion_pids: tuple[str, ...] = ()
     compatible_pids: tuple[str, ...] = ()
 

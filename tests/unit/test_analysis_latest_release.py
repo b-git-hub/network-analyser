@@ -10,6 +10,7 @@ tests read what the operator sees in the advice record: both values, their lifec
 from dataclasses import replace
 
 from network_analyser import analysis, topology
+from network_analyser.analysis.advisory import LATEST_PID_NOT_SENT
 from network_analyser.records.analysis import (
     AnalysisInput,
     CiscoAnswers,
@@ -145,6 +146,31 @@ def test_an_old_nxos_train_is_the_devices_own_train() -> None:
     assert advice.latest_release == "10.4(8)"
 
 
+def test_an_nxos_release_number_that_moves_stays_in_the_same_train() -> None:
+    results = _results(
+        _device(
+            A,
+            "N1",
+            "nx-a",
+            platform=Platform.NX_OS,
+            model=NEXUS_MODEL,
+            chassis=NEXUS_CHASSIS,
+            release="7.3(2)D1(1)",
+        ),
+        compatible=(
+            _compatible(
+                NEXUS_CHASSIS,
+                ("7.3(5)D1(1)", "MD"),
+                ("9.3(10)", "ED"),
+            ),
+        ),
+    )
+
+    (advice,) = results.advice
+    assert advice.latest_release_in_train == "7.3(5)D1(1)"
+    assert advice.latest_release == "9.3(10)"
+
+
 def test_a_lifecycle_code_that_fails_the_pattern_is_dropped() -> None:
     results = _results(
         _device(A, "S1", "sw-a", release="17.12.4"),
@@ -245,3 +271,22 @@ def test_the_lookup_questions_ask_for_chassis_models_only_and_once_each() -> Non
     assert questions.compatible_pids == (OTHER_MODEL, MODEL)
     assert LINE_CARD not in questions.compatible_pids
     assert "sw-a" not in questions.compatible_pids
+
+
+def test_an_odd_chassis_pid_says_why_the_latest_release_is_not_available() -> None:
+    """A PID the shared pattern refuses is not asked about, so both values name the reason.
+
+    It is never echoed: the model text could be hostile (#130, #155).
+    """
+    record = _device(A, "S1", "sw-a", model="ISR 4451;X")
+    questions = analysis.lookup_questions(AnalysisInput(topology=topology.build((record,))))
+
+    results = _results(record, compatible=())
+
+    assert questions.compatible_pids == ()
+    (advice,) = results.advice
+    assert advice.latest_release_in_train == LATEST_PID_NOT_SENT
+    assert advice.latest_release == LATEST_PID_NOT_SENT
+    assert advice.latest_in_train_lifecycle is None
+    assert advice.latest_release_lifecycle is None
+    assert "4451" not in advice.latest_release

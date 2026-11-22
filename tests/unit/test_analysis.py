@@ -120,6 +120,16 @@ def test_one_low_finding_per_model_running_more_than_one_release() -> None:
     assert finding.items == ()
 
 
+def test_drift_counts_one_release_printed_two_ways_as_one_release() -> None:
+    """`17.9.4` and `17.09.04` are the same IOS-XE release, so they are not drift (#150)."""
+    results = _results(
+        _device(A, "S1", "sw-a", release="17.9.4"),
+        _device(B, "S2", "sw-b", release="17.09.04"),
+    )
+
+    assert _model_drift(results) == []
+
+
 def test_a_model_on_one_release_raises_nothing() -> None:
     results = _results(_device(A, "S1", "sw-a"), _device(B, "S2", "sw-b"))
 
@@ -214,7 +224,9 @@ def test_every_shipped_check_runs_and_one_advice_record_exists_per_visited_devic
         "hardening-vty-access-class",
         "hardening-weak-secret-types",
         "lifecycle-hardware-eox",
+        "lifecycle-hardware-eox-could-not-check",
         "lifecycle-software-eox",
+        "lifecycle-software-eox-could-not-check",
         "lifecycle-suggested-release",
     ]
     assert all(run.reason is None for run in results.checks if run.ran)
@@ -395,7 +407,9 @@ def test_the_results_fit_topology_json_as_optional_fields() -> None:
         "hardening-vty-access-class",
         "hardening-weak-secret-types",
         "lifecycle-hardware-eox",
+        "lifecycle-hardware-eox-could-not-check",
         "lifecycle-software-eox",
+        "lifecycle-software-eox-could-not-check",
         "lifecycle-suggested-release",
     ]
     drift = next(item for item in checks if item["check"]["id"] == "consistency-model-drift")
@@ -403,8 +417,8 @@ def test_the_results_fit_topology_json_as_optional_fields() -> None:
     train = next(
         item for item in checks if item["check"]["id"] == "consistency-standard-support-train"
     )
-    assert train["ran"] is False
-    assert "17.9" in train["reason"]
+    assert train["ran"] is True
+    assert train["reason"] is None
 
 
 def test_the_advice_shape_accepts_an_advisory_answer() -> None:

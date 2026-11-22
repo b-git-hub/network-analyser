@@ -6,6 +6,9 @@ redirect, a rate limit, a 5xx or an outage. It refuses a request that leaves the
 an undesired value, or lacks the token, so every test also proves the envelope held.
 
 All data here is synthetic: made-up releases, PIDs, ids and text. No Cisco reply is committed.
+A value Cisco has no data for answers in the shape #148 observed live: an EoX `EOXRecord` entry
+with empty ids and a nested `EOXError`, and a Software Suggestion `productList` entry with no
+`basePID` and the code in `suggestions[].errorDetailsResponse` (#166).
 
 `FakeOpener` stands in for `transport.open_https`, so the real transport's own checks (TLS
 context, timeouts, tunnel, redirect refusal, size cap) are tested without a socket.
@@ -16,10 +19,11 @@ so a test sees the bytes a proxy and Cisco would receive (the tunnel, #132).
 import base64
 import io
 import json
+import re
 import ssl
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final
 
 from network_analyser.advisories import (
     HttpRequest,
@@ -27,7 +31,7 @@ from network_analyser.advisories import (
     TransportFailed,
 )
 from network_analyser.advisories.fence import FENCED_HOSTS, HTTPS_PORT
-from network_analyser.advisories.patterns import is_safe_pid, is_safe_release
+from network_analyser.advisories.patterns import is_safe_release
 
 CLIENT_ID = "CANARY-client-id-95"
 """A synthetic client ID; the tool must never put it in an event or a record."""
@@ -40,9 +44,17 @@ TOKEN = "CANARY-access-token-95"
 
 ADVISORY_PREFIX = "/security/advisories/v2/OSType/"
 EOX_PREFIX = "/supporttools/eox/rest/5/"
+_EOX_OS_TYPES = frozenset({"IOS", "IOS-XE", "NX-OS"})
+"""The OS types Cisco documents for `release,OSType`; a query value must carry one."""
 SUGGESTION_PREFIX = "/software/suggestion/v2/suggestions/releases/productIds/"
 COMPATIBLE_PREFIX = "/software/suggestion/v2/suggestions/compatible/productId/"
 TOKEN_PATH = "/oauth2/default/v1/token"
+
+_FAKE_PID_PATH: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,63}(?:/[A-Za-z0-9-]{1,16})?")
+"""The fake's own literal PID path shape: letters, digits and hyphens, and at most one raw `/`.
+
+It is deliberately not the tool's `is_safe_pid`, so a loosened pattern there cannot make the
+fake accept a value Cisco would never receive (#155)."""
 
 
 class LeftTheFenceError(AssertionError):
@@ -199,26 +211,39 @@ class FakeCisco:
     def _eox(self, path: str) -> HttpResponse:
         rest = path.removeprefix(EOX_PREFIX)
         kind, _, tail = rest.partition("/")
-        page_text, _, values_text = tail.partition("/")
+        page_and_query, _, path_values = tail.partition("/")
+        page_text, _, query = page_and_query.partition("?")
         page = int(page_text)
-        values = values_text.split(",")
         if kind == "EOXByProductID":
-            values = [_pid_from_wire(value) for value in values]
-        for value in values:
-            if kind == "EOXBySWReleaseString" and not is_safe_release(value):
-                msg = f"release left without its pattern: {value!r}"
+            if query:
+                msg = "hardware EoX was asked in the query form; it is sent in the path"
                 raise UnsafeValueSentError(msg)
+            values = [_pid_from_wire(value) for value in path_values.split(",")]
+            known = self.eox_pid
+            input_type = "PID"
+        elif kind == "EOXBySWReleaseString":
+            if path_values:
+                msg = "software EoX sent a release in the path; the query form is required"
+                raise UnsafeValueSentError(msg)
+            values = _software_values(query)
+            known = self.eox_release
+            input_type = "Software"
+        else:
+            msg = f"asked an EoX kind the fake does not serve: {kind}"
+            raise UnsafeValueSentError(msg)
         if (kind, page) in self.page_records:
             records = self.page_records[(kind, page)]
         else:
-            known = self.eox_pid if kind == "EOXByProductID" else self.eox_release
-            input_type = "PID" if kind == "EOXByProductID" else "Software"
             records = [
                 known.get(value)
                 or {
-                    "EOXInputValue": value,
+                    "EOLProductID": "",
+                    "EOXInputValue": "",
                     "EOXInputType": input_type,
-                    "ErrorCode": "SSA_ERR_026",
+                    "EOXError": {
+                        "ErrorID": "SSA_ERR_026",
+                        "ErrorDescription": "synthetic",
+                    },
                 }
                 for value in values
             ]
@@ -246,11 +271,11 @@ class FakeCisco:
             else:
                 entries.append(
                     {
-                        "product": {"basePID": value},
-                        "errorDetailsResponse": {"errorCode": "S3_INV_BASEPID"},
+                        "product": {},
+                        "suggestions": [{"errorDetailsResponse": {"errorCode": "S3_INV_BASEPID"}}],
                     }
                 )
-        return _json(200, {"suggestions": entries})
+        return _json(200, {"productList": entries})
 
     def _compatible(self, path: str) -> HttpResponse:
         rest = path.removeprefix(COMPATIBLE_PREFIX)
@@ -281,6 +306,33 @@ class FakeCisco:
         )
 
 
+def _software_values(query: str) -> list[str]:
+    """Return the releases in a software EoX query, proving every `inputN` is safe."""
+    params = _params(query)
+    inputs = sorted(
+        (int(key.removeprefix("input")), value)
+        for key, value in params.items()
+        if key.startswith("input") and key.removeprefix("input").isdigit()
+    )
+    if not inputs:
+        msg = "software EoX was asked with no inputs"
+        raise UnsafeValueSentError(msg)
+    if [number for number, _ in inputs] != list(range(1, len(inputs) + 1)):
+        msg = f"software EoX inputs were not input1..inputN: {sorted(params)}"
+        raise UnsafeValueSentError(msg)
+    releases: list[str] = []
+    for _, pair in inputs:
+        release, _, os_type = pair.partition(",")
+        if os_type not in _EOX_OS_TYPES:
+            msg = f"software EoX sent an OS type Cisco does not document: {os_type!r}"
+            raise UnsafeValueSentError(msg)
+        if not is_safe_release(release):
+            msg = f"release left without its pattern: {release!r}"
+            raise UnsafeValueSentError(msg)
+        releases.append(release)
+    return releases
+
+
 def _check_authorization(request: HttpRequest) -> None:
     headers = dict(request.headers)
     if headers.get("Authorization") != f"Bearer {TOKEN}":
@@ -295,14 +347,15 @@ def _pid_from_wire(wire: str) -> str:
     """Return the PID a path segment names, proving it left the PC in its safe wire form.
 
     A licence suffix's `/` must arrive raw, the only form Cisco answers (#162): Cisco's gateway
-    refuses `%2F` with HTTP 400, and no `%` is a PID character at all. The PID pattern allows
-    that one slash and nothing after it that could change the path.
+    refuses `%2F` with HTTP 400, and no `%` is a PID character at all. This is the fake's own
+    literal path rule, never the code's `is_safe_pid`, so a loosened pattern in the tool cannot
+    make the fake accept a value Cisco would never receive (#155).
     """
     if "%" in wire:
         msg = f"a PID reached the path percent-encoded, which Cisco refuses: {wire!r}"
         raise UnsafeValueSentError(msg)
-    if not is_safe_pid(wire):
-        msg = f"PID left without its pattern: {wire!r}"
+    if _FAKE_PID_PATH.fullmatch(wire) is None:
+        msg = f"PID left without its path shape: {wire!r}"
         raise UnsafeValueSentError(msg)
     return wire
 
@@ -441,9 +494,10 @@ CISCO_REPLY = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"
 class FakeSocket:
     """A socket with scripted incoming bytes that records everything sent on it."""
 
-    def __init__(self, incoming: bytes) -> None:
-        """Hold the bytes the other end will say."""
+    def __init__(self, incoming: bytes, on_send: Callable[[bytes], bytes] | None = None) -> None:
+        """Hold the bytes the other end will say, and how to answer what this end sends."""
         self._incoming = incoming
+        self._on_send = on_send
         self.sent = bytearray()
         self.closed = False
 
@@ -454,8 +508,10 @@ class FakeSocket:
         """Accept an option."""
 
     def sendall(self, data: bytes) -> None:
-        """Record what was sent."""
+        """Record what was sent, and let the far end answer it when it is scripted to."""
         self.sent += data
+        if self._on_send is not None:
+            self._incoming += self._on_send(bytes(data))
 
     def makefile(self, *_args: object, **_kwargs: object) -> io.BytesIO:
         """Hand out the scripted incoming bytes."""
@@ -475,9 +531,10 @@ class FakeTlsContext:
     check_hostname = True
     verify_mode = ssl.CERT_REQUIRED
 
-    def __init__(self, tls_reply: bytes) -> None:
-        """Hold the bytes the far end says once the handshake is done."""
+    def __init__(self, tls_reply: bytes, on_send: Callable[[bytes], bytes] | None = None) -> None:
+        """Hold how the far end answers what arrives after the handshake."""
         self._tls_reply = tls_reply
+        self._on_send = on_send
         self.server_names: list[str | None] = []
         self.wrapped: list[FakeSocket] = []
         self.tls_sockets: list[FakeSocket] = []
@@ -486,7 +543,8 @@ class FakeTlsContext:
         """Record the name the certificate would be checked against."""
         self.server_names.append(server_hostname)
         self.wrapped.append(sock)
-        wrapped = FakeSocket(self._tls_reply)
+        reply = b"" if self._on_send is not None else self._tls_reply
+        wrapped = FakeSocket(reply, self._on_send)
         self.tls_sockets.append(wrapped)
         return wrapped
 
@@ -496,18 +554,32 @@ class FakeNetwork:
     """`socket.create_connection` and the TLS context, on in-memory sockets.
 
     `connected` is every address the code under test tried to reach, so a test can say
-    that nothing but the proxy was ever dialled.
+    that nothing but the proxy was ever dialled. `replies` answers each request by its path
+    prefix, so one test can run the real transport through the token and every API path;
+    a request that matches none is answered with `cisco_says`.
     """
 
     proxy_says: bytes = CONNECT_ESTABLISHED
     cisco_says: bytes = CISCO_REPLY
+    replies: list[tuple[str, bytes]] = field(default_factory=list)
     connected: list[tuple[str, int]] = field(default_factory=list)
     plain_sockets: list[FakeSocket] = field(default_factory=list)
     context: FakeTlsContext = field(init=False)
 
     def __post_init__(self) -> None:
         """Make the TLS context that answers as Cisco."""
-        self.context = FakeTlsContext(self.cisco_says)
+        self.context = FakeTlsContext(self.cisco_says, on_send=self._reply_for)
+
+    def _reply_for(self, request: bytes) -> bytes:
+        """Return the scripted reply for one request's path, or the default reply."""
+        try:
+            path = request.split(b"\r\n", 1)[0].split(b" ")[1].decode("latin-1")
+        except IndexError:
+            return self.cisco_says
+        return next(
+            (reply for prefix, reply in self.replies if path.startswith(prefix)),
+            self.cisco_says,
+        )
 
     def create_connection(
         self, address: tuple[str, int], _timeout: float | None = None, *_args: object

@@ -123,6 +123,17 @@ _LEGACY_PREFIXES: Final = (
     ("feature ftp", "FTP"),
     ("feature tftp", "TFTP"),
 )
+_LEGACY_DEFAULT_ON: Final = (
+    ("PAD", "no service pad"),
+    ("BOOTP", "no ip bootp server"),
+)
+"""The IOS/IOS-XE legacy services that are on by default, and the line that turns each off.
+
+Cisco's IOS command references give both defaults as on: `service pad` is on from release
+10.0 ("All PAD commands and associated connections are enabled"), and `ip bootp server` is
+"enabled" unless `no ip bootp server` is configured. So an absent line is the documented
+default, not "off". NX-OS has no proven default for either, so it reads only what it shows.
+"""
 _NTP_SERVER: Final = re.compile(r"^ntp\s+(?:server|peer)\s+\S+(.*)$", re.IGNORECASE)
 _NTP_MASTER: Final = re.compile(r"^ntp\s+master(?:\s|$)", re.IGNORECASE)
 _NTP_KEY: Final = re.compile(r"^ntp\s+authentication-key\s+(\d+)\s+(\S+)", re.IGNORECASE)
@@ -146,7 +157,7 @@ def read_config_facts(platform: Platform, text: str) -> tuple[ConfigFact, ...]:
     lines = [line.rstrip() for line in text.splitlines()]
     facts: dict[str, FactValue] = {
         **_secret_facts(lines),
-        LEGACY_SERVICES: _legacy_services(lines),
+        LEGACY_SERVICES: _legacy_services(platform, lines),
         HTTP_SERVER: _http_server(lines),
         TELNET_LINES: _telnet_lines(platform, lines),
         VTY_ACCESS_CLASS_MISSING_LINES: _vty_access_class_missing(lines),
@@ -229,13 +240,23 @@ def _source_routing(lines: list[str]) -> bool:
     return True
 
 
-def _legacy_services(lines: list[str]) -> tuple[str, ...]:
-    """The legacy services the config explicitly turns on, by fixed keyword."""
+def _legacy_services(platform: Platform, lines: list[str]) -> tuple[str, ...]:
+    """The legacy services that are on: those shown, plus an IOS/IOS-XE default.
+
+    An explicitly configured service counts wherever it is read. On IOS/IOS-XE, PAD and BOOTP
+    are also on when the config shows neither form, because that is the vendor default; only
+    `no service pad` and `no ip bootp server` turn them off. NX-OS has no such proven default,
+    so it lists only what the config shows.
+    """
+    stripped = [line.strip().lower() for line in lines]
     found: list[str] = []
-    for line in lines:
-        text = line.strip().lower()
+    for text in stripped:
         for prefix, keyword in _LEGACY_PREFIXES:
             if text.startswith(prefix) and keyword not in found:
+                found.append(keyword)
+    if platform is Platform.IOS_XE:
+        for keyword, disabled_by in _LEGACY_DEFAULT_ON:
+            if keyword not in found and disabled_by not in stripped:
                 found.append(keyword)
     return tuple(found)
 

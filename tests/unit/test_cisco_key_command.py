@@ -11,12 +11,13 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from network_analyser import backup_store, run_output
 from network_analyser.cli import main
-from network_analyser.credentials import Secret
+from network_analyser.credentials import Secret, SecretScan
 from tests.support import fake_age
 from tests.support.fake_cisco import CLIENT_ID, CLIENT_SECRET, FakeCisco
 from tests.support.run_driver import (
@@ -174,6 +175,31 @@ def test_set_shows_the_least_privilege_guidance(operator: Operator) -> None:
         assert words in guidance
 
 
+def test_set_wipes_the_passphrase_and_the_key_from_memory(
+    operator: Operator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _serve_with(monkeypatch, FakeCisco())
+    wiped: list[Secret] = []
+    real_wipe = Secret.wipe
+    forgot: list[SecretScan] = []
+
+    def spy(self: Secret) -> None:
+        wiped.append(self)
+        real_wipe(self)
+
+    def forget(self: SecretScan) -> None:
+        forgot.append(self)
+
+    monkeypatch.setattr(Secret, "wipe", spy)
+    monkeypatch.setattr(SecretScan, "forget", forget)
+
+    got = operator("set", typed=typed("YES", PASS, CLIENT_ID, CLIENT_SECRET))
+
+    assert got.code == 0, got.err
+    assert len(wiped) >= 3  # the passphrase, the client ID and the client secret
+    assert len(forgot) == 1
+
+
 def test_set_no_check_stores_the_key_without_asking_cisco(
     operator: Operator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -214,7 +240,48 @@ def test_set_reports_an_outage_and_keeps_it_stored(
     assert operator.data.cisco_key_file.is_file()
 
 
+def test_set_passes_the_proxy_to_the_token_check(
+    operator: Operator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--proxy` must reach the one online request `set` makes, as `run --proxy` does (#150)."""
+    fake = FakeCisco()
+    opened: dict[str, Any] = {}
+
+    def transport(**kwargs: object) -> FakeCisco:
+        opened.update(kwargs)
+        return fake
+
+    monkeypatch.setattr("network_analyser.advisories.session.HttpsTransport", transport)
+
+    got = operator(
+        "set",
+        "--proxy",
+        "proxy.example:8080",
+        typed=typed("YES", PASS, CLIENT_ID, CLIENT_SECRET),
+    )
+
+    assert got.code == 0, got.err
+    proxy = opened["proxy"]
+    assert proxy.address == "proxy.example:8080"
+    assert fake.token_calls() == 1
+
+
 # -- show (story 30) --------------------------------------------------------------------------
+
+
+def test_show_says_when_the_key_was_set_without_asking_for_the_passphrase(
+    operator: Operator,
+) -> None:
+    """Story 30: only the last 4 needs the passphrase, so plain `show` never asks for it (#150)."""
+    operator.store()
+
+    got = operator("show", typed="")
+
+    assert got.code == 0, got.err
+    assert "A Cisco API key is stored" in got.out
+    assert STAMP.search(got.out)
+    assert "The client ID ends in" not in got.out
+    assert "Backup Passphrase" not in got.err
 
 
 def test_show_says_when_the_key_was_set_and_the_last_four_with_the_passphrase(
@@ -222,7 +289,7 @@ def test_show_says_when_the_key_was_set_and_the_last_four_with_the_passphrase(
 ) -> None:
     operator.store()
 
-    got = operator("show", typed=typed("YES", PASS))
+    got = operator("show", "--last-4", typed=typed("YES", PASS))
 
     assert got.code == 0, got.err
     assert "A Cisco API key is stored" in got.out
@@ -240,10 +307,10 @@ def test_show_says_no_key_is_stored_without_asking_for_anything(operator: Operat
     assert "Backup Passphrase" not in got.err
 
 
-def test_show_does_not_show_the_key_after_three_wrong_passphrases(operator: Operator) -> None:
+def test_show_does_not_show_last_four_after_three_wrong_passphrases(operator: Operator) -> None:
     operator.store()
 
-    got = operator("show", typed=typed("YES", WRONG, WRONG, WRONG))
+    got = operator("show", "--last-4", typed=typed("YES", WRONG, WRONG, WRONG))
 
     assert got.code == 2
     assert "The client ID ends in" not in got.out
@@ -261,10 +328,20 @@ def test_show_reports_a_key_locked_elsewhere_once(operator: Operator, tmp_path: 
         set_at=SET_AT,
     )
 
-    got = operator("show", typed=typed("YES", PASS))
+    got = operator("show", "--last-4", typed=typed("YES", PASS))
 
     assert got.code == 1
     assert (got.out + got.err).count(backup_store.KEY_LOCKED_ELSEWHERE) == 1
+
+
+def test_show_reports_an_unreadable_key_file_as_unreadable(operator: Operator) -> None:
+    operator.data.cisco_key_file.write_bytes(b"x" * (64 * 1024 + 1))
+
+    got = operator("show", "--last-4", typed=typed("YES", PASS))
+
+    assert got.code == 1
+    assert backup_store.KEY_FILE_UNREADABLE in got.err
+    assert backup_store.KEY_LOCKED_ELSEWHERE not in got.err
 
 
 # -- remove (story 31) ------------------------------------------------------------------------
@@ -339,9 +416,27 @@ def test_every_action_refuses_when_another_account_can_reach_the_trust_folder(
 # -- The lifecycle: change-passphrase and starting over (stories 37, 39) ----------------------
 
 
+def test_change_passphrase_forgets_the_scanned_secrets(
+    operator: Operator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    operator.store()
+    forgot: list[SecretScan] = []
+
+    def forget(self: SecretScan) -> None:
+        forgot.append(self)
+
+    monkeypatch.setattr(SecretScan, "forget", forget)
+
+    operator.monkeypatch.setattr("sys.stdin", io.StringIO(typed("YES", PASS, NEW, NEW, "y")))
+    code = main(["change-passphrase"])
+    operator.capsys.readouterr()
+
+    assert code == 0
+    assert len(forgot) == 1
+
+
 def test_change_passphrase_relocks_the_key_with_the_new_passphrase(operator: Operator) -> None:
     operator.store()
-
     operator.monkeypatch.setattr("sys.stdin", io.StringIO(typed("YES", PASS, NEW, NEW, "y")))
     code = main(["change-passphrase"])
     got = operator.capsys.readouterr()

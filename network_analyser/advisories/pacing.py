@@ -6,6 +6,8 @@ second, far under anything it has been seen to allow. The token is asked once.
 
 `Retry-After` decides the one retry's wait when Cisco sends it. A wait longer than two minutes
 is not taken: the source is marked unavailable instead, because a Run must not hang on Cisco.
+A source that refuses a few calls in a row is not asked again, so a persistent limit cannot
+walk the estate one value at a time (#154).
 """
 
 import time
@@ -14,6 +16,12 @@ from typing import Final
 
 from network_analyser.advisories.numbers import whole_number
 from network_analyser.records.cisco import CiscoEndpoint
+
+monotonic: Final = time.monotonic
+"""The default clock, named here so a test can inject its own with `monkeypatch` (#149)."""
+
+sleep: Final = time.sleep
+"""The default wait, named here for the same reason: a test never waits for real (#149)."""
 
 OPENVULN_INTERVAL_S: Final = 2.0
 """30 calls a minute (story 19)."""
@@ -35,6 +43,13 @@ DEFAULT_RETRY_WAIT_S: Final = 2.0
 MAX_RETRY_WAIT_S: Final = 120.0
 """The longest `Retry-After` the tool will honour; beyond it, the source is unavailable."""
 
+CONSECUTIVE_REFUSALS: Final = 3
+"""How many calls in a row one source may refuse, with a limit or a 5xx, before it is stopped.
+
+A shorter run than this can be one odd value; a persistent limit is not, and the values still
+to be asked are answered with fixed text instead of being sent one at a time (#154).
+"""
+
 
 class Pacer:
     """Waits so Cisco's limits are never reached, counting what it waited for tests."""
@@ -44,12 +59,16 @@ class Pacer:
     def __init__(
         self,
         *,
-        clock: Callable[[], float] = time.monotonic,
-        wait: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] | None = None,
+        wait: Callable[[float], None] | None = None,
     ) -> None:
-        """Use `clock` for time and `wait` to pause; tests replace both, so none waits."""
-        self._clock = clock
-        self._wait = wait
+        """Use `clock` for time and `wait` to pause; tests replace both, so none waits.
+
+        The defaults are read when the `Pacer` is made, never bound at import, so the Run's
+        own online step picks up the clock a test injects (#149).
+        """
+        self._clock = monotonic if clock is None else clock
+        self._wait = sleep if wait is None else wait
         self._last: dict[CiscoEndpoint, float] = {}
         self.waits: list[float] = []
 

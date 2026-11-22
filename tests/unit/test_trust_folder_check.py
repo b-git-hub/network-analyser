@@ -1,11 +1,12 @@
-r"""Before any prompt, the tool checks that only the operator can read or change the Trust Store.
+r"""Before any prompt, the tool checks that only the operator can read or change the data.
 
 #7 decided the per-user `trust\` folder is readable and writable only by the operator's
-Windows user (ticket #69). Anyone else who can change it could make the tool trust an
-impostor's host key and so send it a password, so another account that can read or change
-it refuses the Run; SYSTEM and Administrators, who can reach every file anyway, raise
-nothing. Windows answers are faked
-here; they are checked by hand on a Windows PC (lab checklist, G14).
+Windows user (ticket #69); #150 extended the check to the data folder that holds the Cisco API
+key file. Anyone else who can change the Trust Store could make the tool trust an impostor's
+host key and so send it a password, and anyone else who can reach the data folder could read or
+replace the stored key, so another account that can read or change either refuses the Run;
+SYSTEM and Administrators, who can reach every file anyway, raise nothing. Windows answers are
+faked here; they are checked by hand on a Windows PC (lab checklist, G14).
 """
 
 from pathlib import Path
@@ -117,6 +118,32 @@ def test_an_account_on_the_known_hosts_file_itself_is_caught(
 
     assert check.refusal is not None
     assert COLLEAGUE.name in check.refusal
+
+
+def test_another_account_on_the_data_folder_refuses_too(data: run_output.DataFolder) -> None:
+    """The data folder holds the Cisco API key file, so its permissions matter as well (#150)."""
+    root = _winsys.os_path(data.root)
+    windows = FakeWindows(read={root: (*OWNER_ONLY, COLLEAGUE)})
+
+    check = run_output.check_trust_folder(data, facts=windows.facts())
+
+    assert check.refusal is not None
+    assert COLLEAGUE.name in check.refusal
+    assert str(data.root) in check.refusal
+    assert "Cisco API key" in check.refusal
+    assert check.warning is None
+
+
+def test_an_account_on_the_cisco_key_file_itself_is_caught(data: run_output.DataFolder) -> None:
+    data.cisco_key_file.write_bytes(b"age ciphertext, never a real key")
+    key_file = _winsys.os_path(data.cisco_key_file)
+    windows = FakeWindows(read={key_file: (*OWNER_ONLY, COLLEAGUE)})
+
+    check = run_output.check_trust_folder(data, facts=windows.facts())
+
+    assert check.refusal is not None
+    assert COLLEAGUE.name in check.refusal
+    assert str(data.cisco_key_file) in check.refusal
 
 
 def test_before_the_first_run_the_folder_it_will_inherit_from_is_read(tmp_path: Path) -> None:

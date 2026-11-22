@@ -63,8 +63,10 @@ DENIED_REASON: Final = "denied"
 """
 DEVICE_ROLE_CHECK: Final = "Device Role out of date"
 """The Check name the out-of-date Role Finding carries (story 80; #102 gives it an id)."""
-DEVICE_ROLE_OUT_OF_DATE: Final = "Device Role is out of date"
-"""The Finding's own opening words (story 80, and the Finding order in story 108)."""
+DEVICE_ROLE_OUT_OF_DATE: Final = "The Device Role may be out of date"
+"""The Finding's own opening words: both possible causes, because IOS's refusal cannot tell
+them apart (story 80; operator decision on #142, 2026-11-22). The Check's name is
+`DEVICE_ROLE_CHECK` and its Level is `DEVICE_ROLE_LEVEL`."""
 DEVICE_ROLE_LEVEL: Final = "Medium"
 """Its level (spec #92, Levels). `analysis.role` now raises the Finding itself (#102)."""
 

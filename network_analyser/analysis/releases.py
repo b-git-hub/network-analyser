@@ -5,7 +5,7 @@ the Platform alone: classic IOS and IOS-XE share one command set, so the release
 them apart. Only three families are ever looked up (stories 44-45):
 
 - classic IOS, such as `15.2(7)E4`, `12.2(55)SE7` and `15.1(4)M12a`;
-- IOS-XE, such as `16.9.1`, `17.9.4a` and `26.1.2s1`;
+- IOS-XE, such as `16.9.1`, `17.9.4a`, `26.1.2s1` and the 3.x `3.6.8E`;
 - NX-OS, such as `9.3(10)`, `10.6(3s)` and `7.0(3)I4(8b)`.
 
 A lettered or special running release is an ordinary release: the letters and the digit after
@@ -13,14 +13,15 @@ them (`26.1.2s1`, `10.3(4a)`, `15.1(4)M12a`) are part of the release, never a re
 
 NX-OS in ACI mode (`14.2(4i)`, `15.2(3e)`), IOS-XR and any other shape are not in the table,
 so they are never matched: the device gets a "could not check" Finding instead. IOS-XR never
-reaches Analysis, because it is not a supported Platform. The fields Analysis holds can tell an
-NX-OS ACI-mode release from a plain NX-OS one, and an IOS-XE SD-WAN controller release (`20.x`)
-from an IOS-XE one, but a cEdge SD-WAN device looks exactly like an IOS-XE device; the family
-table keeps its three entries either way.
+reaches Analysis, because it is not a supported Platform. IOS XE SD-WAN is never matched
+either (decided on #78): a controller-managed edge router prints an ordinary IOS-XE release,
+so it is told apart by its `Router operating mode:` line, and a vManage controller by its
+`20.x` release line. NX-OS in ACI mode is told apart by its release shape. A device the
+fields cannot tell apart is matched as its release shape says.
 
-A device's release is normalised before it is looked up: the NX-OS `[build ...]` suffix is
-dropped and IOS-XE zero padding is stripped (`16.09.01` becomes `16.9.1`), so a formatting
-difference never hides an Advisory (story 45).
+A device's release is normalised before it is looked up: the bracketed suffix NX-OS prints
+after the release is dropped and IOS-XE zero padding is stripped (`16.09.01` becomes
+`16.9.1`), so a formatting difference never hides an Advisory (story 45).
 """
 
 import re
@@ -29,14 +30,17 @@ from types import MappingProxyType
 from typing import Final
 
 from network_analyser.records.analysis import OsType
+from network_analyser.records.lookup_values import strip_release_suffix
 from network_analyser.records.platform import Platform
 from network_analyser.records.unknown import Unknown
 
-_BUILD_SUFFIX: Final = re.compile(r"\s*\[build[^\]]*\]", re.IGNORECASE)
-_ZERO_PADDED: Final = re.compile(r"^0+([0-9][a-z]*)$")
-# A classic IOS release written dotted: `15.2.7E4`. Only classic IOS capitalises its Train.
+# One zero-padded dotted part, with any letters it carries: `03`, `08E`, `09a`.
+_ZERO_PADDED: Final = re.compile(r"^0+([0-9][A-Za-z]*)$")
+# A classic IOS release written dotted: `15.2.7E4`. Only classic IOS capitalises its Train, and
+# its majors are the two-digit 10-15 lines; IOS-XE 3.x is dotted with a capital letter too, so
+# it must never be rewritten here (#151).
 _DOTTED_CLASSIC: Final = re.compile(
-    r"([0-9]{1,2})\.([0-9]{1,2})\.0*([0-9]{1,3})([A-Z][A-Za-z0-9]{0,6})"
+    r"(1[0-5])\.([0-9]{1,2})\.0*([0-9]{1,3})([A-Z][A-Za-z0-9]{0,6})"
 )
 # The release inside a display name such as `Dublin-17.12.4`: a major and a minor number, then
 # parenthesised or dotted parts.
@@ -64,6 +68,13 @@ _CLASSIC_IOS: Final = re.compile(
 _IOS_XE: Final = re.compile(
     r"(?:1[6-9]|2[6-9]|[3-9][0-9])\.[0-9]{1,2}\.[0-9]{1,3}[a-z]{0,2}[0-9]{0,2}"
 )
+# IOS-XE 3.x: dotted releases whose rebuild carries an upper-case Train letter, such as
+# `3.6.8E` and `3.2.2SE`, with an optional rebuild letter before it (`3.16.4aS`). The letter
+# stays part of the Train, because 3.6E and 3.6S are different Train lines. Only 3.x is numbered
+# this way; 16.x on keeps lower-case suffixes (#151).
+_IOS_XE_3X: Final = re.compile(r"3\.[0-9]{1,2}\.[0-9]{1,3}[a-z]?[A-Z]{1,3}")
+# The Train letter of an IOS-XE 3.x release, which its Train keeps: `3.6E`, `3.2SE`.
+_IOS_XE_3X_TRAIN: Final = re.compile(r"3\.[0-9]{1,3}\.[0-9]{1,3}[a-z]?([A-Z]{1,3})")
 # The Nexus platform aliases openVuln matches NX-OS on, from a chassis PID's series prefix. The
 # aliases are the ones Cisco's `/platforms?OSType=nxos` documents (NEXUS3000, NEXUS5000,
 # NEXUS6000, NEXUS7000, NEXUS9000); the Nexus 7700 (`N77-`) is listed under NEXUS7000, and a
@@ -78,8 +89,11 @@ _NEXUS_FAMILIES: Final = (
 )
 _BASE_TRAIN: Final = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}")
 _CLASSIC_TRAIN: Final = re.compile(r"\)([A-Za-z]+)")
-_NXOS_LETTER_TRAIN: Final = re.compile(
-    r"[0-9]{1,3}\.[0-9]{1,3}\([0-9]{1,3}[a-z]{0,2}\)[A-Z][0-9]{1,3}"
+# The NX-OS hardware line: the capital letter and number Cisco calls the platform designator,
+# such as `I7`, `U6` or `D1`, which follows the first parenthesised number (`7.0(3)I7(9)`,
+# `7.3(2)D1(1)`). It stays in the Train; the number before it does not (#157).
+_NXOS_HARDWARE_LINE: Final = re.compile(
+    r"[0-9]{1,3}\.[0-9]{1,3}\([0-9]{1,3}[a-z]{0,2}\)([A-Z][0-9]{1,3})"
 )
 # The `platforms[].name` text Cisco's openVuln reply gives each Nexus series (#126). The names
 # are Cisco's own, as its samples and the 2026 live replies show; a series whose text cannot be
@@ -94,16 +108,37 @@ _PLATFORM_NAMES: Final[Mapping[str, str]] = MappingProxyType(
 )
 _ACI_REASON: Final = "NX-OS in ACI mode is not matched"
 _FAMILY_REASON: Final = "the software family could not be worked out from show version"
+# The Nexus series `show version` names in its hardware line, and the alias each one matches
+# openVuln on (#159). A token that is not here names no documented series, such as a Nexus 2000
+# Fabric Extender, so it gives no alias rather than a guess.
+_NEXUS_VERSION_SERIES: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "Nexus3000": "NEXUS3000",
+        "Nexus5000": "NEXUS5000",
+        "Nexus6000": "NEXUS6000",
+        "Nexus7000": "NEXUS7000",
+        "Nexus9000": "NEXUS9000",
+    }
+)
+_SDWAN_REASON: Final = "IOS XE SD-WAN is not matched"
+# A Catalyst SD-WAN edge router managed by a controller prints this `Router operating mode:`
+# value, whatever IOS-XE release it runs (#147, decided on #78).
+_SDWAN_CONTROLLER_MANAGED: Final = re.compile(r"controller[\s_-]*managed", re.IGNORECASE)
+# A Catalyst SD-WAN controller (vManage, vBond, vSmart) runs IOS-XE 20.x (#78).
+_SDWAN_CONTROLLER_RELEASE: Final = re.compile(r"20\.[0-9]{1,3}\.[0-9]{1,3}[a-z]{0,2}")
 
 
 def normalise_release(release: str) -> str:
     """Return `release` as Cisco's lookup expects it (story 45).
 
-    The NX-OS `[build ...]` suffix is dropped. A dotted release has its zero padding stripped,
-    which is what IOS-XE devices print in `show version`. Parenthesised releases, classic IOS
-    and NX-OS, are left as they are.
+    The bracketed suffix NX-OS prints after the release (`[build ...]`, `[Feature Release]`) is
+    dropped, by the same rule `platforms` uses when it reads `show version` (#155). A dotted
+    release has its zero padding stripped, which is what IOS-XE devices print in `show
+    version`: `16.09.01` becomes `16.9.1` and `03.06.08E` becomes `3.6.8E`, an upper-case
+    suffix letter kept as it is. Parenthesised releases, classic IOS and NX-OS, are left as
+    they are.
     """
-    stripped = _BUILD_SUFFIX.sub("", release).strip()
+    stripped = strip_release_suffix(release).strip()
     if "(" in stripped or "." not in stripped:
         return stripped
     return ".".join(_strip_component(part) for part in stripped.split("."))
@@ -120,7 +155,9 @@ def normalise_listed_release(release: str) -> str:
     `normalise_release` runs first, then a classic IOS release written dotted, such as
     `15.2.7E4` or `15.02.07E4`, is rewritten to the parenthesised form `15.2(7)E4` that
     `show version` prints, so it orders and matches a Train like the running release does. An
-    IOS-XE release only ever carries lowercase letters, so it is never rewritten.
+    IOS-XE release is never rewritten: a 16.x-on one only carries lower-case letters, and a
+    3.x one such as `3.6.8E` is IOS-XE numbering even though it capitalises its Train letter
+    (#151).
     """
     normalised = normalise_release(release)
     match = _DOTTED_CLASSIC.fullmatch(normalised)
@@ -141,40 +178,72 @@ def release_token(text: str) -> str:
     return match.group(0) if match else text.strip()
 
 
-def family_of(platform: Platform | Unknown, release: str | Unknown) -> OsType | None:
+def family_of(
+    platform: Platform | Unknown,
+    release: str | Unknown,
+    router_operating_mode: str | None = None,
+) -> OsType | None:
     """Return the family `release` belongs to, or None when the table does not hold it.
 
     None means never matched: an unreadable release, an unsupported Platform, NX-OS in ACI
-    mode, or a shape the family table does not name (stories 44, 46).
+    mode, IOS XE SD-WAN, or a shape the family table does not name (stories 44, 46). SD-WAN is
+    a controller-managed IOS-XE device's `Router operating mode:` text, or a 20.x controller
+    release (decided on #78, #147).
     """
     if not isinstance(release, str):
         return None
     normalised = normalise_release(release)
+    if platform is Platform.IOS_XE and _is_sdwan(normalised, router_operating_mode):
+        return None
     if platform is Platform.NX_OS:
         return OsType.NX_OS if _NXOS.fullmatch(normalised) else None
     if platform is Platform.IOS_XE:
         if _CLASSIC_IOS.fullmatch(normalised):
             return OsType.IOS
-        if _IOS_XE.fullmatch(normalised):
+        if _IOS_XE.fullmatch(normalised) or _IOS_XE_3X.fullmatch(normalised):
             return OsType.IOS_XE
     return None
 
 
-def family_reason(release: str | Unknown) -> str:
+def family_reason(
+    platform: Platform | Unknown,
+    release: str | Unknown,
+    router_operating_mode: str | None = None,
+) -> str:
     """Why `family_of` could not name a family, in fixed text the operator can read."""
-    if isinstance(release, str) and _ACI_MODE.fullmatch(normalise_release(release)):
-        return _ACI_REASON
+    if isinstance(release, str):
+        normalised = normalise_release(release)
+        if platform is Platform.IOS_XE and _is_sdwan(normalised, router_operating_mode):
+            return _SDWAN_REASON
+        if _ACI_MODE.fullmatch(normalised):
+            return _ACI_REASON
     return _FAMILY_REASON
 
 
-def train_of(release: str, os_type: OsType) -> str:
-    """Return the Train `release` belongs to (GLOSSARY.md: `17.12`, `15.2E`).
+def _is_sdwan(release: str, router_operating_mode: str | None) -> bool:
+    """Say whether this IOS/IOS-XE device is one Cisco's SD-WAN family owns (#78, #147)."""
+    if router_operating_mode is not None and _SDWAN_CONTROLLER_MANAGED.search(
+        router_operating_mode
+    ):
+        return True
+    return _SDWAN_CONTROLLER_RELEASE.fullmatch(release) is not None
 
-    IOS-XE and NX-OS use the first two dotted numbers. Classic IOS keeps the Train letter that
-    follows the maintenance rebuild. An NX-OS release with a hardware-line segment, a capital
-    letter and a number such as `I7`, `U6`, `A8`, `F3` or `N1`, keeps everything up to and
-    including it, so `7.0(3)I7(9)` is in Train `7.0(3)I7` and `6.0(2)U6(10)` in `6.0(2)U6`
-    (#137): releases built for different hardware lines are never lumped (story 19).
+
+def train_of(release: str, os_type: OsType) -> str:
+    """Return the Train `release` belongs to (GLOSSARY.md: `17.12`, `15.2E`, `3.6E`).
+
+    IOS-XE and NX-OS use the first two dotted numbers, and an IOS-XE 3.x release keeps the
+    Train letter that follows its rebuild (`3.6.8E` is in Train `3.6E`, #151). Classic IOS
+    keeps the Train letter that follows the maintenance rebuild.
+
+    An NX-OS release with a hardware line keeps that line's capital letter and number, and
+    drops the first parenthesised number (#157). Cisco names a release by its major and minor
+    numbers, a maintenance release number, the platform designator and, if present, a rebuild
+    identifier; the maintenance number is a release step within the Train, not a new Train. So
+    `7.0(3)I7(9)` is in Train `7.0I7` and `6.0(2)U6(10)` in `6.0U6`, while `7.3(2)D1(1)` and
+    `7.3(5)D1(1)` are both in `7.3D1` and `7.3(0)N1(1)` and `7.3(13)N1(1)` both in `7.3N1`
+    (decided on #157). Releases built for different hardware lines, such as `7.0(3)I7(9)` and
+    `7.0(3)I6(1)`, are never lumped (stories 19 of #122, #137).
     """
     match = _BASE_TRAIN.match(release)
     base = match.group(0) if match else release
@@ -182,10 +251,14 @@ def train_of(release: str, os_type: OsType) -> str:
         suffix = _CLASSIC_TRAIN.search(release)
         if suffix is not None:
             return f"{base}{suffix.group(1).upper()}"
-    if os_type is OsType.NX_OS:
-        letter_train = _NXOS_LETTER_TRAIN.match(release)
+    if os_type is OsType.IOS_XE:
+        letter_train = _IOS_XE_3X_TRAIN.match(release)
         if letter_train is not None:
-            return letter_train.group(0)
+            return f"{base}{letter_train.group(1)}"
+    if os_type is OsType.NX_OS:
+        hardware_line = _NXOS_HARDWARE_LINE.match(release)
+        if hardware_line is not None:
+            return f"{base}{hardware_line.group(1)}"
     return base
 
 
@@ -232,6 +305,20 @@ def hardware_family(chassis_pid: str | None) -> str | None:
         (family for pattern, family in _NEXUS_FAMILIES if pattern.match(chassis_pid)),
         None,
     )
+
+
+def hardware_family_from_version(token: str | None) -> str | None:
+    """Return the Nexus series alias the `show version` token names, or None (#159).
+
+    `show version` prints the series beside the model, `cisco Nexus9000 C93180YC-EX Chassis`,
+    while the model alone names no series (story 46). This is the fallback for a device whose
+    `show inventory | json` the Device Role refused: the token settles the series only, never
+    a chassis PID, so EoX and Suggestion lookups are still not asked. A token naming no
+    documented series gives None, never a guess.
+    """
+    if token is None:
+        return None
+    return _NEXUS_VERSION_SERIES.get(token)
 
 
 def platform_name(family: str | None) -> str | None:

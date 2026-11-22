@@ -17,6 +17,7 @@ import pytest
 from network_analyser import diagram
 from network_analyser.cli.findings_file import FINDINGS_FILE, write_findings
 from network_analyser.credentials import Secret, SecretScan
+from network_analyser.diagram.findings import findings_tab
 from network_analyser.diagram.findings_report import DEVICE_ROLE_CHECK as REPORTED_ROLE_CHECK
 from network_analyser.platforms.collection import DEVICE_ROLE_CHECK as RAISED_ROLE_CHECK
 from network_analyser.run_output import RunFolder
@@ -138,6 +139,7 @@ def _advised(  # noqa: PLR0913 (each part of the advice, by name)
     train: str | None = "17.12",
     **fields: object,
 ) -> object:
+    not_cleared = fields.pop("not_cleared", 0)
     return device(
         ident,
         hostname,
@@ -151,6 +153,7 @@ def _advised(  # noqa: PLR0913 (each part of the advice, by name)
             "latest_release_lifecycle": latest_release_lifecycle,
             "latest_in_train_lifecycle": latest_in_train_lifecycle,
             "train": train,
+            "not_cleared": not_cleared,
         },
         **fields,
     )
@@ -351,13 +354,54 @@ def test_no_fix_in_a_train_without_a_recorded_train_still_reads_as_no_fix() -> N
     assert "no fix in this device's Train" in page
 
 
-def test_a_file_without_advice_says_could_not_check_rather_than_safe() -> None:
+def test_a_file_without_advice_says_not_available_rather_than_safe_or_broken() -> None:
+    """A v1/v2 file, or a device with no advice, reads as "not available", not a failure (#146)."""
     data = document([device("dev-S1", "sw-a", "192.0.2.1", software_version="17.12.4")])
 
     page = _page(data)
 
-    assert "could not check: this topology.json does not record the Advisory answer" in page
+    assert '<p class="callout not-available"><b>not available</b></p>' in page
+    assert "could not check" not in page
     assert "no Critical/High Advisories" not in page
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_a_format_1_or_2_file_renders_without_a_red_could_not_check_callout(version: int) -> None:
+    data = document([device("dev-S1", "sw-a", "192.0.2.1", software_version="17.12.4")])
+    data["format_version"] = version
+
+    page = _page(data)
+
+    assert '<p class="callout not-available"><b>not available</b></p>' in page
+    assert '<p class="callout could-not-check">' not in page
+
+
+def test_a_recorded_target_with_no_count_never_reads_as_a_complete_upgrade() -> None:
+    data = document([_advised("dev-S1", "sw-a", "192.0.2.1")])
+    del data["devices"][0]["advice"]["not_cleared"]
+    data["findings"] = [_advisory(ADVISORY_ID, "High", "dev-S1")]
+
+    page = _page(data)
+
+    assert "Upgrade to 17.12.8 or later (count not recorded" in page
+    assert "Upgrade to 17.12.8 or later</b>" not in page
+
+
+def test_an_unknown_target_shows_a_dash_for_not_cleared() -> None:
+    data = document(
+        [_advised("dev-S1", "sw-a", "192.0.2.1", upgrade_target="not available")],
+        findings=[_advisory(ADVISORY_ID, "High", "dev-S1")],
+    )
+
+    page = _page(data)
+
+    assert '<p class="callout could-not-check"><b>not available</b></p>' in page
+    tab = findings_tab(read(data))
+    (group,) = tab.levels
+    (check,) = group.checks
+    assert check.advisory is not None
+    (row,) = check.advisory.devices
+    assert row.not_cleared == "\u2014"
 
 
 def test_advisories_fold_into_one_details_with_the_count_and_the_counts_per_level() -> None:
@@ -399,6 +443,33 @@ def test_an_advisory_with_no_fix_names_the_train() -> None:
     page = _page(data)
 
     assert "no fix in Train 17.12" in page
+
+
+def test_an_unresolved_series_reads_not_available_and_never_upgrades_to_it() -> None:
+    """A fix Cisco's `platforms[]` cannot resolve is unknown, not absent (#136)."""
+    detail = _advisory_detail(first_fixed=None, fix_unresolved=True)
+    data = document(
+        [
+            _advised(
+                "dev-S1",
+                "sw-a",
+                "192.0.2.1",
+                release="9.3(10)",
+                outcome="1 Advisory matches",
+                upgrade_target="not available",
+                train="9.3",
+            )
+        ],
+        findings=[_advisory(ADVISORY_ID, "High", "dev-S1", detail=detail)],
+    )
+
+    page = _page(data)
+
+    assert '<p class="callout could-not-check"><b>not available</b></p>' in page
+    assert "Upgrade to not available" not in page
+    assert "no fix in Train" not in page
+    details = page[page.index("<details>") : page.index("</details>")]
+    assert "<td>not available</td>" in details
 
 
 def test_an_advisory_id_that_does_not_pass_the_pattern_is_not_a_link() -> None:

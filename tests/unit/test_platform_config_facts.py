@@ -226,6 +226,30 @@ def test_the_no_source_route_form_reads_as_disabled() -> None:
     assert _facts(Platform.IOS_XE, "no ip source-route\n")[IP_SOURCE_ROUTE] is False
 
 
+def test_ios_legacy_pad_and_bootp_read_as_on_because_their_default_is_on() -> None:
+    facts = _facts(Platform.IOS_XE, "hostname sw-a\n")
+
+    assert facts[LEGACY_SERVICES] == ("PAD", "BOOTP")
+
+
+def test_the_no_forms_turn_pad_and_bootp_off() -> None:
+    facts = _facts(Platform.IOS_XE, "hostname sw-a\nno service pad\nno ip bootp server\n")
+
+    assert facts[LEGACY_SERVICES] == ()
+
+
+def test_an_enabled_line_never_counts_a_default_twice() -> None:
+    facts = _facts(Platform.IOS_XE, "hostname sw-a\nservice pad\nip bootp server\n")
+
+    assert facts[LEGACY_SERVICES] == ("PAD", "BOOTP")
+
+
+def test_nxos_does_not_read_pad_or_bootp_at_a_default() -> None:
+    facts = _facts(Platform.NX_OS, "hostname nx-a\nfeature telnet\nline vty\n access-class 10 in\n")
+
+    assert facts[LEGACY_SERVICES] == ()
+
+
 @pytest.mark.parametrize("config", ["hostname nx-a\n", "hostname nx-a\nno ip source-route\n"])
 def test_source_routing_is_not_an_nxos_fact(config: str) -> None:
     assert IP_SOURCE_ROUTE not in _facts(Platform.NX_OS, config)

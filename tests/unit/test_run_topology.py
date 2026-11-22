@@ -174,7 +174,7 @@ def test_a_run_whose_role_refuses_the_new_commands_gets_one_role_finding(
     roles = [item for item in findings if item["check"]["id"] == "config-device-role-out-of-date"]
     assert len(roles) == 1
     assert roles[0]["level"] == "Medium"
-    assert "Device Role is out of date" in roles[0]["what_was_found"]
+    assert "image may not have the command" in roles[0]["what_was_found"]
     assert "role-snippet" in roles[0]["what_was_found"]
     checks = _topology()["analysis"]["checks"]  # type: ignore[index]  # JSON data
     assert isinstance(checks, list)

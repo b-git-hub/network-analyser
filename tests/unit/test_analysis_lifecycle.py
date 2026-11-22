@@ -283,6 +283,55 @@ def test_upcoming_eox_dates_are_advice_not_findings() -> None:
     )
 
 
+def test_an_eox_date_of_today_counts_as_passed_and_is_not_upcoming() -> None:
+    """A milestone dated today has passed, so it raises its Finding and adds no advice (#150).
+
+    Counting it as neither used to lose it from both surfaces.
+    """
+    today = AS_OF.date().isoformat()
+    record = _device(A, "S1", "sw-a")
+    results = _results(
+        record,
+        inventory=(_inventory("dev-S1", (MODEL, HardwareKind.CHASSIS)),),
+        hardware=(
+            _hardware(
+                MODEL,
+                _item(
+                    name=MODEL,
+                    last_date_of_support=today,
+                    end_of_sale=today,
+                ),
+            ),
+        ),
+        software=(
+            _software(
+                RELEASE,
+                _item(
+                    kind=EoxKind.SOFTWARE,
+                    name=RELEASE,
+                    end_of_sw_maintenance=today,
+                ),
+            ),
+        ),
+    )
+
+    hardware_finding = next(
+        finding
+        for finding in _lifecycle(results, "lifecycle-hardware-eox")
+        if finding.devices == ("dev-S1",)
+    )
+    software_finding = next(
+        finding
+        for finding in _lifecycle(results, "lifecycle-software-eox")
+        if finding.devices == ("dev-S1",)
+    )
+    assert hardware_finding.level is FindingLevel.HIGH
+    assert today in hardware_finding.what_was_found
+    assert software_finding.level is FindingLevel.MEDIUM
+    (advice,) = results.advice
+    assert advice.upcoming_eox == ()
+
+
 def test_upcoming_eox_rides_the_analysis_record_in_topology_json() -> None:
     record = _device(A, "S1", "sw-a")
     built = topology.build((record,))
@@ -525,6 +574,152 @@ def test_a_config_canary_never_reaches_a_lifecycle_finding() -> None:
         replace(built, findings=results.findings, analysis=results.summary)
     )
     assert CANARY not in json.dumps(document)
+
+
+def test_a_pid_refused_by_the_safe_pattern_gives_its_device_a_could_not_check() -> None:
+    record = _device(A, "S1", "sw-a")
+    results = _results(
+        record,
+        inventory=(_inventory("dev-S1", ("C9300 48P", HardwareKind.CHASSIS)),),
+    )
+
+    (finding,) = _lifecycle(results, "lifecycle-hardware-eox-could-not-check")
+
+    assert finding.level is FindingLevel.LOW
+    assert finding.devices == ("dev-S1",)
+    assert finding.check.name == "Hardware EoX could not check"
+    assert finding.check.type is CheckType.LIFECYCLE
+    assert finding.source == "Cisco EoX"
+    assert "C9300 48P" in finding.what_was_found
+    assert "does not match the safe pattern" in finding.what_was_found
+    assert finding.what_was_found == finding.summary
+    assert finding.cisco_detail is None
+
+
+def test_a_pid_cisco_has_no_record_for_gives_its_device_a_could_not_check() -> None:
+    record = _device(A, "S1", "sw-a")
+    results = _results(
+        record,
+        inventory=(_inventory("dev-S1", (MODEL, HardwareKind.CHASSIS)),),
+        hardware=(HardwareEox(MODEL, unanswered="SSA_ERR_026"),),
+    )
+
+    (finding,) = _lifecycle(results, "lifecycle-hardware-eox-could-not-check")
+
+    assert finding.level is FindingLevel.LOW
+    assert MODEL in finding.what_was_found
+    assert "SSA_ERR_026" in finding.what_was_found
+    assert _lifecycle(results, "lifecycle-hardware-eox") == []
+
+
+def test_a_pid_cisco_was_not_asked_about_gives_its_device_a_could_not_check() -> None:
+    record = _device(A, "S1", "sw-a")
+    results = _results(
+        record,
+        inventory=(_inventory("dev-S1", (MODEL, HardwareKind.CHASSIS)),),
+    )
+
+    (finding,) = _lifecycle(results, "lifecycle-hardware-eox-could-not-check")
+
+    assert finding.level is FindingLevel.LOW
+    assert "no answer for PID" in finding.what_was_found
+
+
+def test_a_pid_cisco_answered_with_no_eox_dates_is_not_a_could_not_check() -> None:
+    record = _device(A, "S1", "sw-a")
+    results = _results(
+        record,
+        inventory=(_inventory("dev-S1", (MODEL, HardwareKind.CHASSIS)),),
+        hardware=(_hardware(MODEL),),
+    )
+
+    assert _lifecycle(results, "lifecycle-hardware-eox-could-not-check") == []
+
+
+def test_one_unchecked_pid_beside_a_passed_date_raises_both_findings() -> None:
+    record = _device(A, "S1", "sw-a")
+    results = _results(
+        record,
+        inventory=(
+            _inventory(
+                "dev-S1",
+                (MODEL, HardwareKind.CHASSIS),
+                ("C9300-NM-8X", HardwareKind.LINE_CARD),
+            ),
+        ),
+        hardware=(
+            _hardware(MODEL, _item(end_of_sale=PAST)),
+            HardwareEox("C9300-NM-8X", unanswered="SSA_ERR_026"),
+        ),
+    )
+
+    (passed,) = _lifecycle(results, "lifecycle-hardware-eox")
+    (gap,) = _lifecycle(results, "lifecycle-hardware-eox-could-not-check")
+
+    assert passed.level is FindingLevel.LOW
+    assert gap.level is FindingLevel.LOW
+    assert gap.devices == ("dev-S1",)
+    assert "C9300-NM-8X" in gap.what_was_found
+    assert MODEL not in gap.what_was_found
+
+
+def test_a_release_cisco_has_no_record_for_gives_its_device_a_could_not_check() -> None:
+    record = _device(A, "S1", "sw-a")
+    results = _results(
+        record,
+        software=(SoftwareEox(RELEASE, unanswered="SSA_ERR_026"),),
+    )
+
+    (finding,) = _lifecycle(results, "lifecycle-software-eox-could-not-check")
+
+    assert finding.level is FindingLevel.LOW
+    assert finding.devices == ("dev-S1",)
+    assert finding.check.name == "Software EoX could not check"
+    assert RELEASE in finding.what_was_found
+    assert "SSA_ERR_026" in finding.what_was_found
+    assert _lifecycle(results, "lifecycle-software-eox") == []
+
+
+def test_a_release_whose_family_is_not_asked_about_gives_a_could_not_check() -> None:
+    record = _device(A, "S1", "sw-a", release="14.2(4i)")
+    results = _results(record)
+
+    (finding,) = _lifecycle(results, "lifecycle-software-eox-could-not-check")
+
+    assert finding.level is FindingLevel.LOW
+    assert "OS family" in finding.what_was_found
+
+
+def test_an_unreadable_release_gives_a_could_not_check() -> None:
+    record = _device(A, "S1", "sw-a", release="")
+    results = _results(record)
+
+    (finding,) = _lifecycle(results, "lifecycle-software-eox-could-not-check")
+
+    assert "release is not readable" in finding.what_was_found
+
+
+def test_a_release_cisco_answered_with_no_eox_dates_is_not_a_could_not_check() -> None:
+    record = _device(A, "S1", "sw-a")
+    results = _results(record, software=(_software(RELEASE),))
+
+    assert _lifecycle(results, "lifecycle-software-eox-could-not-check") == []
+
+
+def test_an_unavailable_eox_source_skips_the_could_not_check_checks_too() -> None:
+    reason = "Cisco EoX could not be reached"
+    results = _results(
+        _device(A, "S1", "sw-a"),
+        inventory=(_inventory("dev-S1", (MODEL, HardwareKind.CHASSIS)),),
+        eox=SourceUnavailable(reason),
+    )
+
+    runs = {run.check.id: run for run in results.checks}
+    assert runs["lifecycle-hardware-eox-could-not-check"].ran is False
+    assert runs["lifecycle-hardware-eox-could-not-check"].reason == reason
+    assert runs["lifecycle-software-eox-could-not-check"].ran is False
+    assert runs["lifecycle-software-eox-could-not-check"].reason == reason
+    assert _lifecycle(results) == []
 
 
 def test_lifecycle_findings_are_sorted_worst_first() -> None:

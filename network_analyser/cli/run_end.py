@@ -10,10 +10,13 @@ The crawl this module is handed has already closed every device session and drai
 Backing locking queue (`backup_store.BackupLocker.finish`), so nothing here holds a live
 device. The key is unlocked with the Backup Passphrase only when lookups are on and the key
 file exists; the password wipe follows at once, before any outbound connection. `--cisco-
-lookups off` never opens the key file and never asks Cisco.
+lookups off` never opens the key file and never asks Cisco. A stopped Run, or one stopped
+during the online step, takes the offline path and still records its `analysis` event (#143).
 
 A source that could not be asked becomes one Needs-attention line, never a per-device
-Finding, and the Run still writes its outputs and keeps its Backups (stories 118-120).
+Finding, and the Run still writes its outputs and keeps its Backups (stories 118-120). A Check
+that raises on Cisco's answers falls back to offline Analysis, so the Run still writes every
+output (story 120, #143).
 """
 
 import sys
@@ -31,12 +34,14 @@ from network_analyser.cli.parser import PROG
 from network_analyser.credentials import CredentialSets, SecretScan
 from network_analyser.records.analysis import AnalysisInput, CiscoAnswers, SourceUnavailable
 from network_analyser.records.cisco import CiscoCallTally, LookupQuestions, TokenOutcome
+from network_analyser.records.device import DeviceRecord
 from network_analyser.records.events import AnalysisRan
 from network_analyser.records.scope import ScopeRecord
 from network_analyser.records.topology import (
     AnalysisResults,
     CiscoLookups,
     FindingLevel,
+    Topology,
 )
 from network_analyser.run_output import AuditLog, RunFolder
 
@@ -54,6 +59,12 @@ NO_KEY_ATTENTION: Final = (
 
 LOOKUPS_FAILED: Final = "Cisco lookups did not finish"
 """Fixed text when the online step raised, so the Run still writes its outputs."""
+
+ANALYSIS_FAILED: Final = (
+    "Warning: Analysis could not use Cisco's answers, so the Run's Checks ran offline. "
+    "The Backups\nand every other output are unaffected."
+)
+"""Fixed text when a Check raised on Cisco's answers, so the Run still writes its outputs."""
 
 _SOURCES: Final = (
     ("advisories", "Cisco advisories (openVuln)"),
@@ -73,6 +84,9 @@ _EXPIRED_LINE: Final = (
 )
 """The one line an expired token gives, however many sources it stopped. It does not blame the key
 or send the operator to cisco-key set: Cisco's token is issued once a Run (#133)."""
+_REJECTED_LINE: Final = f"{_ALL_SOURCES} stopped: {_REJECTED}. {_KEY_STEP}"
+"""The one line a rejected key gives, however many sources it stopped. It says the lookups
+stopped, never that they did not run: an earlier source may already have answered (#155)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,12 +99,15 @@ class EndOutcome:
             missing-key line.
         results: Analysis's Findings, advice and Check list; None when Analysis did not run.
         lookups: what `topology.json` records about Cisco lookups.
+        stopped: whether the operator's Ctrl+C ended the online step, so the Run is reported
+            stopped and exits 3 (#143).
     """
 
     written: bool
     attention: tuple[str, ...]
     results: AnalysisResults | None = None
     lookups: CiscoLookups = field(default_factory=lambda: CiscoLookups(ran=False))
+    stopped: bool = False
 
 
 def missing_key_notice(*, lookups_enabled: bool, key_file: Path) -> str | None:
@@ -124,23 +141,31 @@ def finish(  # noqa: PLR0913 (the Run's end, every dependency explicit)
 
     Called after the crawl has closed every session and locked every Backup, inside the
     Run's audit trail so the `analysis` event lands before the Run-end event. The key, its
-    token and Cisco's answers are dropped before this returns.
+    token and Cisco's answers are dropped before this returns, and the `try` starts right
+    after the unlock, so a failure in Topology building cannot skip the key wipe (#143).
     """
     key = None
-    if lookups_enabled and key_file.is_file():
-        key = backup_store.unlock_key_file(key_file, passphrase)
-    locked_out = lookups_enabled and key is None and key_file.is_file()
-    wipe(sets, passphrase)
-
-    built = run_topology.build_topology(collected.records(), scope)
+    key_problem = None
+    stopped = False
+    as_of = (now or datetime.now(UTC)).astimezone()
     try:
+        if lookups_enabled and key_file.is_file():
+            opened = backup_store.open_key_file(key_file, passphrase)
+            key = opened.key
+            if key is not None:
+                key.add_to_scan(scan)  # story 40: the key joins the scan as soon as it exists
+            else:
+                key_problem = opened.problem or backup_store.KEY_LOCKED_ELSEWHERE
+        wipe(sets, passphrase)
+
+        built = run_topology.build_topology(collected.records(), scope)
         known = AnalysisInput(
             topology=built,
             collected=run_analysis.collected_from(collected.records()),
             inventory=run_analysis.inventories(built, collected.records()),
         )
-        answers, lookups, replies = _ask(known, key, scan=scan, proxy=proxy, now=now)
-        results = run_analysis.analysed(built, answers, records=collected.records())
+        answers, lookups, replies, stopped = _ask(known, key, scan=scan, proxy=proxy, now=now)
+        results, answers = _analysed(built, answers, lookups, collected.records(), as_of=as_of)
         audit.record(analysis_event(results, lookups, replies))
         written = run_topology.save_all(
             folder,
@@ -158,13 +183,42 @@ def finish(  # noqa: PLR0913 (the Run's end, every dependency explicit)
         attention=_attention(
             lookups_enabled=lookups_enabled,
             key=key,
-            locked_out=locked_out,
+            key_problem=key_problem,
             answers=answers,
             lookups=lookups,
+            stopped=stopped,
         ),
         results=results,
         lookups=lookups,
+        stopped=stopped,
     )
+
+
+def _analysed(
+    built: Topology,
+    answers: CiscoAnswers,
+    lookups: CiscoLookups,
+    records: tuple[DeviceRecord, ...],
+    *,
+    as_of: datetime,
+) -> tuple[AnalysisResults, CiscoAnswers]:
+    """Run every Check, returning the results and the answers they were run with.
+
+    Cisco's replies are not signed or fully controlled, so odd data must never cost the Run
+    its `topology.json`, diagram and Findings report (story 120, #143): a Check that raises on
+    them is retried offline, and the offline answers also carry the Needs-attention lines.
+    When Cisco was not asked there is no Cisco data to blame, so the exception is the Run's
+    own and propagates. `as_of` is the one local day the Lifecycle Checks judge EoX dates
+    against, used by the retry too (#150).
+    """
+    try:
+        return run_analysis.analysed(built, answers, records=records, as_of=as_of), answers
+    except Exception:  # one odd Cisco reply must not lose every output
+        if not lookups.ran:
+            raise
+        print(ANALYSIS_FAILED, file=sys.stderr)
+        offline = CiscoAnswers.unavailable(LOOKUPS_FAILED)
+        return run_analysis.analysed(built, offline, records=records, as_of=as_of), offline
 
 
 def _ask(
@@ -174,13 +228,18 @@ def _ask(
     scan: SecretScan,
     proxy: ProxyConfig | None,
     now: datetime | None,
-) -> tuple[CiscoAnswers, CiscoLookups, CiscoCallTally | None]:
-    """Return Analysis's answers, the lookup record and Cisco's call tally."""
+) -> tuple[CiscoAnswers, CiscoLookups, CiscoCallTally | None, bool]:
+    """Return Analysis's answers, the lookup record, Cisco's call tally and whether stopped.
+
+    A Ctrl+C landed on the online step is treated as lookups that did not finish: the Run
+    still writes its outputs and records them, and is reported stopped (#143).
+    """
     if key is None:
         return (
             CiscoAnswers.unavailable(run_analysis.LOOKUPS_DID_NOT_RUN),
             CiscoLookups(ran=False),
             None,
+            False,
         )
     asked = run_analysis.lookup_questions(known)
     if not _has_questions(asked):
@@ -188,22 +247,37 @@ def _ask(
             CiscoAnswers.unavailable(run_analysis.LOOKUPS_DID_NOT_RUN),
             CiscoLookups(ran=False),
             None,
+            False,
         )
     when = (now or datetime.now(UTC)).isoformat(timespec="seconds")
     try:
         replies = run_analysis.answers_for(asked, key, proxy=proxy, scan=scan)
         answers = run_analysis.analysis_answers(replies, asked)
+    except KeyboardInterrupt:
+        _warn_lookups_did_not_finish()
+        return (
+            CiscoAnswers.unavailable(LOOKUPS_FAILED),
+            CiscoLookups(ran=True, when=when),
+            None,
+            True,
+        )
     except LookupInterrupted as stopped:
         _warn_lookups_did_not_finish()
         return (
             CiscoAnswers.unavailable(LOOKUPS_FAILED),
             CiscoLookups(ran=True, when=when),
             stopped.tally,
+            False,
         )
     except Exception:  # noqa: BLE001 (an outage must never cost the Run its outputs)
         _warn_lookups_did_not_finish()
-        return CiscoAnswers.unavailable(LOOKUPS_FAILED), CiscoLookups(ran=True, when=when), None
-    return answers, CiscoLookups(ran=True, when=when), replies.tally
+        return (
+            CiscoAnswers.unavailable(LOOKUPS_FAILED),
+            CiscoLookups(ran=True, when=when),
+            None,
+            False,
+        )
+    return answers, CiscoLookups(ran=True, when=when), replies.tally, False
 
 
 def _warn_lookups_did_not_finish() -> None:
@@ -224,36 +298,59 @@ def _has_questions(asked: LookupQuestions) -> bool:
     )
 
 
-def _attention(
+def _attention(  # noqa: PLR0913 (the Run end's state, each part named)
     *,
     lookups_enabled: bool,
     key: backup_store.CiscoKey | None,
-    locked_out: bool,
+    key_problem: str | None,
     answers: CiscoAnswers,
     lookups: CiscoLookups,
+    stopped: bool,
 ) -> tuple[str, ...]:
-    """One Needs-attention line per Cisco source that did not run (stories 35, 118)."""
-    if not lookups_enabled:
+    """One Needs-attention line per Cisco source that did not run (stories 35, 118).
+
+    A Ctrl+C during the online step already shows as a stopped Run, so it adds no line that
+    blames a Cisco source (#143). A key file that did not open gives its own fixed reason: a
+    read problem and a wrong passphrase are not the same thing (#150).
+    """
+    if not lookups_enabled or stopped:
         return ()
     if key is None:
-        if locked_out:
-            return (backup_store.KEY_LOCKED_ELSEWHERE,)
+        if key_problem is not None:
+            return (key_problem,)
         return (NO_KEY_ATTENTION,)
     if not lookups.ran:
         return ()  # there was nothing Cisco could be asked, so no source was down
+    return attention_lines(answers)
+
+
+def attention_lines(answers: CiscoAnswers) -> tuple[str, ...]:
+    """One Needs-attention line per named Cisco source that did not run.
+
+    A rejected key and an expired token each give one line, whatever they stopped, and they
+    are decided first: a rejected compatible list still gives the key line when Software
+    Suggestion failed for another reason, although the two calls share one name (#131, #155).
+    """
+    sources = tuple(getattr(answers, name) for name, _shown in _SOURCES)
     lines: list[str] = []
+    if any(_rejected(source) for source in sources):
+        lines.append(_REJECTED_LINE)
+    if any(_is_expired(source) for source in sources):
+        lines.append(_EXPIRED_LINE)
     named: set[str] = set()
-    for name, shown in _SOURCES:
-        source = getattr(answers, name)
-        if _is_expired(source) and _EXPIRED_LINE not in lines:
-            lines.append(_EXPIRED_LINE)
+    for (_name, shown), source in zip(_SOURCES, sources, strict=True):
         if not isinstance(source, SourceUnavailable) or shown in named:
             continue
+        if source.reason in (_REJECTED, TOKEN_EXPIRED):
+            continue  # its one line is already above
         named.add(shown)
-        line = _source_line(shown, source.reason)
-        if line not in lines:
-            lines.append(line)
+        lines.append(_source_line(shown, source.reason))
     return tuple(lines)
+
+
+def _rejected(source: object) -> bool:
+    """Whether a source says Cisco refused the API key."""
+    return isinstance(source, SourceUnavailable) and source.reason == _REJECTED
 
 
 def _is_expired(source: object) -> bool:
@@ -266,11 +363,7 @@ def _is_expired(source: object) -> bool:
 
 
 def _source_line(shown: str, reason: str) -> str:
-    """The Needs-attention line for one source that did not run; a shared cause shares a line."""
-    if reason == _REJECTED:
-        return f"{_ALL_SOURCES} did not run: {_REJECTED}. {_KEY_STEP}"
-    if reason == TOKEN_EXPIRED:
-        return _EXPIRED_LINE
+    """The Needs-attention line for one source that did not run; a shared name shares a line."""
     return f"{shown} did not run: {reason}."
 
 

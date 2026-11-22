@@ -10,7 +10,9 @@ Run's records into the de-duplicated, pattern-valid values `advisories` may send
 device record in them. `answers_for` asks Cisco through `advisories` with the unlocked key.
 `analysis_answers` adapts Cisco's replies (`records.cisco`) into the plain answers Analysis's
 Checks take (`records.analysis`), keeping "source unavailable: reason" as a source with no
-answers, so an outage never reads as "Cisco said none".
+answers, so an outage never reads as "Cisco said none". A failure that belongs to one
+openVuln release stays with that release, so it never costs the other releases their answers
+(#156); the source is collapsed only when every release failed or the key was rejected.
 
 `collected_from` is the show-output half of the input (#102): the Run's device records hold
 each Visited Device's `Collected`, and Analysis cannot ask a device for it later.
@@ -24,10 +26,12 @@ Checks still run.
 
 import re
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Final
 
 from network_analyser import advisories, analysis
 from network_analyser.advisories import ProxyConfig, Transport
+from network_analyser.advisories.session import REJECTED
 from network_analyser.analysis.releases import normalise_release, train_of
 from network_analyser.backup_store import CiscoKey
 from network_analyser.credentials import SecretScan
@@ -59,6 +63,7 @@ from network_analyser.records.cisco import (
     CompatibleAnswers,
     EoxAnswer,
     EoxRecord,
+    SoftwareEoxQuestion,
     SuggestionsAnswer,
 )
 from network_analyser.records.cisco import (
@@ -75,6 +80,7 @@ from network_analyser.records.cisco import (
 )
 from network_analyser.records.collected import InventoryItem, InventoryKind, Reading
 from network_analyser.records.device import DeviceRecord
+from network_analyser.records.lookup_values import is_safe_pid, is_safe_release
 from network_analyser.records.topology import (
     ADVISORY_STATUS,
     AdvisoryDetail,
@@ -91,6 +97,12 @@ from network_analyser.topology.devices import known_devices
 
 LOOKUPS_DID_NOT_RUN: Final = "Cisco lookups did not run"
 """The reason every Cisco source gives when the online step was not asked (#104)."""
+
+_VALUE_REFUSED: Final = "Cisco was not asked: the value did not match the safe pattern"
+"""The per-value counterpart of `advisories.REFUSED`, for one value of a source (#153)."""
+
+SOFTWARE_EOX_MATCH_PENDING: Final = "software EoX match rule not decided"
+"""Why a software EoX record is "could not check" until the operator's probe decides it (#165)."""
 
 _TRAIN: Final = re.compile(r"^\d{1,3}\.\d{1,3}(?:[.(]|$)")
 _CISCO_OS: Final = {
@@ -122,7 +134,10 @@ def lookup_questions(data: AnalysisInput) -> CiscoQuestions:
     return CiscoQuestions(
         releases=releases,
         hardware_pids=asked.pids,
-        software_releases=tuple(question.release for question in asked.releases),
+        software_releases=tuple(
+            SoftwareEoxQuestion(_CISCO_OS[question.os_type], question.release)
+            for question in asked.releases
+        ),
         suggestion_pids=asked.compatible_pids,
         compatible_pids=asked.compatible_pids,
     )
@@ -146,6 +161,7 @@ def analysed(
     answers: CiscoAnswers | None = None,
     *,
     records: tuple[DeviceRecord, ...] = (),
+    as_of: datetime | None = None,
 ) -> AnalysisResults:
     """Run every Check on `built`, with Cisco's answers, config facts and show output.
 
@@ -154,7 +170,8 @@ def analysed(
     `built` was made from; their secret-free config facts ride into `AnalysisInput.config_facts`
     (#96) and their collected show output into `AnalysisInput.collected` (#102). With none,
     every fact and show command reads as `Unknown`, so a Check says it could not decide rather
-    than passing.
+    than passing. `as_of` is the one moment the Lifecycle Checks judge EoX dates against, which
+    a Run pins so every Check uses the same day (#150).
     """
     without_cisco = CiscoAnswers.unavailable(LOOKUPS_DID_NOT_RUN)
     return analysis.analyse(
@@ -164,6 +181,7 @@ def analysed(
             config_facts=_config_facts(records),
             collected=collected_from(records),
             inventory=inventories(built, records),
+            as_of=as_of,
         )
     )
 
@@ -194,13 +212,15 @@ def answers_for(
 def analysis_answers(replies: CiscoReplies, asked: CiscoQuestions) -> CiscoAnswers:
     """Adapt Cisco's replies into the plain answers Analysis's Checks take (#104).
 
-    Each source stays whole: a `SourceUnavailable` makes the whole source unavailable, so no
-    per-device Finding can be raised from an outage (stories 118-120). `asked` is what was
+    A source that failed whole stays `SourceUnavailable`, so no per-device Finding can be
+    raised from an outage (stories 118-120), and a rejected key still stops every source
+    (#131). A failure that belongs to one openVuln release becomes that release's own
+    `unavailable` reason, so the other releases keep their answers (#156). `asked` is what was
     sent, so every PID and release asked about gets an answer record, empty when Cisco named
     nothing. Cisco's Advisory text is kept as data; whatever shows it escapes it (story 117).
     """
     return CiscoAnswers(
-        advisories=_advisories(replies.advisories),
+        advisories=_advisories(replies.advisories, asked.releases),
         eox=_eox(replies.hardware_eox, replies.software_eox, asked),
         suggestions=_suggestions(replies.suggestions, asked),
         compatible=_compatible(replies.compatible, asked),
@@ -212,11 +232,39 @@ def analysis_answers(replies: CiscoReplies, asked: CiscoQuestions) -> CiscoAnswe
 
 def _advisories(
     source: tuple[AdvisoriesAnswer | CiscoSourceUnavailable, ...],
+    asked: tuple[CiscoReleaseQuestion, ...],
 ) -> tuple[ReleaseAdvisories, ...] | SourceUnavailable:
-    unavailable = next((item for item in source if isinstance(item, CiscoSourceUnavailable)), None)
-    if unavailable is not None:
-        return SourceUnavailable(unavailable.reason)
-    return tuple(_release_answer(item) for item in source if isinstance(item, AdvisoriesAnswer))
+    """Keep a per-release failure with its release; collapse only for the whole source (#156).
+
+    A rejected key still makes the whole source unavailable, and so does a source whose every
+    release failed. A 5xx, a rate limit that survived its retry, a long `Retry-After` or an
+    unreadable 200 reply otherwise marks only the release it happened on "could not check".
+    """
+    failures = [item for item in source if isinstance(item, CiscoSourceUnavailable)]
+    if any(item.reason == REJECTED for item in failures):
+        return SourceUnavailable(REJECTED)
+    if failures and len(failures) == len(source):
+        return SourceUnavailable(failures[0].reason)
+    if failures and len(source) != len(asked):
+        # The replies no longer line up with the questions, so a failure cannot be pinned to
+        # its release; say the source is unavailable rather than blame the wrong release.
+        return SourceUnavailable(failures[0].reason)
+    return tuple(
+        _release_answer(item)
+        if isinstance(item, AdvisoriesAnswer)
+        else _unanswered_release(asked[index], item.reason)
+        for index, item in enumerate(source)
+    )
+
+
+def _unanswered_release(question: CiscoReleaseQuestion, reason: str) -> ReleaseAdvisories:
+    """One release Cisco could not answer, kept beside the releases it did answer (#156)."""
+    return ReleaseAdvisories(
+        os_type=_ANALYSIS_OS[question.os_type],
+        release=question.release,
+        hardware_family=question.platform_alias,
+        unavailable=reason,
+    )
 
 
 def _release_answer(answer: AdvisoriesAnswer) -> ReleaseAdvisories:
@@ -280,26 +328,99 @@ def _eox(
     software: EoxAnswer | CiscoSourceUnavailable,
     asked: CiscoQuestions,
 ) -> tuple[EoxAnswers, ...] | SourceUnavailable:
-    if isinstance(hardware, CiscoSourceUnavailable):
+    """Keep hardware and software EoX apart: one unavailable never blanks the other (#165).
+
+    Each available source's values are answered one by one with their own gap reason, so an
+    outage or a refused value reads "could not check" rather than "no EoX". Only when both
+    sources failed whole is there nothing to keep apart, and the source stays unavailable.
+    """
+    if isinstance(hardware, CiscoSourceUnavailable) and isinstance(
+        software, CiscoSourceUnavailable
+    ):
         return SourceUnavailable(hardware.reason)
-    if isinstance(software, CiscoSourceUnavailable):
-        return SourceUnavailable(software.reason)
-    hardware_records = _eox_by_input(hardware)
-    software_records = _eox_by_input(software)
     return (
         EoxAnswers(
-            hardware=tuple(
-                HardwareEox(pid, items=_items(EoxKind.HARDWARE, hardware_records.get(pid, ())))
-                for pid in asked.hardware_pids
-            ),
-            software=tuple(
-                SoftwareEox(
-                    release, items=_items(EoxKind.SOFTWARE, software_records.get(release, ()))
-                )
-                for release in asked.software_releases
-            ),
+            hardware=_hardware_eox_answers(hardware, asked),
+            software=_software_eox_answers(software, asked),
         ),
     )
+
+
+def _hardware_eox_answers(
+    source: EoxAnswer | CiscoSourceUnavailable, asked: CiscoQuestions
+) -> tuple[HardwareEox, ...]:
+    """One hardware answer per PID asked, with the reason each unanswered one has."""
+    if isinstance(source, CiscoSourceUnavailable):
+        return tuple(HardwareEox(pid, unanswered=source.reason) for pid in asked.hardware_pids)
+    records = _eox_by_input(source)
+    unanswered = _eox_unanswered(source)
+    return tuple(
+        HardwareEox(
+            pid,
+            items=_items(EoxKind.HARDWARE, records.get(pid, ())),
+            unanswered=_hardware_gap(pid, unanswered),
+        )
+        for pid in asked.hardware_pids
+    )
+
+
+def _software_eox_answers(
+    source: EoxAnswer | CiscoSourceUnavailable, asked: CiscoQuestions
+) -> tuple[SoftwareEox, ...]:
+    """One software answer per release asked, never "no EoX" from an undecided match (#165)."""
+    if isinstance(source, CiscoSourceUnavailable):
+        return tuple(
+            SoftwareEox(question.release, unanswered=source.reason)
+            for question in asked.software_releases
+        )
+    unanswered = _eox_unanswered(source)
+    return tuple(
+        _software_eox_answer(question.release, source, unanswered)
+        for question in asked.software_releases
+    )
+
+
+def _software_eox_answer(
+    release: str, source: EoxAnswer, unanswered: dict[str, str]
+) -> SoftwareEox:
+    """One release's software EoX, with Cisco's reason or the undecided-rule fallback."""
+    if not is_safe_release(release):
+        return SoftwareEox(release, unanswered=_VALUE_REFUSED)
+    matched = _software_records_for(release, source.records)
+    gap = unanswered.get(release)
+    if matched is None:
+        return SoftwareEox(release, unanswered=gap or SOFTWARE_EOX_MATCH_PENDING)
+    return SoftwareEox(release, items=_items(EoxKind.SOFTWARE, matched), unanswered=gap)
+
+
+def _software_records_for(
+    release: str, records: tuple[EoxRecord, ...]
+) -> tuple[EoxRecord, ...] | None:
+    """Return the software EoX records for `release`, or None while the match rule is undecided.
+
+    The rule is NOT decided. #148's query-form runs never showed an `EOXInputValue` equal to
+    the release sent, so an exact echo is disproved; the echo for a real release has not been
+    seen. A loose substring match is forbidden because it could attach another release's EoX
+    to this one. The operator's probe in #165 will show what Cisco echoes for a real
+    `release,OSType`; only then may this function match. Until then it matches nothing, so a
+    release with a record reads "could not check", never "no EoX".
+    """
+    del release, records  # no rule yet; see the docstring and #165
+    return None
+
+
+def _eox_unanswered(answer: EoxAnswer) -> dict[str, str]:
+    """Every value Cisco gave no answer for, by the value it named (#153)."""
+    return {
+        item.input_value: item.reason for item in answer.unanswered if item.input_value is not None
+    }
+
+
+def _hardware_gap(pid: str, unanswered: dict[str, str]) -> str | None:
+    """Why one PID has no EoX answer: Cisco's code, or that it never left the PC (#153)."""
+    if not is_safe_pid(pid):
+        return _VALUE_REFUSED
+    return unanswered.get(pid)
 
 
 def _eox_by_input(answer: EoxAnswer) -> dict[str, tuple[EoxRecord, ...]]:
@@ -363,7 +484,7 @@ def _compatible(
 
 
 def _train(release: str, os_type: OsType) -> str | None:
-    """The Train a release belongs to, such as `17.9` or `7.0(3)I7`; None if unreadable."""
+    """The Train a release belongs to, such as `17.9` or `7.0I7`; None if unreadable."""
     normalised = normalise_release(release)
     if _TRAIN.match(normalised) is None:
         return None

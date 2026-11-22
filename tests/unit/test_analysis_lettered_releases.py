@@ -13,6 +13,7 @@ import pytest
 
 from network_analyser import analysis, platforms, topology
 from network_analyser.advisories import is_safe_release
+from network_analyser.analysis.releases import normalise_release, train_of
 from network_analyser.records.analysis import (
     AdvisoryAnswer,
     AdvisoryPlatform,
@@ -52,8 +53,8 @@ LETTERED = [
     (Platform.NX_OS, NEXUS_MODEL, "10.6(3s)", OsType.NX_OS, "10.6", "10.6(4)"),
     (Platform.NX_OS, NEXUS_MODEL, "10.3(4a)", OsType.NX_OS, "10.3", "10.3(5)"),
     (Platform.NX_OS, NEXUS_MODEL, "9.3(1z)", OsType.NX_OS, "9.3", "9.3(2)"),
-    (Platform.NX_OS, NEXUS_MODEL, "7.0(3)I4(8b)", OsType.NX_OS, "7.0(3)I4", "7.0(3)I4(9)"),
-    (Platform.NX_OS, NEXUS_MODEL, "5.2(1)N1(9a)", OsType.NX_OS, "5.2(1)N1", "5.2(1)N1(10)"),
+    (Platform.NX_OS, NEXUS_MODEL, "7.0(3)I4(8b)", OsType.NX_OS, "7.0I4", "7.0(3)I4(9)"),
+    (Platform.NX_OS, NEXUS_MODEL, "5.2(1)N1(9a)", OsType.NX_OS, "5.2N1", "5.2(1)N1(10)"),
 ]
 
 
@@ -152,15 +153,16 @@ def test_a_lettered_or_special_running_release_gets_its_advisories_and_target(
 @pytest.mark.parametrize(
     ("running", "train"),
     [
-        ("6.0(2)U6(10)", "6.0(2)U6"),
-        ("6.0(2)A8(11)", "6.0(2)A8"),
-        ("5.2(1)N1(9)", "5.2(1)N1"),
-        ("7.0(3)F3(4)", "7.0(3)F3"),
-        ("7.0(3)I7(9)", "7.0(3)I7"),
+        ("6.0(2)U6(10)", "6.0U6"),
+        ("6.0(2)A8(11)", "6.0A8"),
+        ("5.2(1)N1(9)", "5.2N1"),
+        ("7.0(3)F3(4)", "7.0F3"),
+        ("7.0(3)I7(9)", "7.0I7"),
     ],
 )
 def test_nx_os_letter_trains_are_not_lumped_into_one_train(running: str, train: str) -> None:
-    same_line = f"{train}(12)"
+    assert train_of(running, OsType.NX_OS) == train
+    same_line = f"{running.rsplit('(', maxsplit=1)[0]}(12)"
     other_line = f"{running.split('(', maxsplit=1)[0]}(9)Z9(99)"
     device = _device(Platform.NX_OS, NEXUS_MODEL, running)
     listed = (CompatibleRelease(other_line, "MD"), CompatibleRelease(same_line, "MD"))
@@ -169,6 +171,89 @@ def test_nx_os_letter_trains_are_not_lumped_into_one_train(running: str, train: 
 
     (advice,) = results.advice
     assert advice.latest_release_in_train == same_line
+
+
+@pytest.mark.parametrize(
+    ("release", "train"),
+    [
+        ("7.3(2)D1(1)", "7.3D1"),
+        ("7.3(5)D1(1)", "7.3D1"),
+        ("7.3(0)N1(1)", "7.3N1"),
+        ("7.3(13)N1(1)", "7.3N1"),
+        ("7.0(3)I7(9)", "7.0I7"),
+        ("7.0(3)I6(1)", "7.0I6"),
+        ("6.0(2)U6(10)", "6.0U6"),
+        ("6.0(2)A8(11)", "6.0A8"),
+        ("5.2(1)N1(9)", "5.2N1"),
+        ("7.0(3)F3(4)", "7.0F3"),
+        ("9.3(10)", "9.3"),
+        ("10.6(3s)", "10.6"),
+    ],
+)
+def test_an_nx_os_train_keeps_its_hardware_line_not_its_release_number(
+    release: str, train: str
+) -> None:
+    """Cisco's NX-OS name is major, minor, maintenance number, designator, rebuild (#157)."""
+    assert train_of(release, OsType.NX_OS) == train
+
+
+@pytest.mark.parametrize(
+    ("running", "train", "fix"),
+    [
+        ("7.3(2)D1(1)", "7.3D1", "7.3(5)D1(1)"),
+        ("7.3(0)N1(1)", "7.3N1", "7.3(13)N1(1)"),
+    ],
+)
+def test_a_release_number_that_moves_does_not_start_a_new_train(
+    running: str, train: str, fix: str
+) -> None:
+    device = _device(Platform.NX_OS, NEXUS_MODEL, running)
+    asked_os, asked_release, family = _question_release(device)
+
+    results = _analyse(
+        device,
+        answers=(
+            ReleaseAdvisories(
+                os_type=asked_os,
+                release=asked_release,
+                advisories=(_advisory(train, fix, series=NEXUS_PLATFORM),),
+                hardware_family=family,
+            ),
+        ),
+    )
+
+    (finding,) = [f for f in results.findings if f.check.type is CheckType.ADVISORY]
+    assert isinstance(finding.cisco_detail, AdvisoryDetail)
+    assert finding.cisco_detail.first_fixed == fix
+    assert f"First fixed in Train {train}: {fix}." in finding.what_was_found
+    (advice,) = results.advice
+    assert advice.upgrade_target == fix
+    assert advice.not_cleared == 0
+
+
+def test_a_fix_on_another_hardware_line_is_not_in_the_train() -> None:
+    device = _device(Platform.NX_OS, NEXUS_MODEL, "7.0(3)I7(9)")
+    asked_os, asked_release, family = _question_release(device)
+
+    results = _analyse(
+        device,
+        answers=(
+            ReleaseAdvisories(
+                os_type=asked_os,
+                release=asked_release,
+                advisories=(_advisory("7.0I6", "7.0(3)I6(1)", series=NEXUS_PLATFORM),),
+                hardware_family=family,
+            ),
+        ),
+    )
+
+    (finding,) = [f for f in results.findings if f.check.type is CheckType.ADVISORY]
+    assert isinstance(finding.cisco_detail, AdvisoryDetail)
+    assert finding.cisco_detail.first_fixed is None
+    assert "No fix in Train 7.0I7." in finding.what_was_found
+    (advice,) = results.advice
+    assert advice.upgrade_target == "no fix in Train 7.0I7"
+    assert advice.not_cleared == 1
 
 
 def test_a_release_below_the_family_table_still_reads_could_not_check() -> None:
@@ -227,3 +312,19 @@ def test_a_version_with_other_text_after_it_is_still_unknown(shown: str) -> None
 )
 def test_every_release_the_family_table_holds_may_be_sent_to_cisco(release: str) -> None:
     assert is_safe_release(release)
+
+
+@pytest.mark.parametrize(
+    ("shown", "release"),
+    [
+        ("7.0(3)I7(9) [build 7.0(3)I7(8.18)]", "7.0(3)I7(9)"),
+        ("9.3(10) [build 9.3(10.1)]", "9.3(10)"),
+        ("10.4(3) [Feature Release]", "10.4(3)"),
+        ("10.2(5) [Maintenance Release] [build 10.2(5.2)]", "10.2(5)"),
+    ],
+)
+def test_normalise_release_drops_the_same_bracketed_suffix_as_show_version(
+    shown: str, release: str
+) -> None:
+    """One bracket rule serves `show version` and every release that reaches Analysis (#155)."""
+    assert normalise_release(shown) == release

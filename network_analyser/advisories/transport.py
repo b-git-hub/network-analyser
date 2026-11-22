@@ -20,6 +20,7 @@ from typing import Final, Protocol
 
 import truststore
 
+from network_analyser._winsys import WindowsProxy
 from network_analyser._winsys import system_proxy as windows_proxy
 from network_analyser.advisories.fence import is_fenced
 from network_analyser.advisories.proxy import (
@@ -60,6 +61,10 @@ _CONTROL_MAX = 0x20
 class HttpRequest:
     """One request to Cisco, built only from fenced parts and pattern-checked values.
 
+    `headers` and `body` are left out of the default `repr`: the one request that carries the
+    client ID and secret has them base64-encoded in its `Authorization` header, and a printed
+    request must never show either form.
+
     Attributes:
         host: exactly `id.cisco.com` or `apix.cisco.com`.
         port: 443.
@@ -76,8 +81,8 @@ class HttpRequest:
     port: int
     method: str
     path: str
-    headers: tuple[tuple[str, str], ...]
-    body: bytes = b""
+    headers: tuple[tuple[str, str], ...] = field(repr=False)
+    body: bytes = field(default=b"", repr=False)
     timeout_s: float = READ_TIMEOUT_S
     max_bytes: int = DEFAULT_MAX_REPLY_BYTES
     total_timeout_s: float = TOTAL_TIMEOUT_S
@@ -241,7 +246,7 @@ class HttpsTransport:
     """
 
     proxy: ProxyConfig = field(default_factory=ProxyConfig)
-    system_proxy: Callable[[], str | None] = windows_proxy
+    system_proxy: Callable[[], WindowsProxy | None] = windows_proxy
     clock: Callable[[], float] = time.monotonic
 
     def __call__(  # noqa: PLR0911 (one return per fixed outcome, each named)

@@ -89,6 +89,11 @@ class VisitedDevice:
         vlan_database: the VLANs listed in its VLAN database, active or not, for the
             diagram's VLAN view (#64); unknown when not collected or incomplete.
         vpc: its vPC domain; None when it has none.
+        hardware_series: the Nexus hardware series token `show version` named, such as
+            `Nexus9000`; None when it named none, named more than one, or the Platform prints
+            no such token (#159).
+        router_operating_mode: Cisco's `Router operating mode:` text, such as
+            `Controller-Managed`; None when `show version` printed none (ticket #147).
     """
 
     id: str
@@ -105,6 +110,8 @@ class VisitedDevice:
     interfaces: tuple[Interface, ...] | Unknown
     vlan_database: frozenset[int] | Unknown
     vpc: VpcState | Unknown | None
+    hardware_series: str | None = None
+    router_operating_mode: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -398,6 +405,8 @@ class AdvisoryDetail:
         fixed_line: story 49's fixed line, `ADVISORY_FIXED_LINE`.
         hardware_family_not_confirmed: True when an NX-OS match rests on the release alone
             because the Nexus hardware family could not be worked out (story 46).
+        fix_unresolved: True when the Advisory's first fix is unknown rather than absent, so a
+            page never prints "no fix in Train" for it (#136).
     """
 
     kind: CiscoDetailKind
@@ -412,6 +421,7 @@ class AdvisoryDetail:
     status: str = ADVISORY_STATUS
     fixed_line: str = ADVISORY_FIXED_LINE
     hardware_family_not_confirmed: bool = False
+    fix_unresolved: bool = False
 
 
 @unique

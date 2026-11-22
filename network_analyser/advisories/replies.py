@@ -3,7 +3,9 @@
 The envelope is checked strictly: a reply without `advisories`, `EOXRecord` or the suggestion
 list is *not understood*, never "nothing found", so a changed API can never read as "safe"
 (story 52). Inside a good envelope, a missing field becomes empty or None, and a malformed
-entry makes the whole reply not understood rather than quietly dropping a record.
+entry makes the whole reply not understood rather than quietly dropping a record. An entry
+that carries one of Cisco's own codes is *unanswered* for the one value it names, so a value
+Cisco has no data for never costs its batch the other values (#166).
 
 Cisco's text is untrusted: control characters are flattened and every value is bounded before
 it crosses the module boundary. What shows it escapes it again (story 117).
@@ -11,6 +13,7 @@ it crosses the module boundary. What shows it escapes it again (story 117).
 
 import json
 import re
+from collections.abc import Sequence
 from typing import Any, Final
 
 from network_analyser.advisories.numbers import last_page
@@ -66,28 +69,43 @@ def advisories_answer(
 NO_DATA_FOUND: Final = "NO_DATA_FOUND"
 """openVuln's code for a release that has no Advisories: an answer, not a failure (#131)."""
 
+_NO_DATA_STATUSES: Final = frozenset({200, 404})
+"""The statuses #148 confirmed carry `NO_DATA_FOUND` as an empty answer. Until it confirms
+more, any other status is that release's failure, never "no Advisories" (#155)."""
+
 
 def advisories_error_answer(
     question: ReleaseQuestion, status: int, body: bytes
 ) -> AdvisoriesAnswer:
     """Return the answer for a release whose one call failed with HTTP `status` (#131).
 
-    Cisco's `errorCode` is kept when the reply has one, `NO_DATA_FOUND` meaning an empty
-    answer; otherwise the reason is the fixed text `HTTP <status>`.
+    Cisco's `errorCode` is kept when the reply has one; otherwise the reason is the fixed text
+    `HTTP <status>`. `NO_DATA_FOUND` is an empty answer only on the statuses #148 confirmed,
+    200 and 404; on any other status the release reads unavailable with its HTTP status (#155).
     """
     document = _document(body)
     code = None if document is None else _reply_error(document)
-    return _coded_answer(question, code or f"HTTP {status}")
+    return _coded_answer(question, code or f"HTTP {status}", status)
 
 
-def _coded_answer(question: ReleaseQuestion, code: str) -> AdvisoriesAnswer:
+def _coded_answer(question: ReleaseQuestion, code: str, status: int = 200) -> AdvisoriesAnswer:
     if code == NO_DATA_FOUND:
-        return AdvisoriesAnswer(question=question, advisories=())
+        if status in _NO_DATA_STATUSES:
+            return AdvisoriesAnswer(question=question, advisories=())
+        return AdvisoriesAnswer(question=question, advisories=(), unavailable=f"HTTP {status}")
     return AdvisoriesAnswer(question=question, advisories=(), unavailable=code)
 
 
-def eox_answer(body: bytes) -> EoxAnswer | SourceUnavailable:
-    """Return EoX's records for whatever was asked, or why the reply cannot be used."""
+def eox_answer(body: bytes, values: Sequence[str] = ()) -> EoxAnswer | SourceUnavailable:
+    """Return EoX's records for whatever was asked, or why the reply cannot be used.
+
+    `values` are the values this batch asked about, in the order they were sent. Cisco's entry
+    for a value it has no EoX data for names neither its `EOXInputValue` nor an
+    `EOLProductID`, and carries the code in a nested `EOXError` (#166). Such an entry is that
+    value at the same position, but only when the reply is one page and holds exactly one entry
+    per value; anything else leaves it unnamed, and the reply's other entries are still
+    answered.
+    """
     document = _document(body)
     if document is None:
         return SourceUnavailable(NOT_JSON)
@@ -95,15 +113,20 @@ def eox_answer(body: bytes) -> EoxAnswer | SourceUnavailable:
     if not isinstance(entries, list):
         code = _reply_error(document)
         return SourceUnavailable(f"Cisco returned {code}" if code else NOT_UNDERSTOOD)
+    one_per_value = _single_page(document) and len(entries) == len(values)
     records: list[EoxRecord] = []
     unanswered: list[EoxUnanswered] = []
-    for entry in entries:
+    for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
             return SourceUnavailable(NOT_UNDERSTOOD)
         code = _reply_error(entry)
         if code is not None:
             unanswered.append(
-                EoxUnanswered(input_value=_optional_text(entry.get("EOXInputValue")), reason=code)
+                EoxUnanswered(
+                    input_value=_optional_text(entry.get("EOXInputValue"))
+                    or (_named_by_position(values, index) if one_per_value else None),
+                    reason=code,
+                )
             )
             continue
         record = _eox_record(entry)
@@ -113,8 +136,18 @@ def eox_answer(body: bytes) -> EoxAnswer | SourceUnavailable:
     return EoxAnswer(records=tuple(records), unanswered=tuple(unanswered))
 
 
-def suggestion_answer(body: bytes) -> SuggestionsAnswer | SourceUnavailable:
-    """Return Software Suggestion's releases per PID, or why the reply cannot be used."""
+def suggestion_answer(
+    body: bytes, values: Sequence[str] = ()
+) -> SuggestionsAnswer | SourceUnavailable:
+    """Return Software Suggestion's releases per PID, or why the reply cannot be used.
+
+    `values` are the base PIDs this batch asked about, in the order they were sent. Cisco's
+    entry for a PID it does not know names no `basePID` and carries the code in its
+    `suggestions[].errorDetailsResponse` (#166): that entry is the PID at the same position
+    when the reply holds exactly one entry per PID, and it is `unanswered` with Cisco's code,
+    so the batch's other PIDs are still answered. An entry that cannot be named either way
+    leaves the reply not understood.
+    """
     document = _document(body)
     if document is None:
         return SourceUnavailable(NOT_JSON)
@@ -122,14 +155,19 @@ def suggestion_answer(body: bytes) -> SuggestionsAnswer | SourceUnavailable:
     if entries is None:
         code = _reply_error(document)
         return SourceUnavailable(f"Cisco returned {code}" if code else NOT_UNDERSTOOD)
+    one_per_pid = len(entries) == len(values)
     answers: list[SuggestionAnswer] = []
     unanswered: list[SuggestionUnanswered] = []
-    for entry in entries:
+    for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
             return SourceUnavailable(NOT_UNDERSTOOD)
         product = entry.get("product")
         product = product if isinstance(product, dict) else entry
-        product_id = _optional_text(product.get("basePID")) or _optional_text(entry.get("basePID"))
+        product_id = (
+            _optional_text(product.get("basePID"))
+            or _optional_text(entry.get("basePID"))
+            or (_named_by_position(values, index) if one_per_pid else None)
+        )
         if product_id is None:
             return SourceUnavailable(NOT_UNDERSTOOD)
         code = _reply_error(entry)
@@ -189,6 +227,26 @@ def compatible_error_answer(product_id: str, status: int, body: bytes) -> Compat
     document = _document(body)
     code = None if document is None else _reply_error(document)
     return CompatibleUnanswered(product_id=product_id, reason=code or f"HTTP {status}")
+
+
+def eox_error_answer(input_value: str, status: int, body: bytes) -> EoxUnanswered:
+    """Return the `unanswered` record for one value whose own call failed with HTTP `status` (#153).
+
+    Cisco's error code is kept when the reply has one; otherwise the reason is `HTTP <status>`.
+    """
+    document = _document(body)
+    code = None if document is None else _reply_error(document)
+    return EoxUnanswered(input_value=input_value, reason=code or f"HTTP {status}")
+
+
+def suggestion_error_answer(product_id: str, status: int, body: bytes) -> SuggestionUnanswered:
+    """Return the `unanswered` record for a PID whose own call failed with HTTP `status` (#153).
+
+    Cisco's error code is kept when the reply has one; otherwise the reason is `HTTP <status>`.
+    """
+    document = _document(body)
+    code = None if document is None else _reply_error(document)
+    return SuggestionUnanswered(product_id=product_id, reason=code or f"HTTP {status}")
 
 
 def compatible_last_page(body: bytes, *, ceiling: int) -> int:
@@ -367,19 +425,51 @@ def _compatible_release(entry: dict[str, Any]) -> CompatibleRelease | None:
 
 
 def _reply_error(entry: dict[str, Any]) -> str | None:
-    """Return Cisco's error code in this object or a top-level `SSA_ERR_`/`S3_` key."""
-    for key in ("ErrorCode", "errorCode", "error", "errorDetailsResponse"):
+    """Return Cisco's error code in this object or a top-level `SSA_ERR_`/`S3_` key.
+
+    The code sits in a plain field, in an `error`/`errorDetailsResponse`/`EOXError` object, in
+    the `suggestions[]` entry of a Software Suggestion product, or in the bare key itself.
+    `EOXError` is how an EoX entry and a refused EoX call report a value with no data (#166).
+    """
+    for key in ("ErrorCode", "errorCode", "error", "errorDetailsResponse", "EOXError"):
         code = _code(entry.get(key))
         if code is not None:
             return code
-    return next((key for key in entry if _ERROR_KEY.fullmatch(key)), None)
+    return _suggestion_error(entry) or next(
+        (key for key in entry if _ERROR_KEY.fullmatch(key)), None
+    )
+
+
+def _suggestion_error(entry: dict[str, Any]) -> str | None:
+    """Cisco's code inside a Software Suggestion product's `suggestions[]` entry (#166)."""
+    entries = entry.get("suggestions")
+    if not isinstance(entries, list):
+        return None
+    for item in entries:
+        if isinstance(item, dict):
+            code = _code(item.get("errorDetailsResponse"))
+            if code is not None:
+                return code
+    return None
 
 
 def _code(value: object) -> str | None:
     if isinstance(value, dict):
-        value = value.get("errorCode") or value.get("code")
+        value = value.get("errorCode") or value.get("code") or value.get("ErrorID")
     text = _optional_text(value)
     return text if text is not None and _CODE.fullmatch(text) else None
+
+
+def _single_page(document: dict[str, Any]) -> bool:
+    """Whether the EoX reply says it is the only page, of one value per record (#166)."""
+    record = document.get("PaginationResponseRecord")
+    value = record.get("LastIndex") if isinstance(record, dict) else None
+    return last_page(value, ceiling=2) == 1
+
+
+def _named_by_position(values: Sequence[str], index: int) -> str | None:
+    """The value sent at `index`, or None when the batch has no such position (#166)."""
+    return values[index] if index < len(values) else None
 
 
 def _score(value: object) -> float | None:

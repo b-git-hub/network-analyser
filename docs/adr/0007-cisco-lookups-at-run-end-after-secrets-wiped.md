@@ -47,7 +47,7 @@ Decided on [Latest Release and Upgrade Target, given what Cisco provides](https:
 - **Software Suggestion** is asked for the Latest Release through its compatible-releases call, which takes **one chassis PID per call** and is paged, at most 20 pages per PID. The "10 PIDs per Suggestion call" batch applies only to the Suggested-releases call.
 - **`currentRelease` is never sent.** It would pair a model with the release it runs, and every value goes out on its own.
 
-## Amendment (2026-11-22)
+## Amendment (2026-11-21)
 
 Decided on [one PID and release pattern for analysis and advisories](https://github.com/b-git-hub/network-analyser/issues/130). The decision is unchanged; two points of wording change.
 
@@ -59,3 +59,11 @@ Decided on [one PID and release pattern for analysis and advisories](https://git
 Decided on [Send licence-suffixed PIDs to Cisco with a raw slash](https://github.com/b-git-hub/network-analyser/issues/162), after the operator's live runs on [Verify Cisco reply shapes with the live API key](https://github.com/b-git-hub/network-analyser/issues/148). The decision is unchanged; one point of wording in the amendment above changes.
 
 - **A licence-suffixed PID goes into the request path as it is, slash included.** Cisco's gateway answers every path call that carries `%2F` or `%252F` with HTTP 400. It answers the raw slash on hardware EoX (one PID or several comma-joined), Software Suggestion and the compatible list. No character of a PID is percent-encoded. The pattern still allows only one `/`, followed by letters, digits and hyphens, so the slash cannot add `..` or any other change to the path, and any `%` fails the pattern. This replaces the `%2F` sentence above.
+
+## Amendment (2026-11-22, #145)
+
+Decided on [SecretScan keeps plaintext secrets while the Run is online](https://github.com/b-git-hub/network-analyser/issues/145): the operator chose option 1. The decision above is unchanged; the code now matches it.
+
+- **The secret scan keeps no value.** `SecretScan` holds each secret's character length and an HMAC-SHA256 fingerprint of it under a random key drawn once per Run. It finds a secret by hashing the windows of that length, so the console, `audit.log`, `topology.json`, the diagrams and the reports are still redacted after step 3's wipe and while the tool is online.
+- **Why the device values are not dropped instead.** The files written after step 4 carry Cisco's answers merged with device facts, so their device-derived text is final only at write time. Neutralising it before the online step would mean redacting every field of every record, and would still miss a secret split across two fields.
+- **Proved, not asserted.** The Seam 3 test walks what is reachable from the `SecretScan` when the first Cisco request arrives: it holds no typed password and no passphrase, and it still redacts both.

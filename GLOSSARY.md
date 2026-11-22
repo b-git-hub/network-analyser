@@ -139,7 +139,7 @@ A vendor's published security advisory (for Cisco, a PSIRT advisory) that names 
 _Avoid_: CVE, bulletin, vulnerability notice
 
 **Train**:
-One release line of a Platform's software, such as IOS-XE 17.12, IOS 15.2E, NX-OS 7.0(3)I7 or NX-OS 6.0(2)U6, whose releases share features and hardware support. Within a Train, a lettered release comes after its plain release and before the next one: 17.12.7, 17.12.7a, 17.12.7b, 17.12.8.
+One release line of a Platform's software, such as IOS-XE 17.12, IOS 15.2E, NX-OS 7.0I7 or NX-OS 6.0U6, whose releases share features and hardware support. An NX-OS Train is its major and minor numbers plus the hardware line's platform designator, without the maintenance release number: `7.3(2)D1(1)` and `7.3(5)D1(1)` are both Train 7.3D1, while `7.0(3)I7(9)` and `7.0(3)I6(1)` are different Trains. Within a Train, a lettered release comes after its plain release and before the next one: 17.12.7, 17.12.7a, 17.12.7b, 17.12.8.
 _Avoid_: Branch, stream, major version
 
 **Upgrade Target**:

@@ -391,11 +391,21 @@
     }
     const tag = str(m.tag);
     if (tag) {
-      const label = short(tag, 18), w = Math.min(128, 14 + label.length * 6.2);
+      /* A tag that does not fit goes on a second line, never cut: the gap in a partial
+         target ("no fix in Train", "count not recorded") must stay readable (#146). */
+      const note = str(m.tag_note) || '';
+      const main = note && tag.endsWith(note) ? tag.slice(0, tag.length - note.length).trim() : tag;
+      const label = short(main, 26);
+      const w = Math.min(160, 14 + Math.max(label.length, note.length) * 6.2);
+      const h = note ? 26 : 15;
       out += '<g class="marker tag ' + esc(str(m.tag_kind) || '') + '" transform="translate(0,20)">' +
         '<title>' + esc(tag) + '</title>' +
-        '<rect x="' + (-w / 2).toFixed(1) + '" y="3" width="' + w.toFixed(1) + '" height="15" rx="3"/>' +
-        '<text y="13.5" text-anchor="middle">' + esc(label) + '</text></g>';
+        '<rect x="' + (-w / 2).toFixed(1) + '" y="3" width="' + w.toFixed(1) + '" height="' + h + '" rx="3"/>' +
+        (note
+          ? '<text y="12.5" text-anchor="middle">' + esc(label) + '</text>' +
+            '<text y="23.5" text-anchor="middle">' + esc(note) + '</text>'
+          : '<text y="13.5" text-anchor="middle">' + esc(label) + '</text>') +
+        '</g>';
     }
     return out;
   }
@@ -458,7 +468,12 @@
 
   function boundsOf(sc) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    sc.nodes.forEach(n => { const p = posOf(n.id); if (!p) return; x0 = Math.min(x0, p.x - 70); x1 = Math.max(x1, p.x + 70); y0 = Math.min(y0, p.y - 34); y1 = Math.max(y1, p.y + 46); });
+    sc.nodes.forEach(n => {
+      const p = posOf(n.id); if (!p) return;
+      const mark = MARK_BY_DEVICE.get(n.id), below = mark && mark.tag_note ? 56 : 46;
+      x0 = Math.min(x0, p.x - 70); x1 = Math.max(x1, p.x + 70);
+      y0 = Math.min(y0, p.y - 34); y1 = Math.max(y1, p.y + below);
+    });
     sc.labels.forEach(l => { x0 = Math.min(x0, l.x); y0 = Math.min(y0, l.y - 16); x1 = Math.max(x1, l.x + 340); });
     return isFinite(x0) ? { x0, y0, x1, y1 } : { x0: -100, y0: -100, x1: 100, y1: 100 };
   }
@@ -652,6 +667,15 @@
       row('Id', '<span class="mono">' + esc(a.id) + '</span>') + '</dl></div>' +
       '<div><h4>Learned on</h4>' + table(['Device', 'Interfaces'], rows) + '</div><div><h4>Evidence</h4>' + evidenceList(a.evidence) + '</div></div>';
   }
+  /* Both Latest Release values with Cisco's lifecycle code beside each (#127, #139). The
+     model leaves a code out when the file records none, or beside "not available" and the
+     running-release text, so this only joins what it was given. */
+  function latestWording(d) {
+    const value = (release, lifecycle) => (typeof lifecycle === 'string' && lifecycle
+      ? release + ' (' + lifecycle + ')' : release);
+    return 'In Train: ' + value(d.latest_in_train, d.latest_in_train_lifecycle) +
+      '; overall: ' + value(d.latest_release, d.latest_release_lifecycle);
+  }
   /* The picked Check's pane: Cisco's detail for an Advisory, advice and where for any other
      Check (stories 93-94). Every value is escaped; the Cisco link is set after the markup is
      built, from a URL the tool built only after checking the Advisory id (story 51). */
@@ -664,7 +688,7 @@
         : '<span class="mono">' + esc(a.id) + '</span>';
       const rows = arr(a.devices).map(d => '<tr>' + td(esc(d.hostname)) + td('<span class="mono">' + esc(d.management_ip) + '</span>') +
         td('<span class="mono">' + esc(d.model) + '</span>') + td('<span class="mono">' + esc(d.release) + '</span>') +
-        td(esc(d.upgrade_target)) + td(esc(String(d.not_cleared))) + td(esc(d.latest_release)) + '</tr>');
+        td(esc(d.upgrade_target)) + td(esc(d.not_cleared)) + td(esc(latestWording(d))) + '</tr>');
       return '<div class="det"><div><h3>' + esc(a.title) + '</h3>' + level + '<span class="pill acc">Advisory</span><dl>' +
         row('Advisory', id) + row('SIR', esc(a.sir)) + row('CVEs', '<span class="mono">' + esc(arr(a.cves).join(', ') || 'none') + '</span>') +
         row('Published', esc(a.published)) + row('Updated', esc(a.updated)) + row('Status', esc(a.status)) + '</dl>' +
@@ -753,7 +777,7 @@
     const levels = arr(L.levels).map(l => '<span><span class="marker-dot ' + esc(levelClass(l)) + '"></span>' + esc(l) + '</span>').join('');
     return '<span>' + esc(str(L.badge) || '') + '</span>' + levels +
       '<span><b class="marker-key target">' + esc(str(L.target) || '') + '</b></span>' +
-      '<span><b class="marker-key target">' + esc(str(L.target_partial) || '') + '</b></span>' +
+      '<span><b class="marker-key target-partial">' + esc(str(L.target_partial) || '') + '</b></span>' +
       '<span><b class="marker-key no-fix">' + esc(str(L.no_fix) || '') + '</b></span>' +
       '<span><b class="marker-key could-not-check">' + esc(str(L.could_not_check) || '') + '</b></span>';
   }

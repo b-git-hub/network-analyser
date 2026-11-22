@@ -69,6 +69,7 @@ _STYLE: Final = (
     ".callout{border-left:4px solid;padding:0.4rem 0.8rem;}"
     ".callout.upgrade{border-color:#2f8f4e;}"
     ".callout.no-fix,.callout.could-not-check{border-color:#b04040;}"
+    ".callout.not-available{border-color:#8a8a8a;}"
     ".latest{margin:0;}"
     ".fixed{font-style:italic;}"
     ".eox{margin:0.3rem 0 0;padding-left:1.2rem;}"
@@ -229,8 +230,15 @@ def _callout_text(
     advice: DeviceAdvice,
     advisories: Sequence[Mapping[str, Plain]],
 ) -> tuple[str, str]:
-    """One of the four callouts (story 106), decided from the recorded advice and Findings."""
-    if not advice.known or advice.outcome is None:
+    """One of the four callouts (story 106), decided from the recorded advice and Findings.
+
+    Advice this file does not hold (a v1/v2 file, or a device Analysis did not advise) reads
+    as a neutral "not available" rather than a red failure (#146); a recorded outcome that
+    says a check failed stays "could not check".
+    """
+    if not advice.known:
+        return ("not-available", NOT_AVAILABLE)
+    if advice.outcome is None:
         return ("could-not-check", f"could not check: {_NOT_SAFE}")
     outcome = advice.outcome
     lowered = outcome.lower()
@@ -260,12 +268,15 @@ def _target_callout(advice: DeviceAdvice) -> tuple[str, str]:
     """The callout for a recorded Upgrade Target: a release, or its fixed "no fix" text.
 
     A target that does not clear every Advisory says so, and names the Train the rest need
-    (#124, story 23).
+    (#124, story 23). `not available` is shown as it is, never turned into an upgrade
+    instruction: it means the fix could not be worked out (#136).
     """
     target = advice.upgrade_target
     if target is None:
         return ("no-fix", _no_fix(advice))
     lowered = target.lower()
+    if lowered == NOT_AVAILABLE:
+        return ("could-not-check", NOT_AVAILABLE)
     if lowered.startswith("no fix"):
         return ("no-fix", target)
     if lowered.startswith("no critical"):
@@ -274,7 +285,12 @@ def _target_callout(advice: DeviceAdvice) -> tuple[str, str]:
 
 
 def _leaves_open(advice: DeviceAdvice) -> str:
-    """What the target leaves open, or nothing when it clears every Advisory (#124)."""
+    """What the target leaves open, or nothing when it clears every Advisory (#124, #146)."""
+    if advice.not_cleared is None:
+        return (
+            " (count not recorded: it may still leave Advisories open, "
+            "so this target is not confirmed complete)"
+        )
     if advice.not_cleared <= 0:
         return ""
     return f" (does not clear {advice.not_cleared} Advisories: {_no_fix(advice)})"
@@ -323,7 +339,7 @@ def _advisory_row(
     detail = _advisory_detail(finding) or {}
     first_fixed = _string(detail.get("first_fixed"), strict=True)
     if first_fixed is None:
-        first_fixed = f"no fix in Train {train}" if train else "no fix in its Train"
+        first_fixed = _first_fixed_text(detail, train)
     return (
         _level(finding, redact),
         _advisory_link(detail, redact),
@@ -332,6 +348,13 @@ def _advisory_row(
         _text(", ".join(_strings(detail.get("cves"))) or NOT_RECORDED, redact),
         _text(first_fixed, redact),
     )
+
+
+def _first_fixed_text(detail: Mapping[str, Plain], train: str | None) -> str:
+    """The First fixed cell when Cisco named no release: unknown, or none in the Train (#136)."""
+    if detail.get("fix_unresolved") is True:
+        return NOT_AVAILABLE
+    return f"no fix in Train {train}" if train else "no fix in its Train"
 
 
 def _advisory_link(detail: Mapping[str, Plain], redact: Callable[[str], str]) -> str:

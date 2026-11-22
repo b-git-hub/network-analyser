@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from network_analyser.advisories import Pacer, ask_cisco, check_api_key
+from network_analyser.advisories.lookup import SOFTWARE_OS_UNVERIFIED
 from network_analyser.advisories.transport import HttpResponse, TransportFailed
 from network_analyser.credentials import Secret, SecretScan
 from network_analyser.records.cisco import (
@@ -19,6 +20,7 @@ from network_analyser.records.cisco import (
     EoxAnswer,
     LookupQuestions,
     ReleaseQuestion,
+    SoftwareEoxQuestion,
     SourceUnavailable,
     SuggestionsAnswer,
     TokenOutcome,
@@ -83,11 +85,15 @@ def release_question(release: str = "17.9.4a") -> ReleaseQuestion:
     return ReleaseQuestion(CiscoOsType.IOS_XE, release)
 
 
+def software_question(release: str = "17.9.4a") -> SoftwareEoxQuestion:
+    return SoftwareEoxQuestion(CiscoOsType.IOS_XE, release)
+
+
 def questions(
     *,
     releases: tuple[ReleaseQuestion, ...] | None = None,
     hardware_pids: tuple[str, ...] = (),
-    software_releases: tuple[str, ...] = (),
+    software_releases: tuple[SoftwareEoxQuestion, ...] = (),
     suggestion_pids: tuple[str, ...] = (),
 ) -> LookupQuestions:
     return LookupQuestions(
@@ -177,7 +183,7 @@ def test_one_request_per_distinct_question() -> None:
             release_question(),
         ),
         hardware_pids=("C9300-48P", "C9300-48P"),
-        software_releases=("17.9.4a", "17.9.4a"),
+        software_releases=(software_question("17.9.4a"), software_question("17.9.4a")),
         suggestion_pids=("C9300-48P", "C9300-48P"),
     )
 
@@ -192,6 +198,57 @@ def test_one_request_per_distinct_question() -> None:
     assert len([path for path in fake.paths() if "/EOXByProductID/" in path]) == 1
     assert len([path for path in fake.paths() if "/EOXBySWReleaseString/" in path]) == 1
     assert len([path for path in fake.paths() if "/productIds/" in path]) == 1
+
+
+def test_software_eox_is_sent_in_the_query_form_with_each_releases_os_type() -> None:
+    fake = FakeCisco()
+    asked = questions(
+        releases=(),
+        software_releases=(
+            SoftwareEoxQuestion(CiscoOsType.IOS_XE, "17.9.4a"),
+            SoftwareEoxQuestion(CiscoOsType.IOS, "15.2(7)E9"),
+        ),
+    )
+
+    answers, _ = lookup(fake, asked)
+
+    assert [path for path in fake.paths() if "EOXBySWReleaseString" in path] == [
+        "/supporttools/eox/rest/5/EOXBySWReleaseString/1?input1=17.9.4a,IOS-XE&input2=15.2(7)E9,IOS"
+    ]
+    assert isinstance(answers.software_eox, EoxAnswer)
+
+
+def test_software_eox_takes_twenty_inputs_a_call() -> None:
+    values = tuple(software_question(f"17.9.{number}") for number in range(25))
+    fake = FakeCisco()
+
+    answers, _ = lookup(fake, questions(releases=(), software_releases=values))
+
+    paths = [path for path in fake.paths() if "EOXBySWReleaseString" in path]
+    assert len(paths) == 2
+    assert "input20=17.9.19,IOS-XE" in paths[0]
+    assert "input21=" not in paths[0]
+    assert paths[1].startswith(
+        "/supporttools/eox/rest/5/EOXBySWReleaseString/1?input1=17.9.20,IOS-XE"
+    )
+    assert paths[1].count("&") == 4
+    assert isinstance(answers.software_eox, EoxAnswer)
+
+
+def test_an_nxos_release_is_not_sent_because_its_ostype_name_is_unverified() -> None:
+    fake = FakeCisco()
+    asked = questions(
+        releases=(),
+        software_releases=(SoftwareEoxQuestion(CiscoOsType.NX_OS, "9.3(10)"),),
+    )
+
+    answers, _ = lookup(fake, asked)
+
+    assert not any("EOXBySWReleaseString" in path for path in fake.paths())
+    assert isinstance(answers.software_eox, EoxAnswer)
+    assert [(item.input_value, item.reason) for item in answers.software_eox.unanswered] == [
+        ("9.3(10)", SOFTWARE_OS_UNVERIFIED)
+    ]
 
 
 def test_an_nxos_question_sends_the_nexus_family() -> None:
