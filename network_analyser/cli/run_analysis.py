@@ -62,6 +62,7 @@ from network_analyser.records.cisco import (
     CompatibleAnswers,
     EoxAnswer,
     EoxRecord,
+    SoftwareEoxQuestion,
     SuggestionsAnswer,
 )
 from network_analyser.records.cisco import (
@@ -99,6 +100,9 @@ LOOKUPS_DID_NOT_RUN: Final = "Cisco lookups did not run"
 _VALUE_REFUSED: Final = "Cisco was not asked: the value did not match the safe pattern"
 """The per-value counterpart of `advisories.REFUSED`, for one value of a source (#153)."""
 
+SOFTWARE_EOX_MATCH_PENDING: Final = "software EoX match rule not decided"
+"""Why a software EoX record is "could not check" until the operator's probe decides it (#165)."""
+
 _TRAIN: Final = re.compile(r"^\d{1,3}\.\d{1,3}(?:[.(]|$)")
 _CISCO_OS: Final = {
     OsType.IOS: CiscoOsType.IOS,
@@ -129,7 +133,10 @@ def lookup_questions(data: AnalysisInput) -> CiscoQuestions:
     return CiscoQuestions(
         releases=releases,
         hardware_pids=asked.pids,
-        software_releases=tuple(question.release for question in asked.releases),
+        software_releases=tuple(
+            SoftwareEoxQuestion(_CISCO_OS[question.os_type], question.release)
+            for question in asked.releases
+        ),
         suggestion_pids=asked.compatible_pids,
         compatible_pids=asked.compatible_pids,
     )
@@ -317,34 +324,85 @@ def _eox(
     software: EoxAnswer | CiscoSourceUnavailable,
     asked: CiscoQuestions,
 ) -> tuple[EoxAnswers, ...] | SourceUnavailable:
-    if isinstance(hardware, CiscoSourceUnavailable):
+    """Keep hardware and software EoX apart: one unavailable never blanks the other (#165).
+
+    Each available source's values are answered one by one with their own gap reason, so an
+    outage or a refused value reads "could not check" rather than "no EoX". Only when both
+    sources failed whole is there nothing to keep apart, and the source stays unavailable.
+    """
+    if isinstance(hardware, CiscoSourceUnavailable) and isinstance(
+        software, CiscoSourceUnavailable
+    ):
         return SourceUnavailable(hardware.reason)
-    if isinstance(software, CiscoSourceUnavailable):
-        return SourceUnavailable(software.reason)
-    hardware_records = _eox_by_input(hardware)
-    software_records = _eox_by_input(software)
-    hardware_unanswered = _eox_unanswered(hardware)
-    software_unanswered = _eox_unanswered(software)
     return (
         EoxAnswers(
-            hardware=tuple(
-                HardwareEox(
-                    pid,
-                    items=_items(EoxKind.HARDWARE, hardware_records.get(pid, ())),
-                    unanswered=_hardware_gap(pid, hardware_unanswered),
-                )
-                for pid in asked.hardware_pids
-            ),
-            software=tuple(
-                SoftwareEox(
-                    release,
-                    items=_items(EoxKind.SOFTWARE, software_records.get(release, ())),
-                    unanswered=_software_gap(release, software_unanswered),
-                )
-                for release in asked.software_releases
-            ),
+            hardware=_hardware_eox_answers(hardware, asked),
+            software=_software_eox_answers(software, asked),
         ),
     )
+
+
+def _hardware_eox_answers(
+    source: EoxAnswer | CiscoSourceUnavailable, asked: CiscoQuestions
+) -> tuple[HardwareEox, ...]:
+    """One hardware answer per PID asked, with the reason each unanswered one has."""
+    if isinstance(source, CiscoSourceUnavailable):
+        return tuple(HardwareEox(pid, unanswered=source.reason) for pid in asked.hardware_pids)
+    records = _eox_by_input(source)
+    unanswered = _eox_unanswered(source)
+    return tuple(
+        HardwareEox(
+            pid,
+            items=_items(EoxKind.HARDWARE, records.get(pid, ())),
+            unanswered=_hardware_gap(pid, unanswered),
+        )
+        for pid in asked.hardware_pids
+    )
+
+
+def _software_eox_answers(
+    source: EoxAnswer | CiscoSourceUnavailable, asked: CiscoQuestions
+) -> tuple[SoftwareEox, ...]:
+    """One software answer per release asked, never "no EoX" from an undecided match (#165)."""
+    if isinstance(source, CiscoSourceUnavailable):
+        return tuple(
+            SoftwareEox(question.release, unanswered=source.reason)
+            for question in asked.software_releases
+        )
+    unanswered = _eox_unanswered(source)
+    return tuple(
+        _software_eox_answer(question.release, source, unanswered)
+        for question in asked.software_releases
+    )
+
+
+def _software_eox_answer(
+    release: str, source: EoxAnswer, unanswered: dict[str, str]
+) -> SoftwareEox:
+    """One release's software EoX, with Cisco's reason or the undecided-rule fallback."""
+    if not is_safe_release(release):
+        return SoftwareEox(release, unanswered=_VALUE_REFUSED)
+    matched = _software_records_for(release, source.records)
+    gap = unanswered.get(release)
+    if matched is None:
+        return SoftwareEox(release, unanswered=gap or SOFTWARE_EOX_MATCH_PENDING)
+    return SoftwareEox(release, items=_items(EoxKind.SOFTWARE, matched), unanswered=gap)
+
+
+def _software_records_for(
+    release: str, records: tuple[EoxRecord, ...]
+) -> tuple[EoxRecord, ...] | None:
+    """Return the software EoX records for `release`, or None while the match rule is undecided.
+
+    The rule is NOT decided. #148's query-form runs never showed an `EOXInputValue` equal to
+    the release sent, so an exact echo is disproved; the echo for a real release has not been
+    seen. A loose substring match is forbidden because it could attach another release's EoX
+    to this one. The operator's probe in #165 will show what Cisco echoes for a real
+    `release,OSType`; only then may this function match. Until then it matches nothing, so a
+    release with a record reads "could not check", never "no EoX".
+    """
+    del release, records  # no rule yet; see the docstring and #165
+    return None
 
 
 def _eox_unanswered(answer: EoxAnswer) -> dict[str, str]:
@@ -359,13 +417,6 @@ def _hardware_gap(pid: str, unanswered: dict[str, str]) -> str | None:
     if not is_safe_pid(pid):
         return _VALUE_REFUSED
     return unanswered.get(pid)
-
-
-def _software_gap(release: str, unanswered: dict[str, str]) -> str | None:
-    """Why one release has no EoX answer: Cisco's code, or that it never left the PC (#153)."""
-    if not is_safe_release(release):
-        return _VALUE_REFUSED
-    return unanswered.get(release)
 
 
 def _eox_by_input(answer: EoxAnswer) -> dict[str, tuple[EoxRecord, ...]]:
