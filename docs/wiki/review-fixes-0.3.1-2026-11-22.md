@@ -117,3 +117,7 @@ last on the integration branch.
   #160, `MERGEABLE`) was left unmerged because it is second in this batch's order. The
   coordinator decides whether the #143 owner rebases forward onto `e625f25` and re-runs the
   gate.
+- 2026-11-22: merged #160 at `25f2f55`; gate: ruff/format/mypy pass, pytest 3005 passed, 1
+  skipped, 21 failed (baseline); security test 6's autouse fixture fakes the crash-dump
+  registry, so its result no longer depends on this PC's `LocalDumps`/`AeDebug` settings, and
+  it passed inside the full run (ticket closed). #158's intermittent also passed.
