@@ -15,6 +15,7 @@ from ipaddress import ip_address
 from itertools import pairwise
 from typing import Final
 
+from network_analyser.platforms.routing_auth import routing_authentication_missing
 from network_analyser.records import Platform
 from network_analyser.records.analysis import SNMP_V3_USER_CRYPTO
 from network_analyser.records.config_facts import (
@@ -128,7 +129,6 @@ _NTP_TRUSTED_KEY: Final = re.compile(
 )
 _NTP_AUTHENTICATE: Final = re.compile(r"^ntp\s+authenticate\s*$", re.IGNORECASE)
 _L3_ADDRESS: Final = re.compile(r"^ip\s+(?:address|unnumbered)\s+", re.IGNORECASE)
-_ROUTER_PROTOCOL: Final = re.compile(r"^router\s+(ospf|eigrp|bgp)(?:\s|$)", re.IGNORECASE)
 _FLAT_FHRP: Final = re.compile(r"^(standby|vrrp|glbp)\s+(\d+)\s+(.+)$", re.IGNORECASE)
 _BLOCK_FHRP: Final = re.compile(r"^(hsrp|vrrp)\s+(\d+)\s*$", re.IGNORECASE)
 
@@ -390,7 +390,7 @@ def _service_facts(platform: Platform, lines: list[str]) -> dict[str, FactValue]
     return {
         **_ntp_facts(lines),
         REMOTE_SYSLOG_SERVERS: _remote_syslog_servers(lines),
-        ROUTING_AUTHENTICATION_MISSING: _routing_authentication_missing(lines),
+        ROUTING_AUTHENTICATION_MISSING: routing_authentication_missing(lines),
         **_fhrp_facts(lines),
         **_icmp_facts(platform, lines),
     }
@@ -478,45 +478,6 @@ def _is_ip_address(text: str) -> bool:
     except ValueError:
         return False
     return True
-
-
-def _routing_authentication_missing(lines: list[str]) -> tuple[str, ...]:
-    """The routing protocols configured with no authentication, by fixed keyword."""
-    configured: set[str] = set()
-    authenticated: set[str] = set()
-    for line in lines:
-        text = line.strip()
-        protocol = _ROUTER_PROTOCOL.match(text)
-        if protocol is not None:
-            configured.add(protocol.group(1).upper())
-            continue
-        tokens = text.lower().split()
-        if _ospf_authenticated(tokens):
-            authenticated.add("OSPF")
-        if _eigrp_authenticated(tokens):
-            authenticated.add("EIGRP")
-        if tokens[:1] == ["neighbor"] and "password" in tokens[1:]:
-            authenticated.add("BGP")
-    return tuple(sorted(configured - authenticated))
-
-
-def _ospf_authenticated(tokens: list[str]) -> bool:
-    """Whether an OSPF line turns authentication on, in an area, a virtual link or an interface."""
-    if tokens[:1] == ["area"] and "authentication" in tokens[2:]:
-        return True
-    if tokens[:3] != ["ip", "ospf", "authentication"]:
-        return False
-    return not tokens[3:] or tokens[3] != "null"
-
-
-def _eigrp_authenticated(tokens: list[str]) -> bool:
-    """Whether an EIGRP line turns authentication on, in the router or on an interface."""
-    if tokens[:2] in (["authentication", "mode"], ["authentication", "key-chain"]):
-        return True
-    return tokens[:3] in (
-        ["ip", "authentication", "mode"],
-        ["ip", "authentication", "key-chain"],
-    )
 
 
 def _fhrp_facts(lines: list[str]) -> dict[str, FactValue]:
@@ -612,11 +573,11 @@ def _snmp_facts(platform: Platform, lines: list[str]) -> dict[str, FactValue]:
         text = line.strip()
         user = _SNMP_USER.match(text)
         if user is not None:
-            tokens = {token.lower() for token in user.group(1).split()}
-            if tokens & _SNMP_V1_V2C_KEYWORDS:
+            words = {token.lower() for token in user.group(1).split()}
+            if words & _SNMP_V1_V2C_KEYWORDS:
                 continue
             users += 1
-            users_without_priv += int("priv" not in tokens)
+            users_without_priv += int("priv" not in words)
             continue
         group = _SNMP_GROUP.match(text)
         if group is not None:
