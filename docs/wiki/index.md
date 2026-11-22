@@ -9,6 +9,10 @@ A dated, historical record kept by the coordinating (chief-of-staff) session and
 - [implementer-brief](implementer-brief.md): the standing brief every ticket implementer follows.
 - [spec-37-follow-ups](spec-37-follow-ups.md): work one ticket surfaced for a later one.
 - [merger-brief](merger-brief.md): how a finished ticket branch is merged into the integration branch.
+- [review-fixes-0.3.1-2026-11-22](review-fixes-0.3.1-2026-11-22.md): coordination page for #129 on 2026-11-22: base, collision plan, operator-only work, dated log.
+- [review-fixes-implementer-brief-2026-11-22](review-fixes-implementer-brief-2026-11-22.md): the brief every #129 implementer follows on 2026-11-22.
+- [review-fixes-merger-brief-2026-11-22](review-fixes-merger-brief-2026-11-22.md): how a #129 ticket PR is merged into `build/review-fixes-0.3.1`.
+- [review-fixes-gate-baseline-2026-11-22](review-fixes-gate-baseline-2026-11-22.md): the 21 known Windows failures and the two intermittents at `6ce2cf9`.
 - [cloud-container-checks](cloud-container-checks.md): how to run the project's checks in a Linux cloud container (uv 0.13.9 shim).
 - [usage-limits](usage-limits.md): 2026-11-18 rate limit stopped four implementers; how they were resumed and what to change.
 - [agent-worktree-friction](agent-worktree-friction.md): known quirks of agent worktrees and how briefs work around them.
