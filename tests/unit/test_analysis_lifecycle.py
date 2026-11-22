@@ -283,6 +283,40 @@ def test_upcoming_eox_dates_are_advice_not_findings() -> None:
     )
 
 
+def test_an_eox_date_of_today_is_neither_passed_nor_upcoming() -> None:
+    """The reference date is a day, so a milestone dated today has not passed (#149)."""
+    today = AS_OF.date().isoformat()
+    record = _device(A, "S1", "sw-a")
+    results = _results(
+        record,
+        inventory=(_inventory("dev-S1", (MODEL, HardwareKind.CHASSIS)),),
+        hardware=(
+            _hardware(
+                MODEL,
+                _item(
+                    name=MODEL,
+                    last_date_of_support=today,
+                    end_of_sale=today,
+                ),
+            ),
+        ),
+        software=(
+            _software(
+                RELEASE,
+                _item(
+                    kind=EoxKind.SOFTWARE,
+                    name=RELEASE,
+                    end_of_sw_maintenance=today,
+                ),
+            ),
+        ),
+    )
+
+    assert _lifecycle(results) == []
+    (advice,) = results.advice
+    assert advice.upcoming_eox == ()
+
+
 def test_upcoming_eox_rides_the_analysis_record_in_topology_json() -> None:
     record = _device(A, "S1", "sw-a")
     built = topology.build((record,))

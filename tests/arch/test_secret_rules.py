@@ -24,16 +24,99 @@ type Rule = Callable[[str, ast.Module], list[str]]
 # The cli masked reader returns a Secret and never unwraps it.
 REVEAL_OWNERS = ("credentials/", "device_gateway/", "backup_store/", "advisories/")
 
+# The Cisco API Key's client ID, secret and token may be unwrapped only where that key is used:
+# `advisories` reveals them to make Cisco's request, and `backup_store` unlocks the key file
+# (ADR 0008, story 41). A Credential Set password or the Backup Passphrase has no such name, so
+# a device-path module unwrapping one here is caught by this rule even though `device_gateway`
+# may reveal a device password.
+CISCO_SECRET_OWNERS = ("advisories/", "backup_store/")
+CISCO_SECRET_NAMES = frozenset({"client_id", "client_secret", "token", "access_token"})
+
+
+def _reveal_calls(tree: ast.Module) -> list[tuple[ast.expr, bool]]:
+    """Every `.reveal()` call, and every `getattr(..., "reveal")` or `attrgetter`, with `attr`.
+
+    The second value is True for the bypass forms, which are refused even inside an owner:
+    no module needs to reach a Secret's value through a name the scan cannot read.
+    """
+    found: list[tuple[ast.expr, bool]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr == "reveal":
+            found.append((node, False))
+        elif isinstance(node, ast.Call) and _reveal_name(node) == "reveal":
+            found.append((node, True))
+    return found
+
+
+def _reveal_name(call: ast.Call) -> str | None:
+    """The attribute name a `getattr` or `attrgetter` call reads, when it is a literal."""
+    func = call.func
+    name = (
+        func.id
+        if isinstance(func, ast.Name)
+        else func.attr
+        if isinstance(func, ast.Attribute)
+        else None
+    )
+    if name not in {"getattr", "attrgetter"}:
+        return None
+    position = 1 if name == "getattr" else 0
+    argument = call.args[position] if len(call.args) > position else None
+    if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+        return argument.value
+    return None
+
 
 def reveal_outside_owners(relative: str, tree: ast.Module) -> list[str]:
-    """Find `.reveal()` calls outside the modules that may hold a secret's value."""
-    if relative.startswith(REVEAL_OWNERS):
+    """Find reveal calls outside the modules that may hold a secret's value.
+
+    A bypass (`getattr` or `operator.attrgetter`) is caught in every module, because the rule
+    reads names and a computed one would hide the call from it.
+    """
+    found: list[str] = []
+    for node, bypass in _reveal_calls(tree):
+        if not bypass and relative.startswith(REVEAL_OWNERS):
+            continue
+        how = "reveal() through getattr" if bypass else ".reveal()"
+        found.append(f"{relative}:{node.lineno} calls {how}")
+    return found
+
+
+def cisco_key_reveal_outside_owners(relative: str, tree: ast.Module) -> list[str]:
+    """Find a Cisco key value unwrapped outside `advisories` and `backup_store` (story 41)."""
+    if relative.startswith(CISCO_SECRET_OWNERS):
         return []
     return [
-        f"{relative}:{node.lineno} calls .reveal()"
+        f"{relative}:{node.lineno} reveals a Cisco key value"
         for node in ast.walk(tree)
-        if isinstance(node, ast.Attribute) and node.attr == "reveal"
+        if isinstance(node, ast.Call)
+        and (target := _reveal_target(node)) is not None
+        and _names_cisco_secret(target)
     ]
+
+
+def _reveal_target(call: ast.Call) -> ast.expr | None:
+    """What a reveal call unwraps: the receiver, or the object `getattr` reads from."""
+    if isinstance(call.func, ast.Attribute) and call.func.attr == "reveal":
+        return call.func.value
+    if _reveal_name(call) == "reveal" and call.args:
+        return call.args[0]
+    return None
+
+
+def _names_cisco_secret(node: ast.expr) -> bool:
+    """Whether an expression is named like the Cisco key's client ID, secret or token."""
+    if isinstance(node, ast.Attribute):
+        return _is_cisco_name(node.attr) or _names_cisco_secret(node.value)
+    if isinstance(node, ast.Name):
+        return _is_cisco_name(node.id)
+    if isinstance(node, ast.Call):
+        return _names_cisco_secret(node.func)
+    return False
+
+
+def _is_cisco_name(text: str) -> bool:
+    return text.casefold().removeprefix("_") in CISCO_SECRET_NAMES
 
 
 # == Rule: environment ==
@@ -276,6 +359,7 @@ def _write_mode(call: ast.Call, position: int) -> bool:
 # == The tests ==
 RULES: dict[str, Rule] = {
     "reveal": reveal_outside_owners,
+    "cisco key reveal": cisco_key_reveal_outside_owners,
     "environment": environment_reads,
     "exception text": exception_text_used,
     "file writes": file_writes,
@@ -303,6 +387,63 @@ def test_reveal_is_caught_outside_its_owners_and_allowed_inside() -> None:
     assert _scan(reveal_outside_owners, "device_gateway/ssh.py", code) == []
     assert _scan(reveal_outside_owners, "backup_store/lock.py", code) == []
     assert _scan(reveal_outside_owners, "advisories/session.py", code) == []
+
+
+def test_a_computed_reveal_is_caught_even_inside_an_owner() -> None:
+    """`getattr(secret, "reveal")()` would hide the call from a rule that reads names."""
+    code = """
+        import operator
+
+        def show(secret):
+            a = getattr(secret, "reveal")()
+            b = getattr(secret, "reveal", lambda: "")()
+            c = operator.attrgetter("reveal")(secret)()
+            d = getattr(secret, "same_as")(other)
+    """
+
+    assert _scan(reveal_outside_owners, "cli/prompts.py", code) == [
+        "cli/prompts.py:5 calls reveal() through getattr",
+        "cli/prompts.py:6 calls reveal() through getattr",
+        "cli/prompts.py:7 calls reveal() through getattr",
+    ]
+    assert _scan(reveal_outside_owners, "advisories/session.py", code) == [
+        "advisories/session.py:5 calls reveal() through getattr",
+        "advisories/session.py:6 calls reveal() through getattr",
+        "advisories/session.py:7 calls reveal() through getattr",
+    ]
+
+
+def test_the_cisco_key_is_revealed_only_in_its_owners() -> None:
+    """Story 41: `device_gateway` may reveal a device password, never the Cisco key (#149)."""
+    code = """
+        def send(key, session):
+            a = key.client_id.reveal()
+            b = key.client_secret.reveal()
+            c = session._token.reveal()
+            d = session.access_token.reveal()
+    """
+
+    assert _scan(cisco_key_reveal_outside_owners, "device_gateway/visit.py", code) == [
+        "device_gateway/visit.py:3 reveals a Cisco key value",
+        "device_gateway/visit.py:4 reveals a Cisco key value",
+        "device_gateway/visit.py:5 reveals a Cisco key value",
+        "device_gateway/visit.py:6 reveals a Cisco key value",
+    ]
+    assert _scan(cisco_key_reveal_outside_owners, "credentials/sets.py", code) == [
+        "credentials/sets.py:3 reveals a Cisco key value",
+        "credentials/sets.py:4 reveals a Cisco key value",
+        "credentials/sets.py:5 reveals a Cisco key value",
+        "credentials/sets.py:6 reveals a Cisco key value",
+    ]
+    assert _scan(cisco_key_reveal_outside_owners, "advisories/session.py", code) == []
+    assert _scan(cisco_key_reveal_outside_owners, "backup_store/cisco_key.py", code) == []
+
+
+def test_a_device_password_is_still_allowed_in_the_device_path() -> None:
+    code = "def login(password):\n    return password.reveal()\n"
+
+    assert _scan(cisco_key_reveal_outside_owners, "device_gateway/ssh.py", code) == []
+    assert _scan(reveal_outside_owners, "device_gateway/ssh.py", code) == []
 
 
 def test_environment_reads_are_caught_except_named_ones_in_winsys() -> None:

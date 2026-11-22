@@ -150,6 +150,19 @@ def test_the_highest_per_advisory_fix_wins_across_advisories(first: str, second:
     assert (advice.upgrade_target, advice.not_cleared) == ("17.12.7", 0)
 
 
+def test_two_advisories_fixed_in_a_lettered_and_the_next_release_give_the_later_one() -> None:
+    """The #123 criterion as written: 17.12.7a on one Advisory, 17.12.8 on another (#149)."""
+    results = _results(
+        _advisory(FIRST, FixedRelease(TRAIN, "17.12.7a")),
+        _advisory(SECOND, FixedRelease(TRAIN, "17.12.8")),
+    )
+
+    (advice,) = results.advice
+    assert (advice.upgrade_target, advice.not_cleared) == ("17.12.8", 0)
+    assert _first_fixed(_finding(results, FIRST)) == "17.12.7a"
+    assert _first_fixed(_finding(results, SECOND)) == "17.12.8"
+
+
 def test_a_partial_target_names_the_highest_fix_and_counts_what_it_leaves_open() -> None:
     results = _results(
         _advisory(FIRST, FixedRelease(TRAIN, "17.12.7")),
