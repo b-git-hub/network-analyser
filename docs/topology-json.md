@@ -72,9 +72,11 @@ Ids hold only letters, digits, `.`, `-` and `_`. Items point at devices by id.
 
 ### `devices[]` (Visited Device)
 
-`id`, `outcome` (`visited` / `partial`), `partial_reason`, `hostname`, `platform`, `model`, `software_version`, `serials[]`, `stack_members[]` (`number`, `serial`, `model`, `software_version`, `mode`), `management_ip`, `alias_ips[]` (learned aliases and interface addresses), `interfaces[]`, `vlan_database`, `vpc`, `router_operating_mode` (optional, #147), and the optional `advice` (#105).
+`id`, `outcome` (`visited` / `partial`), `partial_reason`, `hostname`, `platform`, `model`, `software_version`, `serials[]`, `stack_members[]` (`number`, `serial`, `model`, `software_version`, `mode`), `management_ip`, `alias_ips[]` (learned aliases and interface addresses), `interfaces[]`, `vlan_database`, `vpc`, `hardware_series` (optional, #159), `router_operating_mode` (optional, #147), and the optional `advice` (#105).
 
 `router_operating_mode` (#147): Cisco's `Router operating mode:` text, such as `Controller-Managed` on a Catalyst SD-WAN edge router, or `null` when `show version` prints no such line, as classic IOS and Catalyst 9000 switches do. Analysis reads it so an IOS XE SD-WAN device is never matched against IOS-XE Advisories (decision #78). It is an optional field: a file from before #147 lacks it, which reads as `null`, and no format-version bump was needed because no surface draws it.
+
+`hardware_series` (#159): the one `Nexus<NNNN>` token `show version` named, such as `Nexus9000`, or `null` when it named none or more than one. Analysis reads it to settle the Nexus series for Advisory matching when the Device Role refused `show inventory | json`; it never supplies a chassis PID. It is an optional field, and no surface draws it, so no format-version bump was needed.
 
 `stack_members[]` is the member table of `show version`: `software_version` and `mode` (such as `INSTALL` or `BUNDLE`) are read per member for the consistency Checks (#99), and are `{"unknown": reason}` when the table does not report them. They are optional fields; a file from before #99 has neither, and no format-version bump was needed because an older `render` drops them.
 
