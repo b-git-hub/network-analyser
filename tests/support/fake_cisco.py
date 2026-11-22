@@ -19,10 +19,11 @@ so a test sees the bytes a proxy and Cisco would receive (the tunnel, #132).
 import base64
 import io
 import json
+import re
 import ssl
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final
 
 from network_analyser.advisories import (
     HttpRequest,
@@ -30,7 +31,7 @@ from network_analyser.advisories import (
     TransportFailed,
 )
 from network_analyser.advisories.fence import FENCED_HOSTS, HTTPS_PORT
-from network_analyser.advisories.patterns import is_safe_pid, is_safe_release
+from network_analyser.advisories.patterns import is_safe_release
 
 CLIENT_ID = "CANARY-client-id-95"
 """A synthetic client ID; the tool must never put it in an event or a record."""
@@ -46,6 +47,12 @@ EOX_PREFIX = "/supporttools/eox/rest/5/"
 SUGGESTION_PREFIX = "/software/suggestion/v2/suggestions/releases/productIds/"
 COMPATIBLE_PREFIX = "/software/suggestion/v2/suggestions/compatible/productId/"
 TOKEN_PATH = "/oauth2/default/v1/token"
+
+_FAKE_PID_PATH: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,63}(?:/[A-Za-z0-9-]{1,16})?")
+"""The fake's own literal PID path shape: letters, digits and hyphens, and at most one raw `/`.
+
+It is deliberately not the tool's `is_safe_pid`, so a loosened pattern there cannot make the
+fake accept a value Cisco would never receive (#155)."""
 
 
 class LeftTheFenceError(AssertionError):
@@ -302,14 +309,15 @@ def _pid_from_wire(wire: str) -> str:
     """Return the PID a path segment names, proving it left the PC in its safe wire form.
 
     A licence suffix's `/` must arrive raw, the only form Cisco answers (#162): Cisco's gateway
-    refuses `%2F` with HTTP 400, and no `%` is a PID character at all. The PID pattern allows
-    that one slash and nothing after it that could change the path.
+    refuses `%2F` with HTTP 400, and no `%` is a PID character at all. This is the fake's own
+    literal path rule, never the code's `is_safe_pid`, so a loosened pattern in the tool cannot
+    make the fake accept a value Cisco would never receive (#155).
     """
     if "%" in wire:
         msg = f"a PID reached the path percent-encoded, which Cisco refuses: {wire!r}"
         raise UnsafeValueSentError(msg)
-    if not is_safe_pid(wire):
-        msg = f"PID left without its pattern: {wire!r}"
+    if _FAKE_PID_PATH.fullmatch(wire) is None:
+        msg = f"PID left without its path shape: {wire!r}"
         raise UnsafeValueSentError(msg)
     return wire
 

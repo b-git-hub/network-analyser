@@ -13,7 +13,7 @@ import pytest
 
 from network_analyser import analysis, platforms, topology
 from network_analyser.advisories import is_safe_release
-from network_analyser.analysis.releases import train_of
+from network_analyser.analysis.releases import normalise_release, train_of
 from network_analyser.records.analysis import (
     AdvisoryAnswer,
     AdvisoryPlatform,
@@ -312,3 +312,19 @@ def test_a_version_with_other_text_after_it_is_still_unknown(shown: str) -> None
 )
 def test_every_release_the_family_table_holds_may_be_sent_to_cisco(release: str) -> None:
     assert is_safe_release(release)
+
+
+@pytest.mark.parametrize(
+    ("shown", "release"),
+    [
+        ("7.0(3)I7(9) [build 7.0(3)I7(8.18)]", "7.0(3)I7(9)"),
+        ("9.3(10) [build 9.3(10.1)]", "9.3(10)"),
+        ("10.4(3) [Feature Release]", "10.4(3)"),
+        ("10.2(5) [Maintenance Release] [build 10.2(5.2)]", "10.2(5)"),
+    ],
+)
+def test_normalise_release_drops_the_same_bracketed_suffix_as_show_version(
+    shown: str, release: str
+) -> None:
+    """One bracket rule serves `show version` and every release that reaches Analysis (#155)."""
+    assert normalise_release(shown) == release

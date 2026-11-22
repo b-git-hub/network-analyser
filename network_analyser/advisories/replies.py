@@ -69,23 +69,30 @@ def advisories_answer(
 NO_DATA_FOUND: Final = "NO_DATA_FOUND"
 """openVuln's code for a release that has no Advisories: an answer, not a failure (#131)."""
 
+_NO_DATA_STATUSES: Final = frozenset({200, 404})
+"""The statuses #148 confirmed carry `NO_DATA_FOUND` as an empty answer. Until it confirms
+more, any other status is that release's failure, never "no Advisories" (#155)."""
+
 
 def advisories_error_answer(
     question: ReleaseQuestion, status: int, body: bytes
 ) -> AdvisoriesAnswer:
     """Return the answer for a release whose one call failed with HTTP `status` (#131).
 
-    Cisco's `errorCode` is kept when the reply has one, `NO_DATA_FOUND` meaning an empty
-    answer; otherwise the reason is the fixed text `HTTP <status>`.
+    Cisco's `errorCode` is kept when the reply has one; otherwise the reason is the fixed text
+    `HTTP <status>`. `NO_DATA_FOUND` is an empty answer only on the statuses #148 confirmed,
+    200 and 404; on any other status the release reads unavailable with its HTTP status (#155).
     """
     document = _document(body)
     code = None if document is None else _reply_error(document)
-    return _coded_answer(question, code or f"HTTP {status}")
+    return _coded_answer(question, code or f"HTTP {status}", status)
 
 
-def _coded_answer(question: ReleaseQuestion, code: str) -> AdvisoriesAnswer:
+def _coded_answer(question: ReleaseQuestion, code: str, status: int = 200) -> AdvisoriesAnswer:
     if code == NO_DATA_FOUND:
-        return AdvisoriesAnswer(question=question, advisories=())
+        if status in _NO_DATA_STATUSES:
+            return AdvisoriesAnswer(question=question, advisories=())
+        return AdvisoriesAnswer(question=question, advisories=(), unavailable=f"HTTP {status}")
     return AdvisoriesAnswer(question=question, advisories=(), unavailable=code)
 
 

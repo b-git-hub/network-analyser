@@ -19,9 +19,9 @@ so it is told apart by its `Router operating mode:` line, and a vManage controll
 `20.x` release line. NX-OS in ACI mode is told apart by its release shape. A device the
 fields cannot tell apart is matched as its release shape says.
 
-A device's release is normalised before it is looked up: the NX-OS `[build ...]` suffix is
-dropped and IOS-XE zero padding is stripped (`16.09.01` becomes `16.9.1`), so a formatting
-difference never hides an Advisory (story 45).
+A device's release is normalised before it is looked up: the bracketed suffix NX-OS prints
+after the release is dropped and IOS-XE zero padding is stripped (`16.09.01` becomes
+`16.9.1`), so a formatting difference never hides an Advisory (story 45).
 """
 
 import re
@@ -30,10 +30,10 @@ from types import MappingProxyType
 from typing import Final
 
 from network_analyser.records.analysis import OsType
+from network_analyser.records.lookup_values import strip_release_suffix
 from network_analyser.records.platform import Platform
 from network_analyser.records.unknown import Unknown
 
-_BUILD_SUFFIX: Final = re.compile(r"\s*\[build[^\]]*\]", re.IGNORECASE)
 # One zero-padded dotted part, with any letters it carries: `03`, `08E`, `09a`.
 _ZERO_PADDED: Final = re.compile(r"^0+([0-9][A-Za-z]*)$")
 # A classic IOS release written dotted: `15.2.7E4`. Only classic IOS capitalises its Train, and
@@ -131,12 +131,14 @@ _SDWAN_CONTROLLER_RELEASE: Final = re.compile(r"20\.[0-9]{1,3}\.[0-9]{1,3}[a-z]{
 def normalise_release(release: str) -> str:
     """Return `release` as Cisco's lookup expects it (story 45).
 
-    The NX-OS `[build ...]` suffix is dropped. A dotted release has its zero padding stripped,
-    which is what IOS-XE devices print in `show version`: `16.09.01` becomes `16.9.1` and
-    `03.06.08E` becomes `3.6.8E`, an upper-case suffix letter kept as it is. Parenthesised
-    releases, classic IOS and NX-OS, are left as they are.
+    The bracketed suffix NX-OS prints after the release (`[build ...]`, `[Feature Release]`) is
+    dropped, by the same rule `platforms` uses when it reads `show version` (#155). A dotted
+    release has its zero padding stripped, which is what IOS-XE devices print in `show
+    version`: `16.09.01` becomes `16.9.1` and `03.06.08E` becomes `3.6.8E`, an upper-case
+    suffix letter kept as it is. Parenthesised releases, classic IOS and NX-OS, are left as
+    they are.
     """
-    stripped = _BUILD_SUFFIX.sub("", release).strip()
+    stripped = strip_release_suffix(release).strip()
     if "(" in stripped or "." not in stripped:
         return stripped
     return ".".join(_strip_component(part) for part in stripped.split("."))

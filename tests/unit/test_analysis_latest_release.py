@@ -10,6 +10,7 @@ tests read what the operator sees in the advice record: both values, their lifec
 from dataclasses import replace
 
 from network_analyser import analysis, topology
+from network_analyser.analysis.advisory import LATEST_PID_NOT_SENT
 from network_analyser.records.analysis import (
     AnalysisInput,
     CiscoAnswers,
@@ -270,3 +271,22 @@ def test_the_lookup_questions_ask_for_chassis_models_only_and_once_each() -> Non
     assert questions.compatible_pids == (OTHER_MODEL, MODEL)
     assert LINE_CARD not in questions.compatible_pids
     assert "sw-a" not in questions.compatible_pids
+
+
+def test_an_odd_chassis_pid_says_why_the_latest_release_is_not_available() -> None:
+    """A PID the shared pattern refuses is not asked about, so both values name the reason.
+
+    It is never echoed: the model text could be hostile (#130, #155).
+    """
+    record = _device(A, "S1", "sw-a", model="ISR 4451;X")
+    questions = analysis.lookup_questions(AnalysisInput(topology=topology.build((record,))))
+
+    results = _results(record, compatible=())
+
+    assert questions.compatible_pids == ()
+    (advice,) = results.advice
+    assert advice.latest_release_in_train == LATEST_PID_NOT_SENT
+    assert advice.latest_release == LATEST_PID_NOT_SENT
+    assert advice.latest_in_train_lifecycle is None
+    assert advice.latest_release_lifecycle is None
+    assert "4451" not in advice.latest_release
