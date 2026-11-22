@@ -47,6 +47,10 @@ FIXED_NOTE: Final = (
 NOT_RECORDED: Final = "not recorded"
 NOT_AVAILABLE: Final = "not available"
 """Shown for advice this topology.json does not hold, rather than guessing (#105, #89)."""
+NEWER_THAN_LIST: Final = "running release is newer than Cisco's list"
+"""The fixed text Analysis gives when the running release is above everything Cisco lists
+(#127). `analysis.advisory.NEWER_THAN_LIST` holds the same text; `diagram` may not import
+`analysis`, so it is repeated here and a test keeps the two equal (#139)."""
 
 _ADVISORY_ID: Final = re.compile(r"cisco-sa-[A-Za-z0-9._-]{1,160}")
 _ADVISORY_HREF: Final = (
@@ -88,7 +92,12 @@ class DeviceRow:
         model: its model.
         release: its software release.
         upgrade_target: its Upgrade Target, `no fix in Train`, or `not available`.
-        latest_release: its Latest Release, or `not available`.
+        latest_release: its Latest Release overall, or `not available`.
+        latest_in_train: its Latest Release in its Train, or `not available`.
+        latest_in_train_lifecycle: Cisco's lifecycle code beside `latest_in_train`, only when
+            there is a listed release for it to describe; None otherwise (#127, #139).
+        latest_release_lifecycle: Cisco's lifecycle code beside `latest_release`, only when
+            there is a listed release for it to describe; None otherwise (#127, #139).
         not_cleared: how many Advisories its Upgrade Target leaves open (#124); 0 when none.
     """
 
@@ -98,6 +107,9 @@ class DeviceRow:
     release: str
     upgrade_target: str
     latest_release: str
+    latest_in_train: str
+    latest_in_train_lifecycle: str | None
+    latest_release_lifecycle: str | None
     not_cleared: int
 
 
@@ -354,13 +366,18 @@ def _device_rows(
 
 def _device_row(device: Mapping[str, Plain]) -> DeviceRow:
     advice = device_advice(device)
+    latest_in_train = _latest_in_train(advice)
+    latest_release = _latest_release(advice)
     return DeviceRow(
         hostname=_device_name(device),
         management_ip=_text(device.get("management_ip")),
         model=_text(device.get("model")),
         release=_text(device.get("software_version")),
         upgrade_target=_upgrade_target(advice),
-        latest_release=_latest_release(advice),
+        latest_release=latest_release,
+        latest_in_train=latest_in_train,
+        latest_in_train_lifecycle=_lifecycle(latest_in_train, advice.latest_in_train_lifecycle),
+        latest_release_lifecycle=_lifecycle(latest_release, advice.latest_release_lifecycle),
         not_cleared=advice.not_cleared,
     )
 
@@ -385,6 +402,23 @@ def _latest_release(advice: DeviceAdvice) -> str:
     if advice.known and advice.latest_release:
         return advice.latest_release
     return NOT_AVAILABLE
+
+
+def _latest_in_train(advice: DeviceAdvice) -> str:
+    if advice.known and advice.latest_in_train:
+        return advice.latest_in_train
+    return NOT_AVAILABLE
+
+
+def _lifecycle(release: str, lifecycle: str | None) -> str | None:
+    """Cisco's code beside `release`, or None when there is no listed release to describe.
+
+    `not available` and "running release is newer than Cisco's list" name no listed release,
+    so a code that sits beside one in a hand-edited file is left out (#139).
+    """
+    if lifecycle is None or release in (NOT_AVAILABLE, NEWER_THAN_LIST):
+        return None
+    return lifecycle
 
 
 def _finding_rows(
