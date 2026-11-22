@@ -726,17 +726,20 @@ def control_plane(text: str) -> ControlPlanePolicy | None:
     """Read `show policy-map control-plane`: the policy attached to the control plane.
 
     An empty policy list means the command answered and no policy is attached, which is
-    what the CoPP Check reads. A blank or unrecognised reply is not understood, so the
-    Check can say "could not decide" rather than raise a false Finding.
+    what the CoPP Check reads. A device with no control-plane policy prints a blank reply,
+    so a blank reply (operator decision on #142, 2026-11-22) means no policy is applied. A
+    reply that carries a `%` line never reaches this reader: the collector classifies it as
+    an error, so that shape stays "could not decide". An unrecognised reply with data is
+    also not understood, never read as "no policy".
     """
-    if not _has_data(text):
-        return None
     names = tuple(
         dict.fromkeys(fields.label(match.group(1)) for match in _SERVICE_POLICY.finditer(text))
     )
     if names:
         return ControlPlanePolicy(names)
-    return ControlPlanePolicy(()) if _CONTROL_PLANE.search(text) else None
+    if not _has_data(text) or _CONTROL_PLANE.search(text):
+        return ControlPlanePolicy(())
+    return None
 
 
 _SSH_STATUS: Final = re.compile(
