@@ -10,6 +10,7 @@ A refusal here prints why and returns exit code 2 (#31: nothing was contacted).
 """
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from network_analyser import backup_store
@@ -40,19 +41,28 @@ _PLATFORM_CHOICES = {"1": Platform.IOS_XE, "2": Platform.NX_OS, "": None}
 
 
 def backup_passphrase(
-    check_file: Path, ask: Prompter, *, key_file: Path | None = None
+    check_file: Path,
+    ask: Prompter,
+    *,
+    key_file: Path | None = None,
+    on_start_over: Callable[[], None] | None = None,
 ) -> BackupPassphrase | ExitCode:
     """Set the Backup Passphrase on a first Run, or check it on a later one (stories 20-22)."""
     try:
         if check_file.exists():
             return _unlock(check_file, ask)
-        return _choose(check_file, ask, key_file)
+        return _choose(check_file, ask, key_file, on_start_over)
     except CheckFileError as error:
         _stop(f"Refused: {fixed_message(error)} ({console_text(str(check_file))}).")
         return ExitCode.REFUSED
 
 
-def _choose(check_file: Path, ask: Prompter, key_file: Path | None) -> BackupPassphrase | ExitCode:
+def _choose(
+    check_file: Path,
+    ask: Prompter,
+    key_file: Path | None,
+    on_start_over: Callable[[], None] | None,
+) -> BackupPassphrase | ExitCode:
     ask.say(
         "First Run: choose the Backup Passphrase. It locks every Backup this tool takes.\n"
         f"  It must be at least {backup_store.PASSPHRASE_MIN} characters. It cannot be "
@@ -72,15 +82,20 @@ def _choose(check_file: Path, ask: Prompter, key_file: Path | None) -> BackupPas
         passphrase = backup_store.create_check_file(check_file, first)
         ask.say(f"Backup Passphrase set. Check file created: {console_text(str(check_file))}")
         # Starting over (a check file deleted by hand) also deletes the key file: a key
-        # locked with the forgotten passphrase is an orphaned secret (story 39).
-        if key_file is not None:
+        # locked with the forgotten passphrase is an orphaned secret (story 39). This happens
+        # even with `--cisco-lookups off`: story 39 wins over story 9, recorded on #143.
+        if key_file is not None and key_file.is_file():
+            removed = True
             try:
                 backup_store.remove_key_file(key_file)
             except OSError:
+                removed = False
                 ask.say(
                     "  Warning: a leftover Cisco API key file could not be removed. Remove "
                     f"{console_text(str(key_file))} by hand."
                 )
+            if removed and on_start_over is not None:
+                on_start_over()  # the Run now has no key: say so before the first device prompt
         return passphrase
     _stop(f"Stopped: no Backup Passphrase was set after {TRIES} tries. {_NO_DEVICE_PASSWORD}")
     return ExitCode.REFUSED

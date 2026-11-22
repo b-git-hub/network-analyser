@@ -134,10 +134,43 @@ def _after_folder_checks(
     if isinstance(request, ExitCode):
         return request
     trust = load_trust_store(data, strict=bool(args.strict_host_keys), known_hosts=args.known_hosts)
-    secrets = _secrets(request, data, ask, scan)
+    secrets = _secrets(request, data, ask, scan, lookups=lookups)
     if isinstance(secrets, ExitCode):
         return secrets
     passphrase, sets = secrets
+    try:
+        return _confirmed(
+            args,
+            data,
+            check,
+            scan,
+            trust_warning,
+            ask,
+            request=request,
+            trust=trust,
+            passphrase=passphrase,
+            sets=sets,
+        )
+    finally:
+        # The Run end wipes before Cisco is asked; this covers every path that never got
+        # there (a refused audit log, Ctrl+C during the crawl, a crash) (#143).
+        run_end.wipe(sets, passphrase)
+
+
+def _confirmed(  # noqa: PLR0913, PLR0917 (everything the confirmed Run needs, each named)
+    args: argparse.Namespace,
+    data: run_output.DataFolder,
+    check: run_output.RunsParentCheck,
+    scan: SecretScan,
+    trust_warning: str | None,
+    ask: Prompter,
+    *,
+    request: RunRequest,
+    trust: TrustStore,
+    passphrase: backup_store.BackupPassphrase,
+    sets: CredentialSets,
+) -> ExitCode:
+    """Everything from the Run folder name to the summary, once the secrets are typed."""
     started = datetime.now(UTC)
     planned = check.parent / run_output.run_folder_name(started, request.label.value)
     if scan.holds_secret(str(planned)):
@@ -180,7 +213,7 @@ def _after_folder_checks(
         draft=draft,
     )
 
-    def end(audit: run_output.AuditLog, _result: CrawlResult) -> run_end.EndOutcome:
+    def end(audit: run_output.AuditLog, result: CrawlResult) -> run_end.EndOutcome:
         outcome = run_end.finish(
             audit=audit,
             folder=folder,
@@ -190,7 +223,7 @@ def _after_folder_checks(
             passphrase=passphrase,
             sets=sets,
             key_file=data.cisco_key_file,
-            lookups_enabled=request.cisco_lookups.value,
+            lookups_enabled=request.cisco_lookups.value and not result.stopped,
             proxy=ProxyConfig.explicit(args.proxy) if args.proxy else None,
         )
         draft.analysis_results = outcome.results
@@ -223,16 +256,28 @@ def _after_folder_checks(
 
 
 def _secrets(
-    request: RunRequest, data: run_output.DataFolder, ask: Prompter, scan: SecretScan
+    request: RunRequest,
+    data: run_output.DataFolder,
+    ask: Prompter,
+    scan: SecretScan,
+    *,
+    lookups: bool,
 ) -> tuple[backup_store.BackupPassphrase, CredentialSets] | ExitCode:
     """The crash-dump check, the Backup Passphrase, then the Credential Sets (ADR 0004).
 
     Each secret joins the scan as soon as it is accepted or typed. The passphrase stays in
-    its `BackupPassphrase` until it reaches the locking worker (#51).
+    its `BackupPassphrase` until it reaches the locking worker (#51). Starting over deletes a
+    leftover key file, so the missing-key notice is shown right then, before the Credential
+    Set prompts (#143, story 35).
     """
     if not guard_crash_dumps(ask):
         return ExitCode.REFUSED
-    passphrase = run_secrets.backup_passphrase(data.check_file, ask, key_file=data.cisco_key_file)
+    passphrase = run_secrets.backup_passphrase(
+        data.check_file,
+        ask,
+        key_file=data.cisco_key_file,
+        on_start_over=lambda: _print_missing_key_notice(data, lookups=lookups),
+    )
     if isinstance(passphrase, ExitCode):
         return passphrase
     passphrase.add_to_scan(scan)

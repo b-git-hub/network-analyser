@@ -50,3 +50,13 @@ new exit code (still 1). `topology.json` records `cisco_lookups = {ran, when}`.
 `findings_by_level` (four levels), `findings_by_check` (id, count), the token outcome/status/
 error code and one `(endpoint, calls, values, retries)` per Cisco endpoint. Counts only: no
 device name, no per-device Finding, no Cisco value, no client ID or token.
+
+## Amendments
+
+- 2026-11-22, [#143](https://github.com/b-git-hub/network-analyser/issues/143): a Run that the
+  crawl stopped skips step 1 and step 3 (the key is never unlocked, Cisco is never asked) and
+  still records its offline `analysis` event. A Ctrl+C during step 3 is treated as lookups that
+  did not finish: the outputs are written, the Run is reported stopped, and exits 3. The
+  `try`/`finally` now starts straight after the unlock, and a Check that raises on Cisco's
+  answers is retried offline. The key joins the scan at the unlock, and `cmd_run` wipes the
+  device secrets on every way out of the Run, not only through step 2.

@@ -111,6 +111,7 @@ def change_passphrase(args: argparse.Namespace) -> ExitCode:
             return ExitCode.REFUSED
         finally:
             _warn_of_scan_hits(scan)
+            scan.forget()  # no passphrase typed here outlives the command (#143)
 
 
 def _change(args: argparse.Namespace, data: run_output.DataFolder, scan: SecretScan) -> ExitCode:

@@ -77,3 +77,10 @@ last on the integration branch.
 
 - 2026-11-22: integration branch refreshed to `6ce2cf9`; coordination, implementer, merger
   and gate-baseline pages created. Wave A worktrees opened.
+- 2026-11-22, [#143](https://github.com/b-git-hub/network-analyser/issues/143): a Run stopped
+  by Ctrl+C takes the offline path even with `--cisco-lookups on`, a Ctrl+C during the online
+  step still writes every output and is reported stopped, and the key/passphrase wipes cover
+  every path out of the Run. **Decision recorded:** starting over (a hand-deleted check file)
+  still deletes `cisco-key.age` with `--cisco-lookups off`; story 39 (an orphaned key is a
+  secret) wins over story 9 (lookups off never touches the file). Code comment in
+  `cli/run_secrets.py`.
