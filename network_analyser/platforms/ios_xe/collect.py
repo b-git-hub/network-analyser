@@ -43,6 +43,7 @@ from network_analyser.records.collected import (
     Reading,
     RoutingNeighbour,
     RoutingProtocol,
+    SnmpUser,
     StackMember,
     StaticRoute,
     SwitchportMode,
@@ -59,8 +60,9 @@ event already says which."""
 
 _NO_PEERS: Final[tuple[Peer, ...]] = ()
 _NO_GROUPS: Final[tuple[FhrpGroup, ...]] = ()
-"""What a routing or FHRP feature that is not running means: none of its neighbours or
-groups."""
+_NO_SNMP_USERS: Final[tuple[SnmpUser, ...]] = ()
+"""What a routing, FHRP or SNMP feature that is not running means: none of its neighbours,
+groups or users (`% SNMP agent not enabled` has no SNMPv3 users to judge)."""
 
 type Ips = dict[str, InterfaceIp | None]
 
@@ -92,7 +94,7 @@ def collect(send: Send, version: VersionFacts) -> Collection:
         static_routes=_static_routes(asker, vrf_names),
         fhrp=_fhrp(asker),
         inventory=_single(asker, c.SHOW_INVENTORY, parsers.inventory),
-        snmp_users=_single(asker, c.SHOW_SNMP_USER, parsers.snmp_users),
+        snmp_users=_single(asker, c.SHOW_SNMP_USER, parsers.snmp_users, off=_NO_SNMP_USERS),
         ntp_associations=_single(asker, c.SHOW_NTP_ASSOCIATIONS, parsers.ntp_associations),
         control_plane=_single(asker, c.SHOW_POLICY_MAP_CONTROL_PLANE, parsers.control_plane),
         ssh=_single(asker, c.SHOW_IP_SSH, parsers.ssh_settings),
@@ -101,8 +103,10 @@ def collect(send: Send, version: VersionFacts) -> Collection:
     return Collection(collected, tuple(asker.problems), PARSER)
 
 
-def _single[T](asker: Asker, command: str, read: Callable[[str], T | None]) -> Reading[T] | Unknown:
-    value = asker.ask(command, read)
+def _single[T](
+    asker: Asker, command: str, read: Callable[[str], T | None], *, off: T | None = None
+) -> Reading[T] | Unknown:
+    value = asker.ask(command, read, off=off)
     return value if isinstance(value, Unknown) else Reading((command,), value)
 
 

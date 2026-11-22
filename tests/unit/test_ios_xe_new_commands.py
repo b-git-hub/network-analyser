@@ -393,6 +393,26 @@ def test_a_command_we_could_not_understand_is_not_an_out_of_date_role() -> None:
     assert outdated.role_out_of_date(collection.collected) is None
 
 
+def test_an_snmp_agent_that_is_not_enabled_means_no_snmpv3_users() -> None:
+    replies = dict(ios_xe_text.REPLIES)
+    replies[c.SHOW_SNMP_USER] = "% SNMP agent not enabled\n"
+
+    collection = collect(Device(replies))
+
+    assert value(collection.collected.snmp_users) == ()
+    assert collection.problems == ()
+    assert outdated.role_out_of_date(collection.collected) is None
+
+
+def test_an_snmp_user_reply_with_another_percent_error_is_still_not_understood() -> None:
+    replies = dict(ios_xe_text.REPLIES)
+    replies[c.SHOW_SNMP_USER] = "% Something else went wrong\n"
+
+    collection = collect(Device(replies))
+
+    assert collection.collected.snmp_users == Unknown(f"{c.SHOW_SNMP_USER}: not understood")
+
+
 def test_a_denied_command_with_no_dependent_check_is_not_an_out_of_date_role() -> None:
     replies = dict(ios_xe_text.REPLIES)
     del replies["show vlan brief"]

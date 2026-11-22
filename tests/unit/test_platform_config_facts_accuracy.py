@@ -13,6 +13,13 @@ from network_analyser.records.config_facts import (
     SECRET_TYPE_5,
     SECRET_TYPE_6,
     SECRET_TYPE_7,
+    SNMP_V1_V2C_COMMUNITIES,
+    SNMP_V1_V2C_READ_WRITE_COMMUNITIES,
+    SNMP_V1_V2C_READ_WRITE_DEFAULT_NAME,
+    SNMP_V1_V2C_READ_WRITE_NO_ACL,
+    SNMP_V3_CONFIGURED,
+    SNMP_V3_USERS,
+    SNMP_V3_USERS_WITHOUT_PRIV,
     FactValue,
 )
 
@@ -142,3 +149,79 @@ def test_nxos_type_7_keys_are_counted_too() -> None:
 def test_an_empty_config_reads_no_secret_fact_so_analysis_cannot_pass_it() -> None:
     assert platforms.read_config_facts(Platform.IOS_XE, "") == ()
     assert platforms.read_config_facts(Platform.NX_OS, "\n  \n") == ()
+
+
+# -- SNMP: NX-OS communities and SNMPv3 users --------------------------------------------------
+
+
+def test_an_nxos_network_admin_community_is_read_write_and_its_acl_line_is_attached() -> None:
+    config = (
+        f"snmp-server community {CANARY}-rw group network-admin\n"
+        f"snmp-server community {CANARY}-rw use-ipv4acl ACL-A\n"
+        f"snmp-server community {CANARY}-ro group network-operator\n"
+        f"snmp-server community {CANARY}-ro use-acl ACL-B\n"
+    )
+
+    facts = _nxos(config)
+
+    assert facts[SNMP_V1_V2C_COMMUNITIES] == 2
+    assert facts[SNMP_V1_V2C_READ_WRITE_COMMUNITIES] == 1
+    assert facts[SNMP_V1_V2C_READ_WRITE_NO_ACL] == 0
+    assert facts[SNMP_V1_V2C_READ_WRITE_DEFAULT_NAME] == 0
+    _assert_no_canary(Platform.NX_OS, config)
+
+
+def test_an_nxos_network_admin_community_with_no_acl_line_is_read_write_without_an_acl() -> None:
+    facts = _nxos(f"snmp-server community {CANARY}-rw group network-admin\n")
+
+    assert facts[SNMP_V1_V2C_COMMUNITIES] == 1
+    assert facts[SNMP_V1_V2C_READ_WRITE_COMMUNITIES] == 1
+    assert facts[SNMP_V1_V2C_READ_WRITE_NO_ACL] == 1
+
+
+def test_an_nxos_default_named_read_write_community_is_counted() -> None:
+    facts = _nxos("snmp-server community private group network-admin\n")
+
+    assert facts[SNMP_V1_V2C_READ_WRITE_DEFAULT_NAME] == 1
+
+
+def test_an_nxos_read_only_group_community_is_not_read_write() -> None:
+    facts = _nxos(f"snmp-server community {CANARY}-ro group network-operator\n")
+
+    assert facts[SNMP_V1_V2C_COMMUNITIES] == 1
+    assert facts[SNMP_V1_V2C_READ_WRITE_COMMUNITIES] == 0
+    assert facts[SNMP_V1_V2C_READ_WRITE_NO_ACL] == 0
+
+
+def test_ios_communities_are_still_counted_line_by_line() -> None:
+    config = f"snmp-server community {CANARY}-ro RO\nsnmp-server community {CANARY}-rw RW 10\n"
+
+    facts = _ios(config)
+
+    assert facts[SNMP_V1_V2C_COMMUNITIES] == 2
+    assert facts[SNMP_V1_V2C_READ_WRITE_COMMUNITIES] == 1
+    assert facts[SNMP_V1_V2C_READ_WRITE_NO_ACL] == 0
+
+
+def test_a_v2c_snmp_user_is_not_an_snmpv3_user() -> None:
+    config = "snmp-server user alice grp v2c\nsnmp-server user carol grp v1 10\n"
+
+    facts = _ios(config)
+
+    assert facts[SNMP_V3_USERS] == 0
+    assert facts[SNMP_V3_USERS_WITHOUT_PRIV] == 0
+    assert facts[SNMP_V3_CONFIGURED] is False
+
+
+def test_a_v3_snmp_user_is_counted_with_and_without_privacy() -> None:
+    config = (
+        f"snmp-server user alice grp v3 auth sha {CANARY}-a priv aes 128 {CANARY}-p\n"
+        f"snmp-server user bob grp v3 auth sha {CANARY}-b\n"
+    )
+
+    facts = _ios(config)
+
+    assert facts[SNMP_V3_USERS] == 2
+    assert facts[SNMP_V3_USERS_WITHOUT_PRIV] == 1
+    assert facts[SNMP_V3_CONFIGURED] is True
+    _assert_no_canary(Platform.IOS_XE, config)

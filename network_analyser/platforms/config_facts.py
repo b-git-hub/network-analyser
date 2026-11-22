@@ -10,6 +10,8 @@ read exactly these.
 """
 
 import re
+from dataclasses import dataclass
+from itertools import pairwise
 from typing import Final
 
 from network_analyser.records import Platform
@@ -85,6 +87,8 @@ _SNMP_COMMUNITY: Final = re.compile(r"^snmp-server\s+community\s+(\S+)(.*)$", re
 _SNMP_USER: Final = re.compile(r"^snmp-server\s+user\s+\S+\s+(.*)$", re.IGNORECASE)
 _SNMP_GROUP: Final = re.compile(r"^snmp-server\s+group\s+\S+\s+(.*)$", re.IGNORECASE)
 _DEFAULT_COMMUNITY_NAMES: Final = frozenset({"public", "private"})
+_SNMP_V1_V2C_KEYWORDS: Final = frozenset({"v1", "v2c"})
+_NXOS_ACL_KEYWORDS: Final = frozenset({"use-acl", "use-ipv4acl", "use-ipv6acl"})
 _SECRET_TYPES: Final = (
     (0, SECRET_TYPE_0),
     (4, SECRET_TYPE_4),
@@ -172,7 +176,7 @@ def read_config_facts(platform: Platform, text: str) -> tuple[ConfigFact, ...]:
         VTY_ACCESS_CLASS_MISSING_LINES: _vty_access_class_missing(lines),
         EXEC_TIMEOUT_DISABLED_LINES: _exec_timeout_disabled(lines),
         **_aaa_facts(lines),
-        **_snmp_facts(lines),
+        **_snmp_facts(platform, lines),
         **_service_facts(platform, lines),
     }
     if platform is Platform.IOS_XE:
@@ -604,28 +608,20 @@ def _interface_blocks(lines: list[str]) -> list[tuple[str, list[tuple[int, str]]
     return blocks
 
 
-def _snmp_facts(lines: list[str]) -> dict[str, FactValue]:
+def _snmp_facts(platform: Platform, lines: list[str]) -> dict[str, FactValue]:
     """Count SNMPv1/v2c communities and SNMPv3 users and groups, without any name."""
-    communities = read_write = default_name = no_acl = 0
+    communities = _snmp_communities(platform, lines)
+    read_write = [community for community in communities if community.writable]
     users = users_without_priv = groups = groups_without_priv = 0
     for line in lines:
         text = line.strip()
-        community = _SNMP_COMMUNITY.match(text)
-        if community is not None:
-            communities += 1
-            name, tail = community.group(1).strip('"'), community.group(2).split()
-            writable, acl = _community_access(tail)
-            if writable:
-                read_write += 1
-                default_name += int(name.lower() in _DEFAULT_COMMUNITY_NAMES)
-                no_acl += int(acl is None)
-            continue
         user = _SNMP_USER.match(text)
         if user is not None:
+            tokens = {token.lower() for token in user.group(1).split()}
+            if tokens & _SNMP_V1_V2C_KEYWORDS:
+                continue
             users += 1
-            users_without_priv += int(
-                "priv" not in {token.lower() for token in user.group(1).split()}
-            )
+            users_without_priv += int("priv" not in tokens)
             continue
         group = _SNMP_GROUP.match(text)
         if group is not None:
@@ -636,10 +632,10 @@ def _snmp_facts(lines: list[str]) -> dict[str, FactValue]:
                 level = tokens[after] if after < len(tokens) else ""
                 groups_without_priv += int(level != "priv")
     return {
-        SNMP_V1_V2C_COMMUNITIES: communities,
-        SNMP_V1_V2C_READ_WRITE_COMMUNITIES: read_write,
-        SNMP_V1_V2C_READ_WRITE_DEFAULT_NAME: default_name,
-        SNMP_V1_V2C_READ_WRITE_NO_ACL: no_acl,
+        SNMP_V1_V2C_COMMUNITIES: len(communities),
+        SNMP_V1_V2C_READ_WRITE_COMMUNITIES: len(read_write),
+        SNMP_V1_V2C_READ_WRITE_DEFAULT_NAME: sum(1 for item in read_write if item.default_name),
+        SNMP_V1_V2C_READ_WRITE_NO_ACL: sum(1 for item in read_write if not item.has_acl),
         SNMP_V3_CONFIGURED: users + groups > 0,
         SNMP_V3_USERS: users,
         SNMP_V3_USERS_WITHOUT_PRIV: users_without_priv,
@@ -681,10 +677,49 @@ def _nxos_user_pair(tokens: list[str]) -> str | None:
     return f"{auth}/{privacy}"
 
 
-def _community_access(tail: list[str]) -> tuple[bool, str | None]:
-    """Whether an `snmp-server community` tail is read-write, and its access list if any."""
+@dataclass(slots=True)
+class _Community:
+    """One SNMPv1/v2c community's access, with no name kept beyond whether it is a default."""
+
+    default_name: bool
+    writable: bool = False
+    has_acl: bool = False
+
+
+def _snmp_communities(platform: Platform, lines: list[str]) -> list[_Community]:
+    """Every community once, with its access merged from all the lines that name it.
+
+    NX-OS prints the access list as a second line (`snmp-server community X use-ipv4acl A`),
+    so its lines are joined by community name. IOS puts everything on one line, so each line
+    is its own community.
+    """
+    found: dict[str | tuple[str, int], _Community] = {}
+    for index, line in enumerate(lines):
+        match = _SNMP_COMMUNITY.match(line.strip())
+        if match is None:
+            continue
+        name = match.group(1).strip('"')
+        key = name if platform is Platform.NX_OS else (name, index)
+        community = found.setdefault(key, _Community(name.lower() in _DEFAULT_COMMUNITY_NAMES))
+        writable, has_acl = _community_access(match.group(2).lower().split())
+        community.writable = community.writable or writable
+        community.has_acl = community.has_acl or has_acl
+    return list(found.values())
+
+
+def _community_access(tail: list[str]) -> tuple[bool, bool]:
+    """Whether an `snmp-server community` tail is read-write, and whether it names an ACL.
+
+    IOS says `RO` or `RW` and then the access list. NX-OS says `group <role>`, where
+    `network-admin` is the read-write role, and names the access list after `use-acl`,
+    `use-ipv4acl` or `use-ipv6acl`. NX-OS never prints `RW`.
+    """
+    writable = "rw" in tail or any(
+        first == "group" and second == "network-admin" for first, second in pairwise(tail)
+    )
+    has_acl = any(token in _NXOS_ACL_KEYWORDS for token in tail[:-1])
     for index, token in enumerate(tail):
-        if token.upper() in {"RO", "RW"}:
-            acl = tail[index + 1] if index + 1 < len(tail) else None
-            return token.upper() == "RW", acl
-    return False, None
+        if token in {"ro", "rw"}:
+            has_acl = has_acl or index + 1 < len(tail)
+            break
+    return writable, has_acl
