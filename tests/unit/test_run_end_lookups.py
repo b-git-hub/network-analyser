@@ -2,7 +2,9 @@
 
 Driven through `main(argv)` with fake devices and the fake Cisco at the `advisories` transport
 seam. The fake asserts on the state it observes, so no test can pass while an outbound
-connection opened with a device session or a typed secret still held.
+connection opened with a device session or a typed secret still held. It also walks the Run's
+`SecretScan` at that moment, proving the scan holds no typed password and no passphrase, only
+fingerprints, yet still redacts them (#145).
 """
 
 import json
@@ -17,19 +19,21 @@ import pytest
 from network_analyser import backup_store, device_gateway
 from network_analyser.advisories import HttpResponse
 from network_analyser.cli import ExitCode, run_end
-from network_analyser.credentials import CredentialSets, Secret
+from network_analyser.credentials import CredentialSets, Secret, SecretScan
 from network_analyser.records.device import DeviceRecord
 from network_analyser.records.identity import Alias
 from tests.support import fake_age
 from tests.support.fake_cisco import CLIENT_ID, CLIENT_SECRET, TOKEN, FakeCisco
 from tests.support.run_driver import (
     BACKUP_CANARY,
+    DEVICE_CANARY,
     FLAGS,
     Runner,
     data_folder,
     first_run,
     later_run,
 )
+from tests.support.scan_state import reachable_text
 
 PASS = BACKUP_CANARY
 SET_AT = datetime(2026, 11, 21, 9, 0, 0, tzinfo=UTC)
@@ -142,11 +146,17 @@ class _Observed:
     visits: int = 0
     sets_wiped: bool | None = None
     passphrase_wiped: bool | None = None
+    scan: SecretScan | None = None
 
     def check(self, *_args: object) -> None:
         assert self.visits == 0, "Cisco was asked while a device session was open"
         assert self.sets_wiped, "Cisco was asked while a Credential Set password was held"
         assert self.passphrase_wiped, "Cisco was asked while the Backup Passphrase was held"
+        assert self.scan is not None
+        held = reachable_text(self.scan)
+        for canary in (DEVICE_CANARY, BACKUP_CANARY):
+            assert canary not in held, "the secret scan still held a typed secret while online"
+            assert self.scan.holds_secret(canary), "the secret scan stopped watching a secret"
 
 
 @pytest.fixture
@@ -181,6 +191,13 @@ def test_a_stored_key_asks_cisco_after_the_sessions_close_and_every_secret_is_wi
         observed.passphrase_wiped = passphrase.wiped
 
     monkeypatch.setattr(run_end, "wipe", observed_wipe)
+
+    def record_scan() -> SecretScan:
+        scan = SecretScan()
+        observed.scan = scan
+        return scan
+
+    monkeypatch.setattr("network_analyser.cli.cmd_run.SecretScan", record_scan)
 
     got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
 
