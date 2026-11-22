@@ -20,7 +20,6 @@ from network_analyser.advisories.patterns import (
     is_safe_pid,
     is_safe_platform_alias,
     is_safe_release,
-    wire_pid,
 )
 from network_analyser.advisories.proxy import ProxyConfig
 from network_analyser.advisories.replies import (
@@ -232,8 +231,7 @@ def _eox(session: Session, kind: str, values: Sequence[str]) -> EoxAnswer | Sour
     for batch in _batches(values, EOX_BATCH_SIZE):
         page = 1
         while True:
-            wire = ",".join(wire_pid(value) if kind == EOX_BY_PID else value for value in batch)
-            path = f"/supporttools/eox/rest/5/{kind}/{page}/{wire}"
+            path = f"/supporttools/eox/rest/5/{kind}/{page}/{','.join(batch)}"
             call = session.get(
                 CiscoEndpoint.EOX, path, values=len(batch) if page == 1 else 0, pages=1
             )
@@ -288,10 +286,7 @@ def _compatible_pid(session: Session, pid: str) -> CompatibleAnswer | Compatible
     """Ask for one chassis PID's pages; a `Call` comes back only when the whole source fails."""
     releases: list[CompatibleRelease] = []
     for page in range(1, COMPATIBLE_MAX_PAGES + 1):
-        path = (
-            "/software/suggestion/v2/suggestions/compatible/productId/"
-            f"{wire_pid(pid)}?pageIndex={page}"
-        )
+        path = f"/software/suggestion/v2/suggestions/compatible/productId/{pid}?pageIndex={page}"
         call = session.get(CiscoEndpoint.COMPATIBLE, path, values=1 if page == 1 else 0, pages=1)
         if call.outcome is not CallOutcome.OK or call.response is None:
             if _fails_this_pid_only(call):
@@ -333,8 +328,7 @@ def _suggestions(session: Session, values: Sequence[str]) -> SuggestionsAnswer |
     answers: list[SuggestionAnswer] = []
     unanswered: list[SuggestionUnanswered] = []
     for batch in _batches(values, SUGGESTION_BATCH_SIZE):
-        wire = ",".join(wire_pid(pid) for pid in batch)
-        path = f"/software/suggestion/v2/suggestions/releases/productIds/{wire}"
+        path = f"/software/suggestion/v2/suggestions/releases/productIds/{','.join(batch)}"
         call = session.get(CiscoEndpoint.SUGGESTION, path, values=len(batch))
         if call.outcome is not CallOutcome.OK or call.response is None:
             return SourceUnavailable(call.reason or UNAVAILABLE)

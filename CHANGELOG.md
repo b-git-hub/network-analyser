@@ -22,6 +22,7 @@ None.
 
 ### Changed
 
+- **Licence-suffixed PIDs now get Cisco answers** (#162): a PID such as `ISR4451-X/K9` was sent with its slash as `%2F`, which Cisco's gateway refuses, so the device read "could not check" for end-of-life, Suggested Release and Latest Release. The slash is now sent as it is, the only form Cisco answers. The PID pattern is unchanged, so nothing else can reach the path.
 - **Behaviour change: type 5 secrets are now flagged on IOS-XE too** (#142): the weak-secret-types Check raised type 5 (MD5-crypt) only on classic IOS. Research #76 says it is weak on IOS-XE as well, and the operator decided on #142 to flag it there, so an IOS-XE device with a type 5 secret now gets the High Finding it did not get before. NX-OS type 5 is SHA-256 and is still not flagged. A Platform that was not identified still reads "could not decide".
 
 ### Fixed
