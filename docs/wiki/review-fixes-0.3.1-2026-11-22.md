@@ -30,7 +30,8 @@ defaults; IOS-XE default vty transport) and two that need lab checks (CoPP on a 
 K5; `% Invalid input`, K7 and L1).
 
 Open children at `6ce2cf9`: #136, #139, #140, #142, #143, #144, #145, #146, #147, #149,
-#150, #151, #153, #154, #155, #156, #157, #158, #159, #160, #164, #165, #166.
+#150, #151, #153, #154, #155, #156, #157, #158, #159, #160, #164, #165, #166. #167 was
+opened on 2026-11-22 for a parallel-gate temp-dir race found during Wave A.
 
 Operator decisions already recorded: #142 type 5 on IOS-XE (2026-11-21, take the
 recommendation); #145 make behaviour match ADR 0007, choosing option 3 or option 1 after
@@ -42,7 +43,9 @@ This is a **collision plan**, not a claim that every later ticket is blocked. Ti
 share files are merged in the order shown. "Wave" means the work can start; merges stay
 serial.
 
-**Wave A (disjoint files, run in parallel):** #139, #140, #143, #144, #147, #158, #159, #166.
+**Wave A (disjoint files, run in parallel):** #139, #140, #143, #144, #147, #158, #159, #166,
+plus #167 (gate temp-dir race found during Wave A). Until #167 lands, every gate sets
+`PYTEST_DEBUG_TEMPROOT` to a worktree-local path; see the gate baseline page.
 
 **Wave B (start when the named file-owner has merged):**
 
@@ -77,3 +80,6 @@ last on the integration branch.
 
 - 2026-11-22: integration branch refreshed to `6ce2cf9`; coordination, implementer, merger
   and gate-baseline pages created. Wave A worktrees opened.
+- 2026-11-22: a baseline gate run crashed at pytest session finish on the shared
+  `pytest-current` link when several gates ran at once. #167 opened and Wave A agents told to
+  set `PYTEST_DEBUG_TEMPROOT` per worktree.

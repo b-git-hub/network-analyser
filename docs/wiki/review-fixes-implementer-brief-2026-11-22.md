@@ -37,6 +37,16 @@ Your prompt names the ticket and your worktree. Read, in this order, from your w
   ACL/`socketpair`/package-build baseline in
   [review-fixes-gate-baseline-2026-11-22](review-fixes-gate-baseline-2026-11-22.md). A new
   failure is yours to fix.
+- **Until [#167](https://github.com/b-git-hub/network-analyser/issues/167) lands**, several
+  gates run at once on this PC and race on pytest's shared temp link. In the same PowerShell
+  session, before the gate:
+
+  ```powershell
+  $env:PYTEST_DEBUG_TEMPROOT = Join-Path $PWD '.pytest-tmp'
+  ```
+
+  A `PermissionError ... pytest-current` at session finish is this race, not your ticket;
+  set the variable and rerun. Do not commit `.pytest-tmp`.
 - If you must work around tooling or a convention, say so in your report; the environment is
   fixed, not the agent.
 

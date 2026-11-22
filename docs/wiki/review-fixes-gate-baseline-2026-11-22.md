@@ -24,6 +24,16 @@ The exact failing node ids are appended below when the baseline run finishes.
 
 Pending the 2026-11-22 baseline run.
 
+## Parallel runs
+
+Until [#167](https://github.com/b-git-hub/network-analyser/issues/167) lands, two gates run
+at once race on pytest's shared `pytest-current` temp link and one crashes at session finish
+with `PermissionError [WinError 5]` and no summary. Set a worktree-local root before the gate:
+
+```powershell
+$env:PYTEST_DEBUG_TEMPROOT = Join-Path $PWD '.pytest-tmp'
+```
+
 ## How to read a gate result
 
 A gate passes when ruff, format and mypy pass and every pytest failure is on this page's
