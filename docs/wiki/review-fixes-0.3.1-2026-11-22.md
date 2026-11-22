@@ -98,3 +98,7 @@ last on the integration branch.
 - 2026-11-22: merged #140 at `4c691c4`; gate: ruff/format/mypy pass, pytest 2997 passed, 1
   skipped, 21 failed (baseline); every Cisco insecure-list entry now names a shipped Check id,
   enforced by a test that refuses stale ids.
+- 2026-11-22: merged #166 at `3449b7b`; gate: ruff/format/mypy pass, pytest 3005 passed, 1
+  skipped, 21 failed (baseline); per-PID EoX/Suggestion error shapes are read as Cisco sends
+  them, and `tests/support/fake_cisco.py` now carries those shapes, so #149 and #153 build on
+  them.
