@@ -8,15 +8,22 @@ Below 17.18.2, or on NX-OS, the command is absent and the Check is not run (stor
 
 import pytest
 
-from network_analyser.analysis.catalogue import PENDING_CHECK_NAMES
 from network_analyser.analysis.checks import CHECKS
 from network_analyser.analysis.cisco_list import RULES
 from network_analyser.records.collected import InsecureConfigurationItem, SnmpUser
+from network_analyser.records.config_facts import (
+    ENABLE_PASSWORD,
+    ENABLE_SECRET,
+    HTTP_SERVER,
+    SECRET_TYPE_7,
+    TELNET_LINES,
+    FactValue,
+)
 from network_analyser.records.device import DeviceRecord
 from network_analyser.records.platform import Platform
 from network_analyser.records.topology import FindingLevel
 from network_analyser.records.unknown import Unknown
-from tests.support.analysis_records import analysed, found, run_of
+from tests.support.analysis_records import analysed, facts, found, run_of
 from tests.support.topology_records import visited
 
 A = "192.0.2.1"
@@ -33,6 +40,18 @@ WEAK_SNMP = InsecureConfigurationItem(
     module="SNMP",
     command="snmp-server user <STRING> NA-RO auth md5 <STRING>",
     reason="Legacy protocol poses data confidentiality risks",
+    severity="HIGH",
+)
+TELNET = InsecureConfigurationItem(
+    module="Telnet",
+    command="line vty 0 4 transport input telnet",
+    reason="Cleartext protocol poses data confidentiality risks",
+    severity="HIGH",
+)
+HTTP = InsecureConfigurationItem(
+    module="HTTP",
+    command="ip http server",
+    reason="Cleartext protocol poses data confidentiality risks",
     severity="HIGH",
 )
 
@@ -68,7 +87,7 @@ def test_an_unmatched_item_is_reported_in_ciscos_own_words_at_its_level() -> Non
     assert finding.check.type.value == "Configuration"
     assert finding.source == "Cisco insecure configuration"
     assert finding.devices == ("dev-S1",)
-    assert "Cisco flags FTP: ip ftp source-interface GigabitEthernet0/0." in finding.what_was_found
+    assert "Cisco flags FTP: ip ftp source-interface <value>." in finding.what_was_found
     assert "Reason: No encryption is configured." in finding.what_was_found
     assert finding.what_was_found == finding.summary
 
@@ -179,20 +198,96 @@ def test_ciscos_command_keeps_its_placeholder_and_never_a_configured_value() -> 
 
     (finding,) = found(analysed(_device(community)), CISCO)
 
-    assert "snmp-server community <STRING> RO" in finding.what_was_found
+    assert "snmp-server community <STRING> <value>" in finding.what_was_found
 
 
-def test_every_mapped_check_id_is_a_shipped_or_pending_check() -> None:
-    known = {definition.check.id for definition in CHECKS} | set(PENDING_CHECK_NAMES)
+@pytest.mark.parametrize(
+    ("item", "check_id", "values"),
+    [
+        (TELNET, "hardening-telnet", {TELNET_LINES: ("line vty 0 4",)}),
+        (HTTP, "hardening-http-server", {HTTP_SERVER: True}),
+    ],
+    ids=["telnet", "http-server"],
+)
+def test_an_item_matching_a_shipped_check_marks_it_and_adds_no_second_row(
+    item: InsecureConfigurationItem, check_id: str, values: dict[str, FactValue]
+) -> None:
+    """The 0.2.0/0.3.0 bug: the mapping named ids no Check ships, so the item showed twice."""
+    results = analysed(_device(item), facts=facts("dev-S1", **values))
 
-    assert {rule.check_id for rule in RULES} <= known
+    (finding,) = found(results, check_id)
+    assert finding.also_flagged_by_cisco is True
+    assert found(results, CISCO) == []
 
 
-def test_the_snmp_community_entry_maps_to_the_snmp_communities_check() -> None:
+def test_an_item_whose_mapped_check_only_could_not_decide_is_still_reported() -> None:
+    """A "could not decide" Finding flags nothing, so Cisco's own words must still be shown."""
+    results = analysed(_device(TELNET))
+
+    (telnet,) = found(results, "hardening-telnet")
+    assert telnet.also_flagged_by_cisco is False
+    (finding,) = found(results, CISCO)
+    assert "Cisco flags Telnet" in finding.what_was_found
+
+
+def test_an_item_can_match_two_checks_at_once() -> None:
+    item = InsecureConfigurationItem(
+        module="Password",
+        command="enable password <STRING>",
+        reason="Reversible secret",
+        severity="HIGH",
+    )
+
+    results = analysed(
+        _device(item),
+        facts=facts(
+            "dev-S1",
+            **{ENABLE_PASSWORD: True, ENABLE_SECRET: True, SECRET_TYPE_7: 1},
+        ),
+    )
+
+    (enable,) = found(results, "hardening-enable-secret")
+    (weak,) = found(results, "hardening-weak-secret-types")
+    assert enable.also_flagged_by_cisco is True
+    assert weak.also_flagged_by_cisco is True
+    assert found(results, CISCO) == []
+
+
+def test_every_mapped_check_id_is_a_shipped_check() -> None:
+    """The mapping may only name Checks that exist: a stale id silently stops matching (#140)."""
+    shipped = {definition.check.id for definition in CHECKS}
+    mapped = {check_id for rule in RULES for check_id in rule.check_ids}
+
+    assert mapped <= shipped, f"mapped Check ids no Check ships: {sorted(mapped - shipped)}"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "snmp-server community CANARY-community RO",
+        "ip ftp password CANARY-ftp-password",
+        "username netops password 7 CANARY-type-7-hash",
+    ],
+)
+def test_a_value_in_ciscos_command_line_never_reaches_a_finding(command: str) -> None:
+    """Cisco may echo a configured value; only keywords survive (stories 66, 81, 116)."""
+    item = InsecureConfigurationItem("FTP", command, "Cisco says so", "HIGH")
+
+    (finding,) = found(analysed(_device(item)), CISCO)
+
+    shown = (
+        f"{finding.id} {finding.what_was_found} {finding.what_to_do} "
+        f"{finding.source} {finding.summary}"
+    )
+    assert "CANARY" not in shown
+    assert "<value>" in finding.what_was_found
+
+
+def test_the_snmp_community_entry_maps_to_the_snmp_v1_v2c_check() -> None:
     (rule,) = [
         rule
         for rule in RULES
-        if rule.check_id == "config-snmp-communities" and "community" in rule.words
+        if "hardening-snmp-v1-v2c" in rule.check_ids and "community" in rule.words
     ]
 
     assert "snmp" in rule.modules

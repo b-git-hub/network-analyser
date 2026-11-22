@@ -8,17 +8,19 @@ considers insecure. Each entry is matched against a built-in table:
 - no match raises a Finding in Cisco's own words, at Cisco's own level, under the dedicated
   `config-cisco-insecure-list` Check id.
 
-The table names Check ids, not device text. A mapped Check a later ticket ships (for example
-`config-telnet` from #96) starts matching as soon as it raises a Finding; until then Cisco's
-entry is reported in Cisco's words, which is never worse than dropping it.
+The table names Check ids, and every id is one a shipped Check owns: a test proves it, so a
+renamed or stale id fails loudly instead of silently reporting the same problem twice (#140).
 
 The command string is Cisco's own entry, with placeholders such as `<STRING>`: the parser
-never keeps the echoed configured value (#97), so no community string reaches a Finding. A
-reply that was refused is a Device Role skip; one that cannot be read is a Low "could not
-decide" Finding (story 6). Below 17.18.2, or on NX-OS, the Check is not run at all: the
-command is absent, not "Cisco found nothing" (story 68).
+never keeps the echoed configured value (#97), so no community string reaches a Finding. It
+is masked again here, keeping only command keywords and placeholders, so a value that a
+reply does echo becomes `<value>` (#140, stories 66, 81). A reply that was refused is a
+Device Role skip; one that cannot be read is a Low "could not decide" Finding (story 6).
+Below 17.18.2, or on NX-OS, the Check is not run at all: the command is absent, not "Cisco
+found nothing" (story 68).
 """
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
@@ -51,6 +53,7 @@ _NO_COMMAND: Final = "this Platform has no Cisco insecure-configuration list"
 _PLATFORM_UNKNOWN: Final = "the Platform was not identified"
 _NOT_UNDERSTOOD: Final = "Cisco's insecure-configuration list was not understood"
 _REMEDIATION: Final = "Remove the command Cisco names, or apply Cisco's remediation for it."
+_UNDECIDED_PREFIX: Final = "Could not decide:"
 
 _SEVERITY_LEVELS: Final[Mapping[str, FindingLevel]] = MappingProxyType(
     {
@@ -61,6 +64,12 @@ _SEVERITY_LEVELS: Final[Mapping[str, FindingLevel]] = MappingProxyType(
     }
 )
 
+_VALUE: Final = "<value>"
+"""What a Cisco command token becomes when it is a configured value, not a keyword."""
+
+_KEYWORD: Final = re.compile(r"[a-z][a-z0-9-]*")
+_PLACEHOLDER: Final = re.compile(r"<[^<>\s]+>")
+
 
 @dataclass(frozen=True, slots=True)
 class Rule:
@@ -69,36 +78,49 @@ class Rule:
     Attributes:
         modules: the Cisco module names this rule covers, lower-cased.
         words: any of these must appear in Cisco's CLI command; empty means any command.
-        check_id: the Check our own Finding carries.
+        check_ids: the Checks our own Findings carry; more than one when Cisco's entry is
+            the same problem either Check reports.
     """
 
     modules: frozenset[str]
     words: tuple[str, ...]
-    check_id: str
+    check_ids: tuple[str, ...]
 
 
 RULES: Final[tuple[Rule, ...]] = (
-    Rule(frozenset({"snmp"}), ("user",), "config-snmpv3-user-crypto"),
-    Rule(frozenset({"snmp"}), ("community", "host"), "config-snmp-communities"),
-    Rule(frozenset({"snmp"}), (), "config-snmp-communities"),
-    Rule(frozenset({"ntp"}), (), "config-ntp"),
-    Rule(frozenset({"copp", "control plane", "control-plane"}), (), "config-copp-applied"),
-    Rule(frozenset({"ssh"}), ("key", "modulus", "bits"), "config-ssh-key-size"),
-    Rule(frozenset({"ssh"}), (), "config-ssh-version"),
-    Rule(frozenset({"telnet"}), (), "config-telnet"),
-    Rule(frozenset({"line", "vty"}), ("telnet",), "config-telnet"),
-    Rule(frozenset({"line", "vty"}), ("access-class",), "config-vty-access-class"),
-    Rule(frozenset({"line", "vty"}), ("exec-timeout",), "config-exec-timeout"),
-    Rule(frozenset({"http", "https"}), (), "config-http-server"),
-    Rule(frozenset({"ftp", "tftp"}), (), "config-legacy-services"),
-    Rule(frozenset({"bootp", "finger", "cdp", "service", "ip"}), (), "config-legacy-services"),
-    Rule(frozenset({"aaa", "tacacs", "radius"}), (), "config-aaa"),
-    Rule(frozenset({"syslog", "logging"}), (), "config-syslog"),
-    Rule(frozenset({"icmp"}), (), "config-icmp"),
-    Rule(frozenset({"password", "secret", "enable"}), (), "config-secret-types"),
-    Rule(frozenset({"guestshell", "guest shell"}), (), "config-guest-shell"),
+    Rule(frozenset({"snmp"}), ("user",), ("config-snmpv3-user-crypto", "hardening-snmp-v3-priv")),
+    Rule(frozenset({"snmp"}), ("community", "host"), ("hardening-snmp-v1-v2c",)),
+    Rule(frozenset({"snmp"}), (), ("hardening-snmp-v1-v2c",)),
+    Rule(frozenset({"ntp"}), (), ("hardening-ntp",)),
+    Rule(frozenset({"copp", "control plane", "control-plane"}), (), ("config-copp-applied",)),
+    Rule(frozenset({"ssh"}), ("key", "modulus", "bits"), ("config-ssh-key-size",)),
+    Rule(frozenset({"ssh"}), (), ("hardening-ssh-v2",)),
+    Rule(frozenset({"telnet"}), (), ("hardening-telnet",)),
+    Rule(frozenset({"line", "vty"}), ("telnet",), ("hardening-telnet",)),
+    Rule(frozenset({"line", "vty"}), ("access-class",), ("hardening-vty-access-class",)),
+    Rule(frozenset({"line", "vty"}), ("exec-timeout",), ("hardening-exec-timeout",)),
+    Rule(frozenset({"http", "https"}), (), ("hardening-http-server",)),
+    Rule(frozenset({"ftp", "tftp"}), (), ("hardening-legacy-services",)),
+    Rule(
+        frozenset({"bootp", "finger", "cdp", "service", "ip"}),
+        (),
+        ("hardening-legacy-services",),
+    ),
+    Rule(
+        frozenset({"aaa", "tacacs", "radius"}),
+        (),
+        ("hardening-aaa-central", "hardening-aaa-fallback"),
+    ),
+    Rule(frozenset({"syslog", "logging"}), (), ("hardening-remote-syslog",)),
+    Rule(frozenset({"icmp"}), (), ("hardening-icmp",)),
+    Rule(
+        frozenset({"password", "secret", "enable"}),
+        (),
+        ("hardening-weak-secret-types", "hardening-enable-secret"),
+    ),
+    Rule(frozenset({"guestshell", "guest shell"}), (), ("config-guest-shell",)),
 )
-"""Cisco's module and command, mapped to the Check we ship. Specific rules come first."""
+"""Cisco's module and command, mapped to the Checks we ship. Specific rules come first."""
 
 CHECK_IDS_BY_DATA: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType(
     {"insecure_configuration": ("config-cisco-insecure-list",)}
@@ -179,22 +201,37 @@ def _severity_read(severity: object) -> bool:
 
 
 def _mark(findings: list[Finding], device: VisitedDevice, item: InsecureConfigurationItem) -> bool:
-    """Mark every Finding the item's mapped Check raised for `device`; True when it matched."""
-    check_id = _check_id(item)
-    if check_id is None:
+    """Mark every Finding the item's mapped Checks raised for `device`; True when it matched."""
+    check_ids = _check_ids(item)
+    if not check_ids:
         return False
     matched = False
     for index, finding in enumerate(findings):
-        if finding.check.id == check_id and device.id in finding.devices:
-            findings[index] = replace(finding, also_flagged_by_cisco=True)
-            matched = True
+        if finding.check.id not in check_ids or device.id not in finding.devices:
+            continue
+        if _could_not_decide(finding):
+            continue
+        findings[index] = replace(finding, also_flagged_by_cisco=True)
+        matched = True
     return matched
 
 
-def _check_id(item: InsecureConfigurationItem) -> str | None:
-    """The Check id our built-in table gives this entry, or None when nothing matches."""
+def _could_not_decide(finding: Finding) -> bool:
+    """Say whether a Finding only says the Check could not decide, so it flags nothing.
+
+    Such a Finding is never the problem Cisco's entry names: marking it would be false and
+    would hide Cisco's own words. The phrase is the one `outcome.could_not_decide` and
+    `hardening`'s undecided helpers always start their text with.
+    """
+    return finding.level is FindingLevel.LOW and finding.what_was_found.startswith(
+        _UNDECIDED_PREFIX
+    )
+
+
+def _check_ids(item: InsecureConfigurationItem) -> tuple[str, ...]:
+    """The Checks our built-in table gives this entry, empty when nothing matches."""
     if not isinstance(item.module, str):
-        return None
+        return ()
     module = " ".join(item.module.casefold().split())
     command = item.command.casefold() if isinstance(item.command, str) else ""
     for rule in RULES:
@@ -202,14 +239,27 @@ def _check_id(item: InsecureConfigurationItem) -> str | None:
             continue
         if rule.words and not any(word in command for word in rule.words):
             continue
-        return rule.check_id
-    return None
+        return rule.check_ids
+    return ()
+
+
+def _masked_command(command: str) -> str:
+    """Cisco's command line with every value replaced, so no configured value is repeated."""
+    shown = " ".join(
+        token if _KEYWORD.fullmatch(token) or _PLACEHOLDER.fullmatch(token) else _VALUE
+        for token in command.split()
+    )
+    return shown or "a command Cisco did not name"
 
 
 def _finding(device: VisitedDevice, item: InsecureConfigurationItem) -> Finding:
     """One Finding in Cisco's own words, at Cisco's own level (story 67)."""
     module = item.module if isinstance(item.module, str) else "an unnamed module"
-    command = item.command if isinstance(item.command, str) else "a command Cisco did not name"
+    command = (
+        _masked_command(item.command)
+        if isinstance(item.command, str)
+        else "a command Cisco did not name"
+    )
     reason = item.reason if isinstance(item.reason, str) else "Cisco gave no reason"
     what = f"Cisco flags {module}: {command}. Reason: {reason}."
     level = level_for(item.severity)
