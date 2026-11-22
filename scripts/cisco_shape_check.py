@@ -518,6 +518,18 @@ def _suggestion_probes(inputs: Inputs) -> list[Probe]:
                     Kind.SUGGESTIONS,
                 )
             )
+            # Cisco's documented form: the base PID as `productId`, and the licence-suffixed
+            # hardware as a raw slash in `supportedHardware`. Nothing is encoded.
+            probes.append(
+                Probe(
+                    "Software Suggestion compatible list, operator base PID with the licence-"
+                    "suffixed PID in supportedHardware, raw slash (Cisco's documented form)",
+                    CiscoEndpoint.COMPATIBLE,
+                    f"{compatible}{base}?supportedHardware={inputs.pid}",
+                    Kind.COMPATIBLE,
+                    (inputs.pid,),
+                )
+            )
         probes.extend(
             [
                 Probe(
