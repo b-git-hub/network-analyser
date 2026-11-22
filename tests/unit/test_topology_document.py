@@ -215,6 +215,7 @@ def test_an_advisory_detail_is_written_as_its_own_object() -> None:
         "status": ADVISORY_STATUS,
         "fixed_line": ADVISORY_FIXED_LINE,
         "hardware_family_not_confirmed": True,
+        "fix_unresolved": False,
     }
     assert written["also_flagged_by_cisco"] is True
     assert written["kind"] is None

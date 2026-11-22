@@ -7,9 +7,12 @@ hand-written synthetic data; no real Cisco reply, device output or advisory text
 from collections.abc import Iterable
 from dataclasses import replace
 
+import pytest
+
 from network_analyser import analysis, topology
 from network_analyser.records.analysis import (
     AdvisoryAnswer,
+    AdvisoryPlatform,
     AnalysisInput,
     CiscoAnswers,
     CompatibleRelease,
@@ -43,6 +46,8 @@ MODEL = "C9300-48P"
 NEXUS_MODEL = "C93180YC-FX"
 NEXUS_CHASSIS = "N9K-C93180YC-FX"
 ADVISORY = "cisco-sa-example-abc123"
+SERIES_3000 = "Cisco Nexus 3000 Series Switches"
+SERIES_9000 = "Cisco Nexus 9000 Series Switches"
 
 
 def _device(  # noqa: PLR0913 (every device field the Check reads, by name)
@@ -80,6 +85,7 @@ def _advisory(  # noqa: PLR0913 (every Cisco field the Check reads, by name)
     cvss: str = "8.1",
     cves: tuple[str, ...] = ("CVE-2026-0001",),
     first_fixed: tuple[FixedRelease, ...] = (FixedRelease("17.9", "17.9.5"),),
+    platforms: tuple[AdvisoryPlatform, ...] = (),
 ) -> AdvisoryAnswer:
     return AdvisoryAnswer(
         detail=AdvisoryDetail(
@@ -94,6 +100,7 @@ def _advisory(  # noqa: PLR0913 (every Cisco field the Check reads, by name)
             first_fixed=None,
         ),
         first_fixed=first_fixed,
+        platforms=platforms,
     )
 
 
@@ -125,6 +132,23 @@ def _results(
             answers=CiscoAnswers(advisories=tuple(answers), compatible=compatible),
         )
     )
+
+
+def _nexus_9000() -> DeviceRecord:
+    """A Nexus 9000 whose series is confirmed from `show inventory`."""
+    return _device(
+        A,
+        "S1",
+        "sw-a",
+        platform=Platform.NX_OS,
+        model=NEXUS_MODEL,
+        chassis=NEXUS_CHASSIS,
+        release="9.3(10)",
+    )
+
+
+def _nxos_answer(*advisories: AdvisoryAnswer) -> ReleaseAdvisories:
+    return _answer(OsType.NX_OS, "9.3(10)", *advisories, hardware_family="NEXUS9000")
 
 
 def _advisory_findings(results: AnalysisResults) -> list[Finding]:
@@ -463,6 +487,7 @@ def test_no_fix_in_the_devices_train_says_so_and_never_picks_another_train() -> 
     (finding,) = _advisory_findings(results)
     assert isinstance(finding.cisco_detail, AdvisoryDetail)
     assert finding.cisco_detail.first_fixed is None
+    assert finding.cisco_detail.fix_unresolved is False
     assert "17.12.4" not in advice.upgrade_target
 
 
@@ -477,6 +502,90 @@ def test_the_nxos_upgrade_target_is_not_available_rather_than_guessed() -> None:
     (finding,) = _advisory_findings(results)
     assert isinstance(finding.cisco_detail, AdvisoryDetail)
     assert finding.cisco_detail.first_fixed is None
+    assert finding.cisco_detail.fix_unresolved is True
+    assert "First fixed in Train 9.3: not available" in finding.what_was_found
+    assert "No fix in Train" not in finding.what_was_found
+    assert "move to a newer Train" not in finding.what_to_do
+
+
+def test_an_nxos_series_with_no_matching_platform_entry_reads_not_available() -> None:
+    """A series Cisco's `platforms[]` never names has an unknown fix, not no fix (#136)."""
+    results = _results(
+        _nexus_9000(),
+        answers=(
+            _nxos_answer(
+                _advisory(
+                    platforms=(AdvisoryPlatform(SERIES_3000, (FixedRelease("9.3", "9.3(11)"),)),)
+                )
+            ),
+        ),
+    )
+
+    (advice,) = results.advice
+    assert advice.upgrade_target == "not available"
+    (finding,) = _advisory_findings(results)
+    assert isinstance(finding.cisco_detail, AdvisoryDetail)
+    assert finding.cisco_detail.first_fixed is None
+    assert finding.cisco_detail.fix_unresolved is True
+    assert "First fixed in Train 9.3: not available" in finding.what_was_found
+    assert "no single Cisco platform entry for this Nexus series" in finding.what_was_found
+    assert "No fix in Train" not in finding.what_was_found
+    assert "move to a newer Train" not in finding.what_to_do
+    assert "Cisco's page" in finding.what_to_do
+
+
+@pytest.mark.parametrize(
+    "platforms",
+    [
+        (),
+        (
+            AdvisoryPlatform(SERIES_9000, (FixedRelease("9.3", "9.3(11)"),)),
+            AdvisoryPlatform(SERIES_9000, (FixedRelease("9.3", "9.3(12)"),)),
+        ),
+    ],
+    ids=["no-entry", "two-entries"],
+)
+def test_no_single_platform_entry_for_the_series_never_claims_no_fix(
+    platforms: tuple[AdvisoryPlatform, ...],
+) -> None:
+    results = _results(
+        _nexus_9000(),
+        answers=(_nxos_answer(_advisory(platforms=platforms)),),
+    )
+
+    (advice,) = results.advice
+    assert advice.upgrade_target == "not available"
+    (finding,) = _advisory_findings(results)
+    assert isinstance(finding.cisco_detail, AdvisoryDetail)
+    assert finding.cisco_detail.fix_unresolved is True
+    assert "no single Cisco platform entry for this Nexus series" in finding.what_was_found
+    assert "No fix in Train" not in finding.what_was_found
+    assert "move to a newer Train" not in finding.what_to_do
+
+
+def test_one_unresolved_advisory_never_makes_another_claim_no_fix() -> None:
+    resolved = _advisory(
+        "cisco-sa-resolved-0001",
+        platforms=(AdvisoryPlatform(SERIES_9000, (FixedRelease("9.3", "9.3(11)"),)),),
+    )
+    unresolved = _advisory(
+        "cisco-sa-unresolved-0002",
+        platforms=(AdvisoryPlatform(SERIES_3000, (FixedRelease("9.3", "9.3(12)"),)),),
+    )
+    results = _results(_nexus_9000(), answers=(_nxos_answer(resolved, unresolved),))
+
+    findings = {finding.cisco_detail.id: finding for finding in _advisory_findings(results)}  # type: ignore[union-attr]
+    known = findings["cisco-sa-resolved-0001"]
+    unknown = findings["cisco-sa-unresolved-0002"]
+    assert known.cisco_detail.first_fixed == "9.3(11)"  # type: ignore[union-attr]
+    assert known.cisco_detail.fix_unresolved is False  # type: ignore[union-attr]
+    assert "First fixed in Train 9.3: 9.3(11)." in known.what_was_found
+    assert "No fix in Train" not in known.what_was_found
+    assert unknown.cisco_detail.fix_unresolved is True  # type: ignore[union-attr]
+    assert "no single Cisco platform entry for this Nexus series" in unknown.what_was_found
+    assert "No fix in Train" not in unknown.what_was_found
+    (advice,) = results.advice
+    assert advice.upgrade_target == "not available"
 
 
 def test_the_latest_release_is_advice_beside_the_target_not_a_finding() -> None:

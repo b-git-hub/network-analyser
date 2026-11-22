@@ -405,6 +405,8 @@ class AdvisoryDetail:
         fixed_line: story 49's fixed line, `ADVISORY_FIXED_LINE`.
         hardware_family_not_confirmed: True when an NX-OS match rests on the release alone
             because the Nexus hardware family could not be worked out (story 46).
+        fix_unresolved: True when the Advisory's first fix is unknown rather than absent, so a
+            page never prints "no fix in Train" for it (#136).
     """
 
     kind: CiscoDetailKind
@@ -419,6 +421,7 @@ class AdvisoryDetail:
     status: str = ADVISORY_STATUS
     fixed_line: str = ADVISORY_FIXED_LINE
     hardware_family_not_confirmed: bool = False
+    fix_unresolved: bool = False
 
 
 @unique
