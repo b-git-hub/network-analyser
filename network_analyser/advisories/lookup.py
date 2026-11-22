@@ -237,7 +237,7 @@ def _eox(session: Session, kind: str, values: Sequence[str]) -> EoxAnswer | Sour
             )
             if call.outcome is not CallOutcome.OK or call.response is None:
                 return SourceUnavailable(call.reason or UNAVAILABLE)
-            answer = _understood(eox_answer, call.response.body)
+            answer = _understood(eox_answer, call.response.body, batch)
             if isinstance(answer, SourceUnavailable):
                 return answer
             records.extend(answer.records)
@@ -332,7 +332,7 @@ def _suggestions(session: Session, values: Sequence[str]) -> SuggestionsAnswer |
         call = session.get(CiscoEndpoint.SUGGESTION, path, values=len(batch))
         if call.outcome is not CallOutcome.OK or call.response is None:
             return SourceUnavailable(call.reason or UNAVAILABLE)
-        answer = _understood(suggestion_answer, call.response.body)
+        answer = _understood(suggestion_answer, call.response.body, batch)
         if isinstance(answer, SourceUnavailable):
             return answer
         answers.extend(answer.answers)
