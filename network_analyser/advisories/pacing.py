@@ -6,6 +6,8 @@ second, far under anything it has been seen to allow. The token is asked once.
 
 `Retry-After` decides the one retry's wait when Cisco sends it. A wait longer than two minutes
 is not taken: the source is marked unavailable instead, because a Run must not hang on Cisco.
+A source that refuses a few calls in a row is not asked again, so a persistent limit cannot
+walk the estate one value at a time (#154).
 """
 
 import time
@@ -34,6 +36,13 @@ DEFAULT_RETRY_WAIT_S: Final = 2.0
 
 MAX_RETRY_WAIT_S: Final = 120.0
 """The longest `Retry-After` the tool will honour; beyond it, the source is unavailable."""
+
+CONSECUTIVE_REFUSALS: Final = 3
+"""How many calls in a row one source may refuse, with a limit or a 5xx, before it is stopped.
+
+A shorter run than this can be one odd value; a persistent limit is not, and the values still
+to be asked are answered with fixed text instead of being sent one at a time (#154).
+"""
 
 
 class Pacer:

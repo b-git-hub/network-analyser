@@ -6,7 +6,8 @@ never hammered (story 36). A key problem is only a 401 or a 400 `invalid_client`
 token endpoint, or an auth-coded 403; any other 4xx from `apix.cisco.com` fails that one
 call and the Session carries on (#131). Only a rate limit, a 5xx or a connection failure that
 can pass is retried, and only once, after `Retry-After` when Cisco sends it and after the
-pacing wait (story 19).
+pacing wait (story 19). A source that keeps refusing — a rate limit that survived that retry,
+or three rate-limit or 5xx replies in a row — is not asked again (#154).
 
 A 401 from `apix.cisco.com` comes after a token was issued, so it means the token expired, not
 that the key is bad (#133). The spec allows one token a Run, so a second is never requested:
@@ -27,7 +28,7 @@ from typing import Final
 
 from network_analyser.advisories.fence import API_HOST, TOKEN_HOST, TOKEN_PATH
 from network_analyser.advisories.numbers import whole_number
-from network_analyser.advisories.pacing import Pacer, retry_delay
+from network_analyser.advisories.pacing import CONSECUTIVE_REFUSALS, Pacer, retry_delay
 from network_analyser.advisories.proxy import ProxyConfig
 from network_analyser.advisories.transport import (
     DEFAULT_MAX_REPLY_BYTES,
@@ -63,6 +64,13 @@ REJECTED: Final = "Cisco rejected the API key"
 TOKEN_EXPIRED: Final = "Cisco's token expired"  # noqa: S105 (fixed text, not a secret)
 """Fixed text for a token that ran out mid-Run. It never says the key was rejected, because it
 was not, and the Run never tells the operator to run `cisco-key set` for it (#133)."""
+
+KEPT_REFUSING: Final = "Cisco kept refusing the calls"
+"""Fixed text for a source the breaker stopped asking: a limit or 5xx it did not come back from.
+
+The values still to be asked are answered with this, rather than sent one at a time, so a
+persistent limit cannot walk the estate (#154).
+"""
 
 TOKEN_MARGIN_S: Final = 30.0
 """No call is sent in the last seconds of the token's life, so none is cut off by its expiry."""
@@ -145,6 +153,8 @@ class Session:
         self._auth_rejected = False
         self._token_expired = False
         self._expires_at: float | None = None
+        self._refusals: dict[CiscoEndpoint, int] = dict.fromkeys(CiscoEndpoint, 0)
+        self._stopped: set[CiscoEndpoint] = set()
         self._counts: dict[CiscoEndpoint, list[int]] = {
             endpoint: [0, 0, 0, 0] for endpoint in CiscoEndpoint
         }
@@ -173,6 +183,15 @@ class Session:
         if self._auth_rejected:
             return REJECTED
         return TOKEN_EXPIRED if self._token_expired else None
+
+    def source_stopped(self, endpoint: CiscoEndpoint) -> str | None:
+        """Why `endpoint` is not asked again this Run, in fixed text; None while it may be.
+
+        A source is stopped after a rate limit that survived its one retry, or after
+        `CONSECUTIVE_REFUSALS` rate-limit or 5xx replies in a row, so a persistent limit
+        cannot walk the estate (#154). It stays stopped: the breaker is never reset.
+        """
+        return KEPT_REFUSING if endpoint in self._stopped else None
 
     def token(self) -> TokenResult:
         """Return the token request's result, requesting the token at most once."""
@@ -270,6 +289,8 @@ class Session:
             return Call(CallOutcome.REJECTED, reason=REJECTED)
         if self._token_expired:
             return Call(CallOutcome.TOKEN_EXPIRED, reason=TOKEN_EXPIRED)
+        if (refusing := self.source_stopped(endpoint)) is not None:
+            return Call(CallOutcome.CALL_FAILED, reason=refusing)
         token = self.token()
         if self._token is None or token.outcome is not TokenOutcome.OK:
             return Call(CallOutcome.UNAVAILABLE, reason=self._token_reason)
@@ -298,13 +319,40 @@ class Session:
         self._pacer.ready(endpoint)
         reply = self._attempt(endpoint, request, retry=False, values=values)
         if not _may_retry(reply):
-            return reply
+            return self._noted(endpoint, reply, retried=False)
         delay = retry_delay(_retry_after(reply.response))
         if delay is None:
-            return Call(CallOutcome.UNAVAILABLE, reply.response, "Cisco asked for a long wait")
+            return self._noted(
+                endpoint,
+                Call(CallOutcome.UNAVAILABLE, reply.response, "Cisco asked for a long wait"),
+                retried=False,
+            )
         self._pacer.back_off(delay)
         self._pacer.ready(endpoint)
-        return self._attempt(endpoint, request, retry=True, values=values)
+        retry = self._attempt(endpoint, request, retry=True, values=values)
+        return self._noted(endpoint, retry, retried=True)
+
+    def _noted(self, endpoint: CiscoEndpoint, reply: Call, *, retried: bool) -> Call:
+        """Count one logical call's refusal, and stop `endpoint` when Cisco keeps refusing it.
+
+        A rate limit that held after its one retry stops the source at once: the limit is
+        Cisco's, not this value's, so the next value would only be refused too (#154). Any
+        other refusal counts towards `CONSECUTIVE_REFUSALS`, and an answer or a 4xx for one
+        value starts the count again.
+        """
+        if endpoint is CiscoEndpoint.TOKEN:
+            return reply
+        if _is_rate_limit(reply):
+            self._refusals[endpoint] += 1
+            if retried:
+                self._stopped.add(endpoint)
+        elif _is_server_error(reply):
+            self._refusals[endpoint] += 1
+        else:
+            self._refusals[endpoint] = 0
+        if self._refusals[endpoint] >= CONSECUTIVE_REFUSALS:
+            self._stopped.add(endpoint)
+        return reply
 
     def _attempt(
         self, endpoint: CiscoEndpoint, request: HttpRequest, *, retry: bool, values: int
@@ -379,6 +427,24 @@ def _is_invalid_client(endpoint: CiscoEndpoint, reply: HttpResponse) -> bool:
 def _may_retry(reply: Call) -> bool:
     """Say whether the call may be tried once more: a limit, a 5xx or no connection."""
     return reply.outcome is CallOutcome.UNAVAILABLE and reply.retryable
+
+
+def _is_rate_limit(reply: Call) -> bool:
+    """Whether Cisco refused this call because calls came too fast (#154)."""
+    response = reply.response
+    if response is None:
+        return False
+    if response.status == _HTTP_TOO_MANY_REQUESTS:
+        return True
+    return (
+        response.status == _HTTP_FORBIDDEN
+        and (header(response, "X-Mashery-Error-Code") or "") in RATE_LIMIT_CODES
+    )
+
+
+def _is_server_error(reply: Call) -> bool:
+    """Whether Cisco answered this call with a 5xx (#154)."""
+    return reply.response is not None and reply.response.status >= _HTTP_SERVER_ERROR
 
 
 def _retry_after(response: HttpResponse | None) -> str | None:

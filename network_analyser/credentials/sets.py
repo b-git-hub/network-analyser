@@ -314,8 +314,9 @@ class CredentialSets:
     def wipe(self) -> None:
         """Wipe every set's password at the Run's end, before Cisco is asked (ADR 0007).
 
-        A wiped password has no value left for `reveal()`; the secret scan keeps its own copy
-        until `forget()`, so the Run's outputs are still redacted.
+        A wiped password has no value left for `reveal()`; the secret scan keeps only a
+        fingerprint of it, so the Run's outputs are still redacted and nothing recoverable
+        is held while Cisco is asked (#145).
         """
         for credential_set in self.__sets:
             credential_set.wipe()
