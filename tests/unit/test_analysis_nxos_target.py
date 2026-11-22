@@ -42,6 +42,7 @@ TRAIN = "10.4"
 SERIES = "NEXUS9000"
 NEXUS3000 = "Cisco Nexus 3000 Series Switches"
 NEXUS5000 = "Cisco Nexus 5000 Series Switches"
+NEXUS6000 = "Cisco Nexus 6000 Series Switches"
 NEXUS7000 = "Cisco Nexus 7000 Series Switches"
 NEXUS9000 = "Cisco Nexus 9000 Series Switches"
 FIRST = "cisco-sa-nxos-0001"
@@ -159,6 +160,7 @@ def test_an_unnamed_platform_entry_is_ignored() -> None:
     [
         ("N3K-C3064PQ-10GE", "NEXUS3000", NEXUS3000),
         ("N5K-C5548UP", "NEXUS5000", NEXUS5000),
+        ("N6K-C6001-64P", "NEXUS6000", NEXUS6000),
         ("N7K-C7010", "NEXUS7000", NEXUS7000),
         ("N9K-C93180YC-FX", "NEXUS9000", NEXUS9000),
     ],

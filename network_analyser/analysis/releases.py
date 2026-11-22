@@ -102,6 +102,7 @@ _PLATFORM_NAMES: Final[Mapping[str, str]] = MappingProxyType(
     {
         "NEXUS3000": "Cisco Nexus 3000 Series Switches",
         "NEXUS5000": "Cisco Nexus 5000 Series Switches",
+        "NEXUS6000": "Cisco Nexus 6000 Series Switches",
         "NEXUS7000": "Cisco Nexus 7000 Series Switches",
         "NEXUS9000": "Cisco Nexus 9000 Series Switches",
     }
