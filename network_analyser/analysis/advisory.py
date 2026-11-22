@@ -90,6 +90,8 @@ _WHAT_TO_DO_FAMILY: Final = (
     "Make sure show inventory | json is readable (the Device Role must allow it) and names the "
     "chassis, so the Nexus series can be worked out."
 )
+_UNRESOLVED_REASON: Final = "no single Cisco platform entry for this Nexus series"
+"""Why an NX-OS Advisory's first fix is unknown rather than absent (#136)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,10 +102,13 @@ class Match:
         answer: Cisco's answer, with the Advisory's own detail.
         first_fixed: the Advisory's lowest first-fixed release in the device's Train that is
             above the running release; None when it has no fix there (#124).
+        unresolved: True when an NX-OS Advisory's `platforms[]` holds no single entry for the
+            device's series, so its first fix is unknown rather than absent (#136).
     """
 
     answer: AdvisoryAnswer
     first_fixed: str | None
+    unresolved: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,14 +301,16 @@ def _matches(
     unresolved = False
     for advisory in advisories:
         fixes = advisory.first_fixed
+        fixes_unresolved = False
         if os_type is OsType.NX_OS:
             selected = _platform_fixes(advisory.platforms, series)
             if selected is None:
                 unresolved = True
+                fixes_unresolved = True
                 fixes = ()
             else:
                 fixes = selected
-        matches.append(_match(advisory, fixes, train, running))
+        matches.append(_match(advisory, fixes, train, running, unresolved=fixes_unresolved))
     return tuple(matches), unresolved
 
 
@@ -328,11 +335,15 @@ def _match(
     fixes: tuple[FixedRelease, ...],
     train: str,
     running: str,
+    *,
+    unresolved: bool = False,
 ) -> Match:
     """Keep the Advisory and its lowest first fix in `train` above the running release.
 
     A fix at or below the running release does not clear the Advisory (story 22): it is
     ignored, so the Advisory reads as having no fix in the Train when none is left (#124).
+    `unresolved` marks the fix as unknown rather than absent, so no surface says "no fix
+    in Train" when Cisco's own entry was never found (#136).
     """
     above = [
         entry.release
@@ -342,13 +353,13 @@ def _match(
         and release_key(entry.release) > release_key(running)
     ]
     fixed = min(above, key=release_key) if above else None
-    return Match(answer=answer, first_fixed=fixed)
+    return Match(answer=answer, first_fixed=fixed, unresolved=unresolved)
 
 
 def _advisory_finding(resolved: DeviceAdvisory, match: Match) -> Finding:
     detail = match.answer.detail
     check = _advisory_check(detail)
-    what = _what_was_found(resolved, detail, match.first_fixed)
+    what = _what_was_found(resolved, detail, match)
     return Finding(
         id=finding_id(check.id, f"{resolved.device.id}:{detail.id}"),
         devices=(resolved.device.id,),
@@ -357,7 +368,7 @@ def _advisory_finding(resolved: DeviceAdvisory, match: Match) -> Finding:
         level=detail.sir,
         check=check,
         what_was_found=what,
-        what_to_do=_what_to_do(resolved, match.first_fixed),
+        what_to_do=_what_to_do(resolved, match),
         source=_SOURCE,
         summary=(
             f"{detail.id}: {detail.title} (SIR {detail.sir.value}) "
@@ -366,6 +377,7 @@ def _advisory_finding(resolved: DeviceAdvisory, match: Match) -> Finding:
         cisco_detail=replace(
             detail,
             first_fixed=match.first_fixed,
+            fix_unresolved=match.unresolved,
             status=ADVISORY_STATUS,
             fixed_line=ADVISORY_FIXED_LINE,
             hardware_family_not_confirmed=resolved.hardware_family_not_confirmed,
@@ -380,27 +392,32 @@ def _advisory_check(detail: AdvisoryDetail) -> Check:
     return Check("advisory-unnamed", detail.title or "Advisory", CheckType.ADVISORY)
 
 
-def _what_was_found(
-    resolved: DeviceAdvisory, detail: AdvisoryDetail, first_fixed: str | None
-) -> str:
+def _what_was_found(resolved: DeviceAdvisory, detail: AdvisoryDetail, match: Match) -> str:
     cves = ", ".join(detail.cves) if detail.cves else "no CVEs named"
-    fit = (
-        f"First fixed in Train {resolved.train}: {first_fixed}."
-        if first_fixed is not None
-        else f"No fix in Train {resolved.train}."
-    )
     what = (
         f"{detail.id} ({detail.title}) affects release {resolved.release}: "
-        f"SIR {detail.sir.value}, CVSS {detail.cvss or 'not given'}, {cves}. {fit}"
+        f"SIR {detail.sir.value}, CVSS {detail.cvss or 'not given'}, {cves}. "
+        f"{_fix_line(resolved, match)}"
     )
     if resolved.hardware_family_not_confirmed:
         what = f"{what} Software-release match only: hardware family not confirmed."
     return what
 
 
-def _what_to_do(resolved: DeviceAdvisory, first_fixed: str | None) -> str:
-    if first_fixed is not None:
-        return f"Upgrade to {first_fixed} or later."
+def _fix_line(resolved: DeviceAdvisory, match: Match) -> str:
+    """The Advisory's first fix, or that it is unknown, or that the Train holds none (#136)."""
+    if match.unresolved:
+        return f"First fixed in Train {resolved.train}: not available ({_UNRESOLVED_REASON})."
+    if match.first_fixed is not None:
+        return f"First fixed in Train {resolved.train}: {match.first_fixed}."
+    return f"No fix in Train {resolved.train}."
+
+
+def _what_to_do(resolved: DeviceAdvisory, match: Match) -> str:
+    if match.unresolved:
+        return f"Check Cisco's page for the first fixed release: {_UNRESOLVED_REASON}."
+    if match.first_fixed is not None:
+        return f"Upgrade to {match.first_fixed} or later."
     return (
         f"No fix in Train {resolved.train}: move to a newer Train after checking that your "
         "hardware supports it."
