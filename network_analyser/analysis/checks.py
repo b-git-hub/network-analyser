@@ -465,8 +465,18 @@ CHECKS: tuple[CheckDefinition, ...] = (
         skipped=lifecycle.hardware_eox_skipped,
     ),
     CheckDefinition(
+        lifecycle.HARDWARE_EOX_COULD_NOT_CHECK_CHECK,
+        lifecycle.hardware_eox_could_not_check,
+        skip_reason=lifecycle.eox_skip_reason,
+    ),
+    CheckDefinition(
         lifecycle.SOFTWARE_EOX_CHECK,
         lifecycle.software_eox,
+        skip_reason=lifecycle.eox_skip_reason,
+    ),
+    CheckDefinition(
+        lifecycle.SOFTWARE_EOX_COULD_NOT_CHECK_CHECK,
+        lifecycle.software_eox_could_not_check,
         skip_reason=lifecycle.eox_skip_reason,
     ),
     CheckDefinition(

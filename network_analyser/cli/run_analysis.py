@@ -75,6 +75,7 @@ from network_analyser.records.cisco import (
 )
 from network_analyser.records.collected import InventoryItem, InventoryKind, Reading
 from network_analyser.records.device import DeviceRecord
+from network_analyser.records.lookup_values import is_safe_pid, is_safe_release
 from network_analyser.records.topology import (
     ADVISORY_STATUS,
     AdvisoryDetail,
@@ -91,6 +92,9 @@ from network_analyser.topology.devices import known_devices
 
 LOOKUPS_DID_NOT_RUN: Final = "Cisco lookups did not run"
 """The reason every Cisco source gives when the online step was not asked (#104)."""
+
+_VALUE_REFUSED: Final = "Cisco was not asked: the value did not match the safe pattern"
+"""The per-value counterpart of `advisories.REFUSED`, for one value of a source (#153)."""
 
 _TRAIN: Final = re.compile(r"^\d{1,3}\.\d{1,3}(?:[.(]|$)")
 _CISCO_OS: Final = {
@@ -286,20 +290,49 @@ def _eox(
         return SourceUnavailable(software.reason)
     hardware_records = _eox_by_input(hardware)
     software_records = _eox_by_input(software)
+    hardware_unanswered = _eox_unanswered(hardware)
+    software_unanswered = _eox_unanswered(software)
     return (
         EoxAnswers(
             hardware=tuple(
-                HardwareEox(pid, items=_items(EoxKind.HARDWARE, hardware_records.get(pid, ())))
+                HardwareEox(
+                    pid,
+                    items=_items(EoxKind.HARDWARE, hardware_records.get(pid, ())),
+                    unanswered=_hardware_gap(pid, hardware_unanswered),
+                )
                 for pid in asked.hardware_pids
             ),
             software=tuple(
                 SoftwareEox(
-                    release, items=_items(EoxKind.SOFTWARE, software_records.get(release, ()))
+                    release,
+                    items=_items(EoxKind.SOFTWARE, software_records.get(release, ())),
+                    unanswered=_software_gap(release, software_unanswered),
                 )
                 for release in asked.software_releases
             ),
         ),
     )
+
+
+def _eox_unanswered(answer: EoxAnswer) -> dict[str, str]:
+    """Every value Cisco gave no answer for, by the value it named (#153)."""
+    return {
+        item.input_value: item.reason for item in answer.unanswered if item.input_value is not None
+    }
+
+
+def _hardware_gap(pid: str, unanswered: dict[str, str]) -> str | None:
+    """Why one PID has no EoX answer: Cisco's code, or that it never left the PC (#153)."""
+    if not is_safe_pid(pid):
+        return _VALUE_REFUSED
+    return unanswered.get(pid)
+
+
+def _software_gap(release: str, unanswered: dict[str, str]) -> str | None:
+    """Why one release has no EoX answer: Cisco's code, or that it never left the PC (#153)."""
+    if not is_safe_release(release):
+        return _VALUE_REFUSED
+    return unanswered.get(release)
 
 
 def _eox_by_input(answer: EoxAnswer) -> dict[str, tuple[EoxRecord, ...]]:

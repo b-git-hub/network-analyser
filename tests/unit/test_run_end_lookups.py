@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from network_analyser import backup_store, device_gateway
-from network_analyser.advisories import HttpResponse
+from network_analyser.advisories import HttpResponse, TransportFailed
 from network_analyser.cli import ExitCode, run_end
 from network_analyser.credentials import CredentialSets, Secret
 from network_analyser.records.device import DeviceRecord
@@ -244,21 +244,59 @@ def test_a_rejected_key_gives_exactly_one_attention_line_and_exit_1(
     assert (Path(_run_folder()) / "backups").is_dir()
 
 
-def test_two_software_suggestion_failures_give_one_attention_line(
+def test_a_5xx_on_both_software_suggestion_calls_gives_one_attention_line(
+    run: Runner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _store_key()
+    fake = _serve(monkeypatch, _fake())
+    # The releases call fails both attempts, and the compatible PID's call loses the
+    # connection: both carry the one "Cisco Software Suggestion" name (#131).
+    fake.scripted.extend(
+        [
+            ("/software/suggestion/v2/suggestions/releases", _status(500)),
+            ("/software/suggestion/v2/suggestions/releases", _status(500)),
+            (
+                "/software/suggestion/v2/suggestions/compatible",
+                TransportFailed("Cisco did not answer in time"),
+            ),
+            (
+                "/software/suggestion/v2/suggestions/compatible",
+                TransportFailed("Cisco did not answer in time"),
+            ),
+        ]
+    )
+
+    got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
+
+    assert got.code == ExitCode.NEEDS_ATTENTION
+    lines = [line for line in got.out.splitlines() if "Cisco Software Suggestion" in line]
+    assert lines == ["  Cisco Software Suggestion did not run: Cisco returned HTTP 500."]
+    assert "cisco-key set" not in got.out
+
+
+def test_a_4xx_on_one_suggestion_batch_is_retried_per_pid_not_reported_as_an_outage(
     run: Runner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _store_key()
     fake = _serve(monkeypatch, _fake())
     fake.scripted.append(("/software/suggestion/v2/suggestions/releases", _status(400)))
-    fake.scripted.append(("/software/suggestion/v2/suggestions/compatible", _status(404)))
 
     got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
 
-    assert got.code == ExitCode.NEEDS_ATTENTION
-    lines = [line for line in got.out.splitlines() if "Cisco Software Suggestion" in line]
-    assert lines == ["  Cisco Software Suggestion did not run: Cisco returned HTTP 400."]
+    assert "Cisco Software Suggestion did not run" not in got.out
     assert "cisco-key set" not in got.out
+    split = [path for path in fake.paths() if "/suggestions/releases/productIds/" in path]
+    assert len(split) == 1  # the one chassis PID's refused batch is that PID's answer
+    document = _topology(_run_folder())
+    findings = [
+        item
+        for item in document["findings"]
+        if item["check"]["id"] == "lifecycle-suggested-release"
+    ]
+    assert findings
+    assert all(item["level"] == "Low" for item in findings)
 
 
 def test_a_400_on_a_release_is_that_devices_could_not_check_and_no_key_advice(

@@ -222,6 +222,26 @@ def compatible_error_answer(product_id: str, status: int, body: bytes) -> Compat
     return CompatibleUnanswered(product_id=product_id, reason=code or f"HTTP {status}")
 
 
+def eox_error_answer(input_value: str, status: int, body: bytes) -> EoxUnanswered:
+    """Return the `unanswered` record for one value whose own call failed with HTTP `status` (#153).
+
+    Cisco's error code is kept when the reply has one; otherwise the reason is `HTTP <status>`.
+    """
+    document = _document(body)
+    code = None if document is None else _reply_error(document)
+    return EoxUnanswered(input_value=input_value, reason=code or f"HTTP {status}")
+
+
+def suggestion_error_answer(product_id: str, status: int, body: bytes) -> SuggestionUnanswered:
+    """Return the `unanswered` record for a PID whose own call failed with HTTP `status` (#153).
+
+    Cisco's error code is kept when the reply has one; otherwise the reason is `HTTP <status>`.
+    """
+    document = _document(body)
+    code = None if document is None else _reply_error(document)
+    return SuggestionUnanswered(product_id=product_id, reason=code or f"HTTP {status}")
+
+
 def compatible_last_page(body: bytes, *, ceiling: int) -> int:
     """Return the last `pageIndex` Cisco's compatible reply names, at most `ceiling`.
 

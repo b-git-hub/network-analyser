@@ -25,6 +25,7 @@ from network_analyser.records.cisco import (
     EndpointUse,
     EoxAnswer,
     EoxRecord,
+    EoxUnanswered,
     LookupQuestions,
     ReleaseQuestion,
     SuggestedRelease,
@@ -197,6 +198,60 @@ def test_eox_becomes_one_answer_per_pid_and_per_release_asked() -> None:
     assert hardware.items[0].last_date_of_support == "2027-01-01"
     assert software.release == "17.9.4"
     assert software.items[0].kind is EoxKind.SOFTWARE
+
+
+def test_an_eox_no_record_becomes_that_pids_unanswered_reason() -> None:
+    replies = replace(
+        _replies(),
+        hardware_eox=EoxAnswer(
+            records=(_eox(input_type="PID"),),
+            unanswered=(EoxUnanswered("C9300-24P", "SSA_ERR_026"),),
+        ),
+    )
+    asked = replace(_asked(), hardware_pids=("C9300-48P", "C9300-24P"))
+
+    answers = run_analysis.analysis_answers(replies, asked)
+
+    assert isinstance(answers.eox, tuple)
+    (eox,) = answers.eox
+    assert [(item.pid, item.unanswered) for item in eox.hardware] == [
+        ("C9300-48P", None),
+        ("C9300-24P", "SSA_ERR_026"),
+    ]
+
+
+def test_an_eox_value_outside_the_safe_pattern_is_marked_not_sent() -> None:
+    asked = replace(_asked(), hardware_pids=("C9300 48P",))
+
+    answers = run_analysis.analysis_answers(_replies(), asked)
+
+    assert isinstance(answers.eox, tuple)
+    (eox,) = answers.eox
+    (hardware,) = eox.hardware
+    assert hardware.pid == "C9300 48P"
+    assert hardware.items == ()
+    assert hardware.unanswered is not None
+    assert "safe pattern" in hardware.unanswered
+
+
+def test_a_software_release_no_record_becomes_that_release_s_unanswered_reason() -> None:
+    replies = replace(
+        _replies(),
+        software_eox=EoxAnswer(
+            records=(_eox(input_type="Software"),),
+            unanswered=(EoxUnanswered("17.12.1", "SSA_ERR_026"),),
+        ),
+    )
+    asked = replace(_asked(), software_releases=("17.9.4", "17.12.1"))
+
+    answers = run_analysis.analysis_answers(replies, asked)
+
+    assert isinstance(answers.eox, tuple)
+    (eox,) = answers.eox
+    assert [(item.release, item.unanswered) for item in eox.software] == [
+        ("17.9.4", None),
+        ("17.12.1", "SSA_ERR_026"),
+    ]
 
 
 def test_suggestions_keep_only_the_releases_cisco_suggests() -> None:
