@@ -102,3 +102,9 @@ last on the integration branch.
   skipped, 21 failed (baseline); per-PID EoX/Suggestion error shapes are read as Cisco sends
   them, and `tests/support/fake_cisco.py` now carries those shapes, so #149 and #153 build on
   them.
+- 2026-11-22: **#176 blocked, not merged.** PR #176 (`ticket-147-train-coverage`, ticket #147)
+  is `CONFLICTING` on `CHANGELOG.md` only: #147 adds one Changed and one Fixed bullet under
+  `[Unreleased]`, and #139 (merged at `a308ac2`) added a bullet at the same anchor at the top
+  of `### Fixed`. The ticket branch forks at `5a77989`, before #139. No merge was attempted,
+  nothing was forced or rewritten, and no gate was run. The coordinator decides whether the
+  #147 owner rebases forward onto the current integration tip and re-runs the gate.
