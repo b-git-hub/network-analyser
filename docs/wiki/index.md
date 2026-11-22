@@ -12,6 +12,7 @@ A dated, historical record kept by the coordinating (chief-of-staff) session and
 - [cloud-container-checks](cloud-container-checks.md): how to run the project's checks in a Linux cloud container (uv 0.13.9 shim).
 - [usage-limits](usage-limits.md): 2026-11-18 rate limit stopped four implementers; how they were resumed and what to change.
 - [agent-worktree-friction](agent-worktree-friction.md): known quirks of agent worktrees and how briefs work around them.
+- [issue-148-handoff-2026-11-22](issue-148-handoff-2026-11-22.md): why #148 (Cisco reply shapes) stopped unsolved on 2026-11-22, what to try first, and what not to repeat.
 
 ## Decisions
 - [spec-37-implementation-calls](spec-37-implementation-calls.md): 2026-11-18 calls on CI, uv packaging, secret holders and config sinks while building spec #37; 2026-11-19 calls on `diagram.drawio` (#65) and `run-report.html` (#66).
