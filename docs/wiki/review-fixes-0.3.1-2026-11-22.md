@@ -86,3 +86,6 @@ last on the integration branch.
 - 2026-11-22: merged #139 at `a308ac2`; gate: ruff/format/mypy pass, pytest 2978 passed, 1
   skipped, 21 failed (all Windows baseline; #158 and #160 passed); baseline page's
   `test_an_account_that_can_only_read_the_folder_refuses_too` corrected to `test_another_...`.
+- 2026-11-22: merged #167 at `bf22e2b`; gate: ruff/format/mypy pass, pytest 2980 passed, 1
+  skipped, 21 failed (baseline), run plain with no `PYTEST_DEBUG_TEMPROOT`; the
+  parallel-temp workaround is no longer needed from this merge commit.

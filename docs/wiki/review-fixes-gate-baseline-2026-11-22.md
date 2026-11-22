@@ -48,6 +48,12 @@ baseline.
 
 ## Parallel runs
 
+**No longer needed from merge commit `bf22e2b` (2026-11-22, [#167](https://github.com/b-git-hub/network-analyser/issues/167)):**
+`scripts/check.py` now gives every invocation its own `PYTEST_DEBUG_TEMPROOT` directory, so the
+workaround below is retired. A plain `uv run --locked python scripts/check.py` in several
+worktrees at once was observed to print full summaries with no `PermissionError`. The text
+below is kept as the dated record of the earlier race.
+
 Until [#167](https://github.com/b-git-hub/network-analyser/issues/167) lands, two gates run
 at once race on pytest's shared `pytest-current` temp link and one crashes at session finish
 with `PermissionError [WinError 5]` and no summary. Set a worktree-local root before the gate:
