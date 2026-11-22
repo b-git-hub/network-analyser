@@ -33,6 +33,7 @@ from tests.support.run_driver import data_folder, typed
 
 PASS = "CANARY-pp-148-c1sco"
 CANARY_PID = "CANARY-148-PID1"
+SLASHED_PID = "SYNTH-PID-3/K9"
 CANARY_TEXT = "CANARY-148-text"
 CANARY_KEY = "CANARY-148-field"
 CANARY_CODE = "CANARY-148-CODE"
@@ -109,6 +110,29 @@ def _canary_cisco() -> FakeCisco:
                 headers=(("X-Mashery-Error-Code", CANARY_CODE),),
             ),
         )
+    )
+    # The fake refuses a raw slash, `%252F` or `*` in a PID path segment, as the tool never sends
+    # them; the probe does, on purpose, so these replies are scripted.
+    eox = "/supporttools/eox/rest/5/EOXByProductID/1/"
+    releases = "/software/suggestion/v2/suggestions/releases/productIds/"
+    refused = _json(400, {"error": CANARY_TEXT})
+    wildcard = _json(
+        200,
+        {
+            "EOXRecord": [
+                {"EOLProductID": SLASHED_PID, CANARY_KEY: CANARY_TEXT},
+                {"EOLProductID": CANARY_TEXT},
+            ]
+        },
+    )
+    fake.scripted.extend(
+        [
+            (f"{eox}{SLASHED_PID}", refused),
+            (f"{eox}SYNTH-PID-3%252FK9", refused),
+            (f"{eox}SYNTH-PID-3*", wildcard),
+            (f"{releases}{SLASHED_PID}", refused),
+            (f"{releases}SYNTH-PID-3%252FK9", refused),
+        ]
     )
     return fake
 
@@ -224,6 +248,32 @@ def test_the_base_pid_without_the_licence_suffix_is_also_asked() -> None:
     paths = fake.paths()
     assert "/supporttools/eox/rest/5/EOXByProductID/1/SYNTH-PID-3" in paths
     assert "/software/suggestion/v2/suggestions/releases/productIds/SYNTH-PID-3" in paths
+
+
+def test_a_slashed_pid_is_also_asked_raw_double_encoded_and_as_a_base_wildcard() -> None:
+    fake = _canary_cisco()
+
+    collect_summary(_session(fake), Inputs(pid=SLASHED_PID))
+
+    paths = fake.paths()
+    eox = "/supporttools/eox/rest/5/EOXByProductID/1/"
+    releases = "/software/suggestion/v2/suggestions/releases/productIds/"
+    for path in (
+        f"{eox}SYNTH-PID-3/K9",
+        f"{eox}SYNTH-PID-3%252FK9",
+        f"{eox}SYNTH-PID-3*",
+        f"{releases}SYNTH-PID-3/K9",
+        f"{releases}SYNTH-PID-3%252FK9",
+    ):
+        assert path in paths
+
+
+def test_the_wildcard_probe_counts_records_naming_the_pid_and_never_prints_it() -> None:
+    summary = collect_summary(_session(_canary_cisco()), Inputs(pid=SLASHED_PID))
+
+    assert "EOLProductID: equals the operator PID in 1 of 2 records" in summary
+    assert SLASHED_PID not in summary
+    assert CANARY_TEXT not in summary
 
 
 def test_cisco_documented_sample_pair_is_asked_whatever_the_operator_gave() -> None:

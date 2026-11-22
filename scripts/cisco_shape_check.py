@@ -325,6 +325,7 @@ class Kind(Enum):
 
     ADVISORIES = "advisories"
     EOX = "eox"
+    EOX_WILDCARD = "eox wildcard"
     SUGGESTIONS = "suggestions"
     COMPATIBLE = "compatible"
     SLASH = "slash"
@@ -347,6 +348,10 @@ class Probe:
     path: str
     kind: Kind
     sent: tuple[str, ...] = ()
+
+
+def _double_encoded(pid: str) -> str:
+    return pid.replace("/", "%252F")
 
 
 def _advisory_probe(os_type: CiscoOsType, release: str, what: str) -> Probe:
@@ -453,6 +458,34 @@ def _eox_probes(inputs: Inputs) -> list[Probe]:
                     (base,),
                 )
             )
+            # Three more ways to carry the slash, after `%2F` in the path drew HTTP 400: raw, as
+            # Cisco's v4 reference lists slashed PIDs; double-encoded, for a gateway that decodes
+            # once; and the base with Cisco's documented trailing wildcard, matched afterwards.
+            probes.extend(
+                [
+                    Probe(
+                        "hardware EoX, operator PID with a raw slash in the path",
+                        CiscoEndpoint.EOX,
+                        f"/supporttools/eox/rest/5/EOXByProductID/1/{inputs.pid}",
+                        Kind.EOX,
+                        (inputs.pid,),
+                    ),
+                    Probe(
+                        "hardware EoX, operator PID with the slash double-encoded (%252F)",
+                        CiscoEndpoint.EOX,
+                        f"/supporttools/eox/rest/5/EOXByProductID/1/{_double_encoded(inputs.pid)}",
+                        Kind.EOX,
+                        (inputs.pid,),
+                    ),
+                    Probe(
+                        "hardware EoX, operator base PID with a trailing wildcard",
+                        CiscoEndpoint.EOX,
+                        f"/supporttools/eox/rest/5/EOXByProductID/1/{base}*",
+                        Kind.EOX_WILDCARD,
+                        (inputs.pid,),
+                    ),
+                ]
+            )
         # The production hardware path (`advisories/lookup.py`), with the operator's own PID,
         # then the same PID in the query form, raw and encoded.
         probes.extend(
@@ -545,6 +578,22 @@ def _suggestion_probes(inputs: Inputs) -> list[Probe]:
                     f"{releases}{base}",
                     Kind.SUGGESTIONS,
                 )
+            )
+            probes.extend(
+                [
+                    Probe(
+                        "Software Suggestion, operator PID with a raw slash in the path",
+                        CiscoEndpoint.SUGGESTION,
+                        f"{releases}{inputs.pid}",
+                        Kind.SUGGESTIONS,
+                    ),
+                    Probe(
+                        "Software Suggestion, operator PID with the slash double-encoded (%252F)",
+                        CiscoEndpoint.SUGGESTION,
+                        f"{releases}{_double_encoded(inputs.pid)}",
+                        Kind.SUGGESTIONS,
+                    ),
+                ]
             )
             # Cisco's documented form: the base PID as `productId`, and the licence-suffixed
             # hardware as a raw slash in `supportedHardware`. Nothing is encoded.
@@ -660,8 +709,10 @@ def _describe(number: int, probe: Probe, call: Call) -> list[str]:
         return lines
     lines.append(f"    reply is JSON: yes ({_json_type(document)})")
     lines.extend(_code_lines(document))
-    if probe.kind is Kind.EOX:
+    if probe.kind in {Kind.EOX, Kind.EOX_WILDCARD}:
         lines.extend(_eox_lines(document, probe.sent))
+    if probe.kind is Kind.EOX_WILDCARD:
+        lines.extend(_wildcard_lines(document, probe.sent))
     if probe.kind in {Kind.SUGGESTIONS, Kind.COMPATIBLE}:
         lines.extend(_release_lines(document))
     lines.extend(_shape_lines(document))
@@ -743,6 +794,16 @@ def _eox_lines(document: object, sent: tuple[str, ...]) -> list[str]:
         f"unrelated {unrelated}, absent or not text {absent}"
     )
     return [f"    EOXRecord: {len(records)} records for {len(sent)} values sent", echo]
+
+
+def _wildcard_lines(document: object, sent: tuple[str, ...]) -> list[str]:
+    records = document.get("EOXRecord") if isinstance(document, dict) else None
+    if not isinstance(records, list):
+        return []
+    named = sum(
+        1 for record in records if isinstance(record, dict) and record.get("EOLProductID") in sent
+    )
+    return [f"    EOLProductID: equals the operator PID in {named} of {len(records)} records"]
 
 
 # -- release, date and platform fields --------------------------------------------------------
