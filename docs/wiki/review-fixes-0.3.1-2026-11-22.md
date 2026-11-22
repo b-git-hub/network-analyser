@@ -30,7 +30,8 @@ defaults; IOS-XE default vty transport) and two that need lab checks (CoPP on a 
 K5; `% Invalid input`, K7 and L1).
 
 Open children at `6ce2cf9`: #136, #139, #140, #142, #143, #144, #145, #146, #147, #149,
-#150, #151, #153, #154, #155, #156, #157, #158, #159, #160, #164, #165, #166.
+#150, #151, #153, #154, #155, #156, #157, #158, #159, #160, #164, #165, #166. #167 was
+opened on 2026-11-22 for a parallel-gate temp-dir race found during Wave A.
 
 Operator decisions already recorded: #142 type 5 on IOS-XE (2026-11-21, take the
 recommendation); #145 make behaviour match ADR 0007, choosing option 3 or option 1 after
@@ -42,7 +43,9 @@ This is a **collision plan**, not a claim that every later ticket is blocked. Ti
 share files are merged in the order shown. "Wave" means the work can start; merges stay
 serial.
 
-**Wave A (disjoint files, run in parallel):** #139, #140, #143, #144, #147, #158, #159, #166.
+**Wave A (disjoint files, run in parallel):** #139, #140, #143, #144, #147, #158, #159, #166,
+plus #167 (gate temp-dir race found during Wave A). Until #167 lands, every gate sets
+`PYTEST_DEBUG_TEMPROOT` to a worktree-local path; see the gate baseline page.
 
 **Wave B (start when the named file-owner has merged):**
 
@@ -77,3 +80,31 @@ last on the integration branch.
 
 - 2026-11-22: integration branch refreshed to `6ce2cf9`; coordination, implementer, merger
   and gate-baseline pages created. Wave A worktrees opened.
+- 2026-11-22: a baseline gate run crashed at pytest session finish on the shared
+  `pytest-current` link when several gates ran at once. #167 opened and Wave A agents told to
+  set `PYTEST_DEBUG_TEMPROOT` per worktree.
+- 2026-11-22: merged #139 at `a308ac2`; gate: ruff/format/mypy pass, pytest 2978 passed, 1
+  skipped, 21 failed (all Windows baseline; #158 and #160 passed); baseline page's
+  `test_an_account_that_can_only_read_the_folder_refuses_too` corrected to `test_another_...`.
+- 2026-11-22: merged #167 at `bf22e2b`; gate: ruff/format/mypy pass, pytest 2980 passed, 1
+  skipped, 21 failed (baseline), run plain with no `PYTEST_DEBUG_TEMPROOT`; the
+  parallel-temp workaround is no longer needed from this merge commit.
+- 2026-11-22: merged #144 at `51479c7`; gate: ruff/format/mypy pass, pytest 2983 passed, 1
+  skipped, 21 failed (baseline); `change-passphrase` now leaves the change pending when
+  `cisco-key.age` was not re-locked.
+- 2026-11-22: merged #158 at `ab31b6b`; gate: ruff/format/mypy pass, pytest 2990 passed, 1
+  skipped, 21 failed (baseline); all temp-then-rename writers now share
+  `_winsys/rename.retry_rename`, so the intermittent is covered (ticket closed).
+- 2026-11-22: merged #140 at `4c691c4`; gate: ruff/format/mypy pass, pytest 2997 passed, 1
+  skipped, 21 failed (baseline); every Cisco insecure-list entry now names a shipped Check id,
+  enforced by a test that refuses stale ids.
+- 2026-11-22: merged #166 at `3449b7b`; gate: ruff/format/mypy pass, pytest 3005 passed, 1
+  skipped, 21 failed (baseline); per-PID EoX/Suggestion error shapes are read as Cisco sends
+  them, and `tests/support/fake_cisco.py` now carries those shapes, so #149 and #153 build on
+  them.
+- 2026-11-22: **#176 blocked, not merged.** PR #176 (`ticket-147-train-coverage`, ticket #147)
+  is `CONFLICTING` on `CHANGELOG.md` only: #147 adds one Changed and one Fixed bullet under
+  `[Unreleased]`, and #139 (merged at `a308ac2`) added a bullet at the same anchor at the top
+  of `### Fixed`. The ticket branch forks at `5a77989`, before #139. No merge was attempted,
+  nothing was forced or rewritten, and no gate was run. The coordinator decides whether the
+  #147 owner rebases forward onto the current integration tip and re-runs the gate.

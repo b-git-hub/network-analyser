@@ -652,6 +652,15 @@
       row('Id', '<span class="mono">' + esc(a.id) + '</span>') + '</dl></div>' +
       '<div><h4>Learned on</h4>' + table(['Device', 'Interfaces'], rows) + '</div><div><h4>Evidence</h4>' + evidenceList(a.evidence) + '</div></div>';
   }
+  /* Both Latest Release values with Cisco's lifecycle code beside each (#127, #139). The
+     model leaves a code out when the file records none, or beside "not available" and the
+     running-release text, so this only joins what it was given. */
+  function latestWording(d) {
+    const value = (release, lifecycle) => (typeof lifecycle === 'string' && lifecycle
+      ? release + ' (' + lifecycle + ')' : release);
+    return 'In Train: ' + value(d.latest_in_train, d.latest_in_train_lifecycle) +
+      '; overall: ' + value(d.latest_release, d.latest_release_lifecycle);
+  }
   /* The picked Check's pane: Cisco's detail for an Advisory, advice and where for any other
      Check (stories 93-94). Every value is escaped; the Cisco link is set after the markup is
      built, from a URL the tool built only after checking the Advisory id (story 51). */
@@ -664,7 +673,7 @@
         : '<span class="mono">' + esc(a.id) + '</span>';
       const rows = arr(a.devices).map(d => '<tr>' + td(esc(d.hostname)) + td('<span class="mono">' + esc(d.management_ip) + '</span>') +
         td('<span class="mono">' + esc(d.model) + '</span>') + td('<span class="mono">' + esc(d.release) + '</span>') +
-        td(esc(d.upgrade_target)) + td(esc(String(d.not_cleared))) + td(esc(d.latest_release)) + '</tr>');
+        td(esc(d.upgrade_target)) + td(esc(String(d.not_cleared))) + td(esc(latestWording(d))) + '</tr>');
       return '<div class="det"><div><h3>' + esc(a.title) + '</h3>' + level + '<span class="pill acc">Advisory</span><dl>' +
         row('Advisory', id) + row('SIR', esc(a.sir)) + row('CVEs', '<span class="mono">' + esc(arr(a.cves).join(', ') || 'none') + '</span>') +
         row('Published', esc(a.published)) + row('Updated', esc(a.updated)) + row('Status', esc(a.status)) + '</dl>' +

@@ -6,6 +6,9 @@ redirect, a rate limit, a 5xx or an outage. It refuses a request that leaves the
 an undesired value, or lacks the token, so every test also proves the envelope held.
 
 All data here is synthetic: made-up releases, PIDs, ids and text. No Cisco reply is committed.
+A value Cisco has no data for answers in the shape #148 observed live: an EoX `EOXRecord` entry
+with empty ids and a nested `EOXError`, and a Software Suggestion `productList` entry with no
+`basePID` and the code in `suggestions[].errorDetailsResponse` (#166).
 
 `FakeOpener` stands in for `transport.open_https`, so the real transport's own checks (TLS
 context, timeouts, tunnel, redirect refusal, size cap) are tested without a socket.
@@ -216,9 +219,13 @@ class FakeCisco:
             records = [
                 known.get(value)
                 or {
-                    "EOXInputValue": value,
+                    "EOLProductID": "",
+                    "EOXInputValue": "",
                     "EOXInputType": input_type,
-                    "ErrorCode": "SSA_ERR_026",
+                    "EOXError": {
+                        "ErrorID": "SSA_ERR_026",
+                        "ErrorDescription": "synthetic",
+                    },
                 }
                 for value in values
             ]
@@ -246,11 +253,11 @@ class FakeCisco:
             else:
                 entries.append(
                     {
-                        "product": {"basePID": value},
-                        "errorDetailsResponse": {"errorCode": "S3_INV_BASEPID"},
+                        "product": {},
+                        "suggestions": [{"errorDetailsResponse": {"errorCode": "S3_INV_BASEPID"}}],
                     }
                 )
-        return _json(200, {"suggestions": entries})
+        return _json(200, {"productList": entries})
 
     def _compatible(self, path: str) -> HttpResponse:
         rest = path.removeprefix(COMPATIBLE_PREFIX)

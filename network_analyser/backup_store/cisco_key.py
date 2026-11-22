@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, NoReturn, final, override
 
+from network_analyser._winsys import retry_rename
 from network_analyser.backup_store.check_file import BackupPassphrase
 from network_analyser.credentials import Secret, SecretScan
 from network_analyser.credentials.secret import HELD_IN_MEMORY
@@ -290,4 +291,4 @@ def _write_new(path: Path, locked: bytes) -> None:
         os.fsync(handle)
     finally:
         os.close(handle)
-    temporary.replace(path)
+    retry_rename(lambda: temporary.replace(path))
