@@ -8,9 +8,9 @@ needs was refused (a Device Role out of date, story 80) or was never collected, 
 reason is recorded (`CheckRun.skipped`), never passed (story 6).
 
 A Check is skipped for the whole Run only when it cannot decide anything at all: a source it
-needs was unavailable (story 10), or a built-in classification, such as the Train support
-table, does not cover what it found. The reason is then recorded and shown, so a skip never
-passes for a clean result.
+needs was unavailable (story 10). A built-in classification that does not cover one device,
+such as the Train support model, raises that device's own "could not decide" Finding instead
+(#147), so it never hides another device's result.
 
 New Checks are added to `CHECKS`; nothing else in `analysis` needs to change. The one
 exception is Cisco's insecure-configuration list: its Check needs every other Check's Findings
@@ -18,8 +18,9 @@ to mark a match, so `analysis.cisco_list.apply` runs after the loop in `core.ana
 """
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from ipaddress import IPv4Address
+from types import MappingProxyType
 from typing import Final
 
 from network_analyser.analysis import advisory, lifecycle
@@ -74,21 +75,26 @@ TRAIN_SUPPORT_CHECK: Check = Check(
 )
 """Story 72: one Low Finding per IOS-XE device on a Standard-Support Train."""
 
-STANDARD_SUPPORT_TRAINS: Final = frozenset({"17.13", "17.14", "17.16", "17.17"})
-"""The IOS-XE Trains Cisco gives 12 months of support, from the #76 research.
+_CLASSIFIED_TRAINS: Final[Mapping[str, tuple[int, int]]] = MappingProxyType(
+    {"16": (6, 12), "17": (1, 18)}
+)
+"""The first and last published Train of each IOS-XE major Cisco gives a support class (#147).
 
-Cisco's "Recommended Releases for Catalyst 9200/9300/9400/9500/9600" (as of September 2026)
-makes 17.12, 17.15 and 17.18 Extended-Support Trains (48 months) and 17.13, 17.14, 17.16 and
-17.17 Standard-Support Trains (12 months). Every other Train is left unclassified rather than
-guessed at: older Trains are already past either support window, and the Lifecycle Checks
-judge them.
+Cisco's Standard/Extended model starts at 16.6: Trains before it are past both support
+windows, so the Lifecycle Checks judge those devices instead of this Check guessing. 16.x
+ends at 16.12 and 17.x at 17.18, the last Trains Cisco had published when this was written
+(Cisco's IOS XE 17 support pages and per-Train end-of-life bulletins, checked on #147).
+Within a major, every third minor from the first is an Extended-Support Train with 48 months
+of support (17.3, 17.6, 17.9, 17.12, 17.15, 17.18) and the ones between are Standard-Support
+Trains with 12 months. A Train outside these bounds, and the whole 26.x scheme, is left
+unclassified: it gets the per-device "could not decide" Finding rather than a guess.
 """
 
-EXTENDED_SUPPORT_TRAINS: Final = frozenset({"17.12", "17.15", "17.18"})
-"""The IOS-XE Extended-Support Trains, from the same table."""
+_EXTENDED_EVERY: Final = 3
+"""Every third minor from 16.6 is an Extended-Support Train."""
 
-_SUPPORT_TRAINS: Final = STANDARD_SUPPORT_TRAINS | EXTENDED_SUPPORT_TRAINS
-"""Every IOS-XE Train the table classifies, either way."""
+_STANDARD: Final = "standard"
+_EXTENDED: Final = "extended"
 
 _IOS_XE_TRAINS: Final = frozenset({"16", "17", "26"})
 """The major release numbers of IOS-XE's 16.x, 17.x and 26.x Trains.
@@ -278,11 +284,12 @@ def bundle_mode(data: AnalysisInput) -> tuple[Finding, ...]:
 
 
 def train_support(data: AnalysisInput) -> tuple[Finding, ...]:
-    """Return one Low Finding per IOS-XE device on a Standard-Support Train (story 72).
+    """Return one Low Finding per IOS-XE device whose Train the model can judge (story 72).
 
-    Only a Train the #76 research classifies as Standard-Support raises a Finding. A Train it
-    does not classify is never guessed at; when no applicable device's Train is classified,
-    `train_support_skip_reason` skips the Check instead.
+    A Standard-Support Train raises the Finding story 72 asks for. An Extended-Support Train
+    raises nothing. A Train the model does not classify raises a Low Finding saying the tool
+    could not decide, so an unclassified Train is never mistaken for either class, and one
+    device's unclassified Train never hides another device's Finding (#147).
     """
     findings: list[Finding] = []
     for device in data.topology.devices:
@@ -292,50 +299,74 @@ def train_support(data: AnalysisInput) -> tuple[Finding, ...]:
         if not isinstance(release, str):
             continue
         train = _train(release)
-        if train not in STANDARD_SUPPORT_TRAINS:
+        if train is None:
             continue
-        what = (
-            f"{_name(device)} runs IOS-XE {release} on Standard-Support Train {train}; "
-            "Cisco recommends an Extended-Support Train (17.12, 17.15 or 17.18)."
-        )
-        findings.append(
-            Finding(
-                id=finding_id(TRAIN_SUPPORT_CHECK.id, f"device:{device.id}"),
-                devices=(device.id,),
-                items=(),
-                evidence=(),
-                level=FindingLevel.LOW,
-                check=TRAIN_SUPPORT_CHECK,
-                what_was_found=what,
-                what_to_do="Plan a move to an Extended-Support Train (17.12, 17.15 or 17.18).",
-                source="device reports",
-                summary=what,
-            )
-        )
+        support = _support_class(train)
+        if support is _STANDARD:
+            findings.append(_standard_train_finding(device, release, train))
+        elif support is None:
+            findings.append(_undecided_train_finding(device, release, train))
     return tuple(findings)
 
 
-def train_support_skip_reason(data: AnalysisInput) -> str | None:
-    """Why the Train Check cannot run, or None when it can decide at least one device.
-
-    The table classifies seven Trains. When every applicable device sits on a Train it does
-    not classify, nothing can be decided and the Check is skipped with those Trains named,
-    rather than letting silence pass for an Extended-Support Train. Once at least one device's
-    Train is classified, the Check runs: a device on an unclassified Train gets no Finding,
-    and the table's coverage is never guessed at.
-    """
-    trains = sorted(
-        {
-            train
-            for device in data.topology.devices
-            if _train_applies(device)
-            for train in (_train(device.software_version),)
-            if isinstance(train, str)
-        }
+def _standard_train_finding(device: VisitedDevice, release: str, train: str) -> Finding:
+    """The Finding story 72 asks for: this device is on a Standard-Support Train."""
+    what = (
+        f"{_name(device)} runs IOS-XE {release} on Standard-Support Train {train}; "
+        "Cisco recommends an Extended-Support Train (17.12, 17.15 or 17.18)."
     )
-    if not trains or any(train in _SUPPORT_TRAINS for train in trains):
+    return Finding(
+        id=finding_id(TRAIN_SUPPORT_CHECK.id, f"device:{device.id}"),
+        devices=(device.id,),
+        items=(),
+        evidence=(),
+        level=FindingLevel.LOW,
+        check=TRAIN_SUPPORT_CHECK,
+        what_was_found=what,
+        what_to_do="Plan a move to an Extended-Support Train (17.12, 17.15 or 17.18).",
+        source="device reports",
+        summary=what,
+    )
+
+
+def _undecided_train_finding(device: VisitedDevice, release: str, train: str) -> Finding:
+    """The Finding an unclassified Train gets, so silence never passes for either class."""
+    what = (
+        f"{_name(device)} runs IOS-XE {release} on Train {train}, and this tool could not decide "
+        "whether that Train is Standard-Support or Extended-Support: Cisco publishes no class "
+        "for it that this version knows."
+    )
+    return Finding(
+        id=finding_id(TRAIN_SUPPORT_CHECK.id, f"device:{device.id}"),
+        devices=(device.id,),
+        items=(),
+        evidence=(),
+        level=FindingLevel.LOW,
+        check=TRAIN_SUPPORT_CHECK,
+        what_was_found=what,
+        what_to_do=(
+            "Check the Train's support class on Cisco's IOS-XE software support pages; the "
+            "tool does not guess."
+        ),
+        source="device reports",
+        summary=what,
+    )
+
+
+def _support_class(train: str) -> str | None:
+    """Say whether `train` is a Standard- or Extended-Support Train, or neither (#147).
+
+    `_STANDARD` and `_EXTENDED` are the two published classes; None means Cisco's model does
+    not classify it, so the device gets "could not decide" rather than a guess.
+    """
+    major, _, minor_text = train.partition(".")
+    if not major.isdigit() or not minor_text.isdigit():
         return None
-    return "Cisco's IOS-XE Train support table does not classify Train " + ", ".join(trains)
+    bounds = _CLASSIFIED_TRAINS.get(major)
+    minor = int(minor_text)
+    if bounds is None or not bounds[0] <= minor <= bounds[1]:
+        return None
+    return _EXTENDED if minor % _EXTENDED_EVERY == 0 else _STANDARD
 
 
 def _member_text(member: StackMember) -> str:
@@ -447,7 +478,7 @@ CHECKS: tuple[CheckDefinition, ...] = (
     CheckDefinition(STACK_MISMATCH_CHECK, stack_mismatch),
     CheckDefinition(VPC_MISMATCH_CHECK, vpc_mismatch),
     CheckDefinition(BUNDLE_MODE_CHECK, bundle_mode),
-    CheckDefinition(TRAIN_SUPPORT_CHECK, train_support, skip_reason=train_support_skip_reason),
+    CheckDefinition(TRAIN_SUPPORT_CHECK, train_support),
     CheckDefinition(
         advisory.ADVISORY_CHECK,
         advisory.advisory_findings,

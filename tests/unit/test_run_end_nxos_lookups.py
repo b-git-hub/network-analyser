@@ -3,8 +3,9 @@
 Driven through `main(argv)` with a fake Nexus at the `device_gateway` seam, answering the
 replies the real readers consume (`show version`, `show inventory | json`), and the fake Cisco
 at the `advisories` transport seam. The series is not in `show version`'s model (`C9300v`); it
-is the chassis PID in `show inventory | json` (`N9K-C9300v`), so a Run that never read the
-inventory cannot name the series and must say so rather than say Cisco gave no answer.
+is the chassis PID in `show inventory | json` (`N9K-C9300v`), or, when that command is refused,
+the `Nexus9000` token `show version` prints (#159). A Run that learned neither cannot name the
+series and must say so rather than say Cisco gave no answer.
 """
 
 import json
@@ -17,7 +18,7 @@ import pytest
 from network_analyser import backup_store
 from network_analyser.cli import ExitCode
 from network_analyser.credentials import Secret
-from tests.support import fake_age, nxos_show
+from tests.support import device_text, fake_age, nxos_show
 from tests.support.fake_cisco import CLIENT_ID, CLIENT_SECRET, FakeCisco
 from tests.support.fake_device import NXOS_REPLIES
 from tests.support.nxos_json import NXOS_JSON_REPLIES
@@ -139,11 +140,32 @@ def test_a_realistic_nexus_run_asks_openvuln_with_the_series_from_its_chassis_pi
     assert not [f for f in findings if f["check"]["id"] == COULD_NOT_CHECK]
 
 
-def test_a_nexus_whose_inventory_was_not_read_says_the_series_could_not_be_worked_out(
+def test_a_nexus_whose_inventory_was_refused_still_asks_openvuln_with_its_series(
     run: Runner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _store_key()
     run.seed.replies["show inventory | json"] = "% Permission denied for the role\n"
+    fake = _serve(monkeypatch)
+
+    got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
+
+    assert got.code in {ExitCode.CLEAN, ExitCode.NEEDS_ATTENTION}, got.err
+    advisory_paths = [path for path in fake.paths() if "/OSType/nxos" in path]
+    assert len(advisory_paths) == 1, fake.paths()
+    assert "platformAlias=NEXUS9000" in advisory_paths[0]
+    assert all("currentRelease" not in path for path in fake.paths())
+    assert not [path for path in fake.paths() if f"/productId/{CHASSIS}" in path]
+    findings = _findings()
+    assert [f for f in findings if f["check"]["id"] == "advisory-cisco-sa-nxos-0134"]
+    assert not [f for f in findings if f["check"]["id"] == COULD_NOT_CHECK]
+
+
+def test_a_nexus_with_no_nexus_token_in_show_version_says_the_series_could_not_be_worked_out(
+    run: Runner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _store_key()
+    run.seed.replies["show inventory | json"] = "% Permission denied for the role\n"
+    run.seed.replies["show version"] = device_text.NXOS_SHOW_VERSION.replace("Nexus9000 ", "Nexus ")
     fake = _serve(monkeypatch)
 
     got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())

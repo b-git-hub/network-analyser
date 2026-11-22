@@ -16,7 +16,7 @@ import pytest
 
 from network_analyser import backup_store, run_output
 from network_analyser.cli import main
-from network_analyser.credentials import Secret
+from network_analyser.credentials import Secret, SecretScan
 from tests.support import fake_age
 from tests.support.fake_cisco import CLIENT_ID, CLIENT_SECRET, FakeCisco
 from tests.support.run_driver import (
@@ -172,6 +172,31 @@ def test_set_shows_the_least_privilege_guidance(operator: Operator) -> None:
         "registration email deleted",
     ):
         assert words in guidance
+
+
+def test_set_wipes_the_passphrase_and_the_key_from_memory(
+    operator: Operator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _serve_with(monkeypatch, FakeCisco())
+    wiped: list[Secret] = []
+    real_wipe = Secret.wipe
+    forgot: list[SecretScan] = []
+
+    def spy(self: Secret) -> None:
+        wiped.append(self)
+        real_wipe(self)
+
+    def forget(self: SecretScan) -> None:
+        forgot.append(self)
+
+    monkeypatch.setattr(Secret, "wipe", spy)
+    monkeypatch.setattr(SecretScan, "forget", forget)
+
+    got = operator("set", typed=typed("YES", PASS, CLIENT_ID, CLIENT_SECRET))
+
+    assert got.code == 0, got.err
+    assert len(wiped) >= 3  # the passphrase, the client ID and the client secret
+    assert len(forgot) == 1
 
 
 def test_set_no_check_stores_the_key_without_asking_cisco(
@@ -339,9 +364,27 @@ def test_every_action_refuses_when_another_account_can_reach_the_trust_folder(
 # -- The lifecycle: change-passphrase and starting over (stories 37, 39) ----------------------
 
 
+def test_change_passphrase_forgets_the_scanned_secrets(
+    operator: Operator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    operator.store()
+    forgot: list[SecretScan] = []
+
+    def forget(self: SecretScan) -> None:
+        forgot.append(self)
+
+    monkeypatch.setattr(SecretScan, "forget", forget)
+
+    operator.monkeypatch.setattr("sys.stdin", io.StringIO(typed("YES", PASS, NEW, NEW, "y")))
+    code = main(["change-passphrase"])
+    operator.capsys.readouterr()
+
+    assert code == 0
+    assert len(forgot) == 1
+
+
 def test_change_passphrase_relocks_the_key_with_the_new_passphrase(operator: Operator) -> None:
     operator.store()
-
     operator.monkeypatch.setattr("sys.stdin", io.StringIO(typed("YES", PASS, NEW, NEW, "y")))
     code = main(["change-passphrase"])
     got = operator.capsys.readouterr()

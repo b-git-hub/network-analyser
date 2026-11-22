@@ -17,10 +17,16 @@ from network_analyser.diagram import topology_file
 from network_analyser.diagram.findings import findings_tab
 from network_analyser.diagram.topology_file import device_advice
 from network_analyser.records.topology import (
+    AdvisoryDetail,
     AdvisoryOutcome,
     AdvisoryOutcomeKind,
     AnalysisSummary,
+    Check,
+    CheckType,
+    CiscoDetailKind,
     DeviceAdvice,
+    Finding,
+    FindingLevel,
 )
 from tests.support.topology_documents import device, document, read
 from tests.support.topology_records import visited
@@ -146,6 +152,68 @@ def test_a_hostile_partial_target_is_escaped_on_every_surface() -> None:
     _markers, marker = _marker(data)
     assert marker.tag is not None
     assert "no fix in Train" in marker.tag
+
+
+def test_an_unresolved_series_reads_not_available_on_both_pages() -> None:
+    """A fix Cisco's `platforms[]` cannot resolve is unknown, not no fix (#136)."""
+    detail = AdvisoryDetail(
+        kind=CiscoDetailKind.ADVISORY,
+        id=ADVISORY_ID,
+        title="Cisco NX-OS Software Example Vulnerability",
+        sir=FindingLevel.HIGH,
+        cvss="8.1",
+        cves=("CVE-2099-0001",),
+        published="2026-01-02",
+        updated="2026-02-03",
+        first_fixed=None,
+        fix_unresolved=True,
+    )
+    finding = Finding(
+        id="finding-0123456789ab",
+        devices=("dev-S1",),
+        items=(),
+        evidence=(),
+        level=FindingLevel.HIGH,
+        check=Check(f"advisory-{ADVISORY_ID}", "Example Advisory", CheckType.ADVISORY),
+        what_was_found="First fixed in Train 9.3: not available",
+        what_to_do="Check Cisco's page for the first fixed release.",
+        source="Cisco openVuln",
+        summary="An Advisory affects release 9.3(10).",
+        cisco_detail=detail,
+    )
+    advice = DeviceAdvice(
+        device="dev-S1",
+        advisory_outcome=AdvisoryOutcome(
+            AdvisoryOutcomeKind.MATCHES,
+            matched=1,
+            release="9.3(10)",
+        ),
+        upgrade_target="not available",
+        train="9.3",
+    )
+    built = replace(
+        topology.build((visited("192.0.2.1", "S1", "sw-a"),)),
+        analysis=AnalysisSummary(advice=(advice,), checks=()),
+        findings=(finding,),
+    )
+
+    written: Any = topology.to_document(built)
+    assert written["findings"][0]["cisco_detail"]["fix_unresolved"] is True
+    data = diagram.read_topology(json.dumps(written))
+    page = diagram.draw_findings_report(data, lambda text: text, run_time=RUN_TIME)
+
+    assert "Upgrade to not available" not in page
+    assert "no fix in Train" not in page
+    assert '<p class="callout could-not-check"><b>not available</b></p>' in page
+    details = page[page.index("<details>") : page.index("</details>")]
+    assert "<td>not available</td>" in details
+
+    tab = findings_tab(data)
+    (high,) = [group for group in tab.levels if group.level == "High"]
+    (check,) = high.checks
+    assert check.advisory is not None
+    (row,) = check.advisory.devices
+    assert row.upgrade_target == "not available"
 
 
 def test_topology_json_carries_each_devices_advice_and_the_new_count() -> None:

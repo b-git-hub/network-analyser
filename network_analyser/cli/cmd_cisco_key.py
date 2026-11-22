@@ -70,6 +70,7 @@ def cisco_key(args: argparse.Namespace) -> ExitCode:
             return ExitCode.REFUSED
         finally:
             _warn_of_scan_hits(scan)
+            scan.forget()  # no secret typed here outlives the command (#143)
 
 
 def _dispatch(args: argparse.Namespace, data: run_output.DataFolder, scan: SecretScan) -> ExitCode:
@@ -94,9 +95,29 @@ def _set(args: argparse.Namespace, data: run_output.DataFolder, scan: SecretScan
     if isinstance(passphrase, ExitCode):
         return passphrase
     passphrase.add_to_scan(scan)
-    ask.say(_LEAST_PRIVILEGE)
-    client_id = _secret(ask, "Cisco API client ID: ", scan)
-    client_secret = _secret(ask, "Cisco API client secret: ", scan)
+    try:
+        ask.say(_LEAST_PRIVILEGE)
+        client_id = _secret(ask, "Cisco API client ID: ", scan)
+        client_secret = _secret(ask, "Cisco API client secret: ", scan)
+        try:
+            return _store_and_check(args, data, ask, scan, passphrase, client_id, client_secret)
+        finally:
+            client_id.wipe()
+            client_secret.wipe()
+    finally:
+        passphrase.wipe()  # ADR 0008: set wipes all three, whatever the check did
+
+
+def _store_and_check(  # noqa: PLR0913, PLR0917 (set's whole state, each part named)
+    args: argparse.Namespace,
+    data: run_output.DataFolder,
+    ask: Prompter,
+    scan: SecretScan,
+    passphrase: backup_store.BackupPassphrase,
+    client_id: Secret,
+    client_secret: Secret,
+) -> ExitCode:
+    """Lock the key, then send the one token-only check unless `--no-check`."""
     ask.say("Locking the key with the Backup Passphrase (about a second)...")
     try:
         backup_store.lock_key_file(

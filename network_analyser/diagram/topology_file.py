@@ -278,6 +278,7 @@ _ADVISORY_DETAIL: dict[str, _Schema] = {
     "status": LEAF,
     "fixed_line": LEAF,
     "hardware_family_not_confirmed": LEAF,
+    "fix_unresolved": LEAF,
 }
 _EOX_ITEM: dict[str, _Schema] = {
     "kind": LEAF,

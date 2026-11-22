@@ -691,6 +691,16 @@ def test_each_devices_upgrade_target_comes_from_the_advice_record() -> None:
     assert "Upgrade to 17.12.9 or later (does not clear" not in page
 
 
+def test_an_unresolved_upgrade_target_reads_not_available_not_an_upgrade() -> None:
+    base = _analysis_report()
+    advice = (dataclasses.replace(_advice("dev-S1", "not available", not_cleared=0), train="9.3"),)
+    built = dataclasses.replace(base.topology, analysis=AnalysisSummary(advice=advice, checks=()))
+    page = report_page.render_run_report(dataclasses.replace(base, topology=built), SecretScan())
+
+    assert "Upgrade to not available" not in page
+    assert "<td>not available</td>" in _section(page, "visited")
+
+
 def _advice(device: str, target: str, *, not_cleared: int) -> DeviceAdvice:
     return DeviceAdvice(
         device=device,

@@ -578,6 +578,7 @@ def test_a_confirmed_sweep_logs_in_only_to_matching_banners(
         *,
         elapsed_s: float,
         extra_attention: object = (),
+        stopped_by_operator: bool = False,
     ) -> str:
         held.append(result)
         return real_summary(
@@ -585,6 +586,7 @@ def test_a_confirmed_sweep_logs_in_only_to_matching_banners(
             backups,
             elapsed_s=elapsed_s,
             extra_attention=extra_attention,  # type: ignore[arg-type]
+            stopped_by_operator=stopped_by_operator,
         )
 
     monkeypatch.setattr(summary, "final_summary", grab)
