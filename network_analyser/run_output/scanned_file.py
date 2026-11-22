@@ -23,6 +23,7 @@ import os
 import secrets
 from pathlib import Path
 
+from network_analyser._winsys import retry_rename
 from network_analyser.credentials import SecretScan
 from network_analyser.records.safe_names import safe_name_problem
 from network_analyser.run_output.folder import RunFolder
@@ -50,7 +51,7 @@ def write_scanned_text(folder: RunFolder, name: str, text: str, scan: SecretScan
         os.fsync(handle)
     finally:
         os.close(handle)
-    temporary.replace(path)
+    retry_rename(lambda: temporary.replace(path))
     return hits
 
 

@@ -24,12 +24,14 @@ ALLOWED: dict[str, frozenset[str]] = {
     "_winsys": frozenset(),
     "scope": frozenset({"records"}),
     "credentials": frozenset({"records"}),
-    "trust_store": frozenset({"records"}),
+    # #158: the temp-then-rename writers retry a Windows rename refusal through
+    # `_winsys.retry_rename`.
+    "trust_store": frozenset({"records", "_winsys"}),
     "platforms": frozenset({"records"}),
     "topology": frozenset({"records"}),
     "analysis": frozenset({"records"}),  # pure: no HTTP client, SSH library or device code
     "diagram": frozenset({"records"}),  # reads only the Topology file
-    "backup_store": frozenset({"records", "credentials"}),
+    "backup_store": frozenset({"records", "credentials", "_winsys"}),
     "run_output": frozenset({"records", "credentials", "_winsys"}),
     # #95: the one egress module. `credentials` is for `Secret` only (the Cisco API Key),
     # never a password path; `_winsys` reads Windows' proxy setting (story 17).

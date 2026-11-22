@@ -40,13 +40,19 @@ baseline.
 - `tests/unit/test_trust_folder_check.py::test_another_account_that_can_change_the_folder_refuses[other0]`
 - `tests/unit/test_trust_folder_check.py::test_another_account_that_can_change_the_folder_refuses[other1]`
 - `tests/unit/test_trust_folder_check.py::test_another_account_that_can_change_the_folder_refuses[other2]`
-- `tests/unit/test_trust_folder_check.py::test_an_account_that_can_only_read_the_folder_refuses_too`
+- `tests/unit/test_trust_folder_check.py::test_another_account_that_can_only_read_the_folder_refuses_too`
 - `tests/unit/test_trust_folder_check.py::test_an_account_on_the_known_hosts_file_itself_is_caught`
 - `tests/unit/test_trust_folder_check.py::test_before_the_first_run_the_folder_it_will_inherit_from_is_read`
 - `tests/unit/test_trust_folder_check.py::test_permissions_windows_will_not_give_refuse[modify]`
 - `tests/unit/test_trust_folder_check.py::test_permissions_windows_will_not_give_refuse[read]`
 
 ## Parallel runs
+
+**No longer needed from merge commit `bf22e2b` (2026-11-22, [#167](https://github.com/b-git-hub/network-analyser/issues/167)):**
+`scripts/check.py` now gives every invocation its own `PYTEST_DEBUG_TEMPROOT` directory, so the
+workaround below is retired. A plain `uv run --locked python scripts/check.py` in several
+worktrees at once was observed to print full summaries with no `PermissionError`. The text
+below is kept as the dated record of the earlier race.
 
 Until [#167](https://github.com/b-git-hub/network-analyser/issues/167) lands, two gates run
 at once race on pytest's shared `pytest-current` temp link and one crashes at session finish
