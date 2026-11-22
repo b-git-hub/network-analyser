@@ -108,3 +108,12 @@ last on the integration branch.
   of `### Fixed`. The ticket branch forks at `5a77989`, before #139. No merge was attempted,
   nothing was forced or rewritten, and no gate was run. The coordinator decides whether the
   #147 owner rebases forward onto the current integration tip and re-runs the gate.
+- 2026-11-22: **#175 blocked, not merged.** PR #175 (`ticket-143-run-end-durability`, ticket
+  #143) is `CONFLICTING` on `docs/wiki/review-fixes-0.3.1-2026-11-22.md` only, the Log tail:
+  both sides append dated lines after the #158 entry, so #143's line (added after the branch
+  merged `dbbe12f`) collides with the #140, #166 and #176 lines that landed on the integration
+  branch since its merge base `538604e`. `git merge-tree` names no other conflicting file. No
+  merge was attempted, nothing was forced or rewritten, and no gate was run; PR #177 (ticket
+  #160, `MERGEABLE`) was left unmerged because it is second in this batch's order. The
+  coordinator decides whether the #143 owner rebases forward onto `e625f25` and re-runs the
+  gate.
