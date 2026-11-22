@@ -56,9 +56,10 @@ def test_ios_two_refused_commands_are_one_medium_finding_naming_both_checks() ->
     assert finding.source == "device reports"
     assert finding.devices == ("dev-S1",)
     assert finding.what_was_found == (
-        "Device Role is out of date: 2 Checks could not run "
-        "(NTP not synchronised, CoPP not applied). " + POINTER
+        "The Device Role may be out of date, or the image may not have the command: "
+        "2 Checks could not run (NTP not synchronised, CoPP not applied). " + POINTER
     )
+    assert "image may not have the command" in finding.what_was_found
     assert finding.summary == finding.what_was_found
     assert finding.what_to_do == POINTER
 
@@ -69,7 +70,8 @@ def test_one_refused_command_names_one_check_in_the_singular() -> None:
     (finding,) = found(results, ROLE)
 
     assert finding.what_was_found == (
-        f"Device Role is out of date: 1 Check could not run (SSH key under 2048 bits). {POINTER}"
+        "The Device Role may be out of date, or the image may not have the command: "
+        f"1 Check could not run (SSH key under 2048 bits). {POINTER}"
     )
 
 
@@ -88,7 +90,8 @@ def test_nxos_all_five_refused_commands_are_still_one_finding() -> None:
 
     assert finding.level is FindingLevel.MEDIUM
     assert finding.what_was_found == (
-        "Device Role is out of date: 5 Checks could not run "
+        "The Device Role may be out of date, or the image may not have the command: "
+        "5 Checks could not run "
         "(Hardware EoX, NTP not synchronised, CoPP not applied, SSH key under 2048 bits, "
         "Guest Shell present). " + POINTER
     )
