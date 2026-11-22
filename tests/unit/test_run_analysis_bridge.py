@@ -365,6 +365,6 @@ def test_an_nxos_i_series_release_keeps_its_own_train() -> None:
     assert release.advisories[0].platforms == (
         AdvisoryPlatform(
             name="Cisco Nexus 9000 Series Switches",
-            first_fixed=(FixedRelease("7.0(3)I7", "7.0(3)I7(10)"),),
+            first_fixed=(FixedRelease("7.0I7", "7.0(3)I7(10)"),),
         ),
     )
