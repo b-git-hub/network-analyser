@@ -27,7 +27,7 @@ cannot replace Cisco's results with an offline copy.
 erase an existing string, so the promise is "no further use", not "zeroed memory". The
 `SecretScan` keeps its own copy of each typed value from the moment it is typed, because
 `topology.json` and the reports are written after the wipe; `SecretScan.forget()` drops those
-copies after the Run's one scan warning.
+copies after the Run's one scan warning. (Superseded 2026-11-22: see Amendments.)
 
 ## What is sent, and NX-OS
 
@@ -60,3 +60,11 @@ device name, no per-device Finding, no Cisco value, no client ID or token.
   `try`/`finally` now starts straight after the unlock, and a Check that raises on Cisco's
   answers is retried offline. The key joins the scan at the unlock, and `cmd_run` wipes the
   device secrets on every way out of the Run, not only through step 2.
+- 2026-11-22, [#145](https://github.com/b-git-hub/network-analyser/issues/145): supersedes the
+  **Secrets** claim that the scan keeps a copy of each typed value. `SecretScan` now stores only
+  each secret's length and an HMAC-SHA256 fingerprint under a random per-Run key, and matches by
+  hashing the windows of that length, so step 2's wipe leaves nothing recoverable while the tool
+  is online ([ADR 0007](../adr/0007-cisco-lookups-at-run-end-after-secrets-wiped.md), the
+  amendment of the same date). `forget()` still drops the fingerprints after the Run's one scan
+  warning, and the Seam 3 test now walks the scan at the first Cisco request to prove no typed
+  password or passphrase is reachable from it.

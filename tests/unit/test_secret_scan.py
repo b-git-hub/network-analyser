@@ -7,6 +7,7 @@ import pytest
 from network_analyser import backup_store
 from network_analyser.credentials import CredentialSet, CredentialSets, Secret, SecretScan
 from tests.support import fake_age
+from tests.support.scan_state import reachable_text
 
 CANARY = "CANARY-pw-51ab"
 BACKUP_CANARY = "CANARY-pp-77c0-backup"
@@ -94,6 +95,59 @@ def test_the_scan_never_shows_what_it_watches() -> None:
         pickle.dumps(scan)
     with pytest.raises(TypeError):
         copy.copy(scan)
+
+
+def test_the_scan_holds_a_fingerprint_and_never_the_value() -> None:
+    scan = _scan(CANARY, BACKUP_CANARY)
+
+    held = reachable_text(scan)
+
+    assert CANARY not in held
+    assert BACKUP_CANARY not in held
+    assert scan.contains_secret(f"x {CANARY} y {BACKUP_CANARY} z") == (
+        "x [blocked] y [blocked] z",
+        2,
+    )
+
+
+def test_a_text_that_only_shares_the_start_of_a_secret_is_untouched() -> None:
+    scan = _scan("CANARY-pw-shared")
+
+    assert scan.contains_secret("CANARY-pw-other") == ("CANARY-pw-other", 0)
+
+
+def test_one_of_two_secrets_that_start_alike_is_blocked_alone() -> None:
+    scan = _scan("CANARY-pw-aaaa", "CANARY-pw-bbbb")
+
+    assert scan.contains_secret("y CANARY-pw-bbbb z") == ("y [blocked] z", 1)
+
+
+def test_a_secret_with_a_non_ascii_character_is_blocked() -> None:
+    scan = _scan("CANARY-pw-passwörd")
+
+    assert scan.contains_secret("a CANARY-pw-passwörd b") == ("a [blocked] b", 1)
+
+
+def test_a_secret_with_fewer_characters_than_the_window_is_blocked() -> None:
+    scan = _scan("ab")
+
+    assert scan.contains_secret("xaby") == ("x[blocked]y", 1)
+
+
+def test_a_secret_at_either_end_of_a_long_text_is_found() -> None:
+    scan = _scan(CANARY)
+    long = "x" * 5000
+
+    assert scan.contains_secret(long + CANARY) == (long + "[blocked]", 1)
+    assert scan.contains_secret(CANARY + long) == ("[blocked]" + long, 1)
+
+
+def test_overlapping_occurrences_across_a_long_text_are_all_blocked() -> None:
+    scan = _scan("aa")
+    long = "a" * 5000
+
+    assert scan.contains_secret(long) == ("[blocked]", 1)
+    assert scan.hits == 1
 
 
 def test_the_backup_passphrase_adds_itself_to_the_scan(tmp_path: Path) -> None:
