@@ -26,6 +26,7 @@ from datetime import UTC, date, datetime
 from typing import Final
 
 from network_analyser.analysis.ids import finding_id
+from network_analyser.analysis.outcome import NOT_COLLECTED_REASON
 from network_analyser.analysis.releases import normalise_release
 from network_analyser.records.analysis import (
     AnalysisInput,
@@ -36,6 +37,7 @@ from network_analyser.records.analysis import (
 from network_analyser.records.lookup_values import is_safe_pid
 from network_analyser.records.topology import (
     Check,
+    CheckSkip,
     CheckType,
     CiscoDetailKind,
     EoxDetail,
@@ -45,6 +47,7 @@ from network_analyser.records.topology import (
     FindingLevel,
     VisitedDevice,
 )
+from network_analyser.records.unknown import Unknown
 
 HARDWARE_EOX_CHECK: Final = Check(
     "lifecycle-hardware-eox",
@@ -206,6 +209,26 @@ def eox_skip_reason(data: AnalysisInput) -> str | None:
     """Why the EoX Checks cannot run: the EoX source's outage reason, or None (story 118)."""
     source = data.answers.eox
     return source.reason if isinstance(source, SourceUnavailable) else None
+
+
+def hardware_eox_skipped(data: AnalysisInput) -> tuple[CheckSkip, ...]:
+    """Return the devices whose `show inventory` was refused or unread (#135).
+
+    The Run falls back to the chassis and stack-member PIDs `show version` gave, so the Check
+    still looks at those; but supervisors and line cards were not seen, so it is recorded as
+    skipped for the device with the reason, never as a clean pass.
+    """
+    skips: list[CheckSkip] = []
+    for device in data.topology.devices:
+        inventory = data.collected_for(device.management_ip).inventory
+        if isinstance(inventory, Unknown):
+            reason = f"{inventory.reason}; only the chassis and stack-member PIDs were checked"
+        elif inventory is None:
+            reason = f"show inventory {NOT_COLLECTED_REASON}"
+        else:
+            continue
+        skips.append(CheckSkip(device.id, reason))
+    return tuple(skips)
 
 
 def suggestions_skip_reason(data: AnalysisInput) -> str | None:

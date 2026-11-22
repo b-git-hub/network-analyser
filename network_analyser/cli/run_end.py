@@ -31,6 +31,7 @@ from network_analyser.cli.parser import PROG
 from network_analyser.credentials import CredentialSets, SecretScan
 from network_analyser.records.analysis import AnalysisInput, CiscoAnswers, SourceUnavailable
 from network_analyser.records.cisco import CiscoCallTally, LookupQuestions, TokenOutcome
+from network_analyser.records.device import DeviceRecord
 from network_analyser.records.events import AnalysisRan
 from network_analyser.records.scope import ScopeRecord
 from network_analyser.records.topology import (
@@ -129,7 +130,9 @@ def finish(  # noqa: PLR0913 (the Run's end, every dependency explicit)
 
     built = run_topology.build_topology(collected.records(), scope)
     try:
-        answers, lookups, replies = _ask(built, key, scan=scan, proxy=proxy, now=now)
+        answers, lookups, replies = _ask(
+            built, collected.records(), key, scan=scan, proxy=proxy, now=now
+        )
         results = run_analysis.analysed(built, answers, records=collected.records())
         audit.record(analysis_event(results, lookups, replies))
         written = run_topology.save_all(
@@ -157,8 +160,9 @@ def finish(  # noqa: PLR0913 (the Run's end, every dependency explicit)
     )
 
 
-def _ask(
+def _ask(  # noqa: PLR0913 (the topology, its records and the online step's settings)
     built: Topology,
+    records: tuple[DeviceRecord, ...],
     key: backup_store.CiscoKey | None,
     *,
     scan: SecretScan,
@@ -172,7 +176,9 @@ def _ask(
             CiscoLookups(ran=False),
             None,
         )
-    asked = run_analysis.lookup_questions(AnalysisInput(topology=built))
+    asked = run_analysis.lookup_questions(
+        AnalysisInput(topology=built, inventory=run_analysis.inventories(built, records))
+    )
     if not _has_questions(asked):
         return (
             CiscoAnswers.unavailable(run_analysis.LOOKUPS_DID_NOT_RUN),
