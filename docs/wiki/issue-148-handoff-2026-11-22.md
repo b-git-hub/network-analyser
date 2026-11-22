@@ -26,4 +26,19 @@ Nothing here is a bug in the shape check itself. The open questions need either 
 - Do not treat the compatible-list 500 for a slashed value as proof that the slash is refused. It is also what an unknown PID returns.
 - Do not push or post anything without the operator's approval. The branch was pushed on 2026-11-22 at the operator's request.
 
+## Update, 2026-11-22 (later): every compatible-list filter fails
+
+Step 1 of "What the next agent should do first" has now been run, on 2026-11-22 by the operator, with `--pid C9300-24T`, on `ticket-148-shape-check` at `325daeb` (the `currentRelease` probe was added in `7d22524`, amended to `325daeb`). Results, by probe label:
+
+- Documented sample pair, `CISCO2811` with `CISCO3925/K9` in `supportedHardware`: HTTP 500, unnamed 25-character code, error text 39 characters.
+- Same base with a non-slashed value, `HWIC-1FE`: HTTP 500, same code, same 39-character error text.
+- Same base with `pageIndex=1` added to both: HTTP 500, same as above.
+- Same base with `currentRelease=15.0.24T7` (Cisco's documented sample): HTTP 500, same code, same 39-character error text.
+- Unknown synthetic PID, no filter: HTTP 500, but with a 28-character error text, so Cisco answers differently.
+- `C9300-24T`, no filter: HTTP 200 with suggestions (unchanged from earlier runs).
+
+So the earlier reading (slash versus catalogue miss) is superseded. Every filter we have tried, of two kinds, fails with the same error text, and the unfiltered list works. This points at the filter parameters (or the request for this endpoint) rather than at licence-suffixed PIDs. Cisco's documentation, as read on 2026-11-22, is the only source of the parameter names and sample values we used; it has not been checked against a live response beyond these runs. The operator has not yet sent a question to Cisco DevNet support. The error text is not printed or recorded here, because the tool's rule is that no value from a reply is printed.
+
+Superseded: the 2026-11-22 (earlier) reading that the 500s for `CISCO1811` and `CISCO3925` "were catalogue misses" if the documented sample returned 200. The sample returned 500, so that reading does not hold.
+
 Related: [conventions](conventions.md), [index](index.md).
