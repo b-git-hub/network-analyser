@@ -250,6 +250,18 @@ def test_cisco_documented_non_slashed_hardware_is_asked_for_comparison() -> None
     )
 
 
+def test_cisco_documented_current_release_filter_is_asked_for_comparison() -> None:
+    fake = _canary_cisco()
+
+    collect_summary(_session(fake), Inputs())
+
+    assert any(
+        path == "/software/suggestion/v2/suggestions/compatible/productId/CISCO2811"
+        "?currentRelease=15.0.24T7&pageIndex=1"
+        for path in fake.paths()
+    )
+
+
 def test_the_suffixed_pid_is_also_asked_in_supported_hardware_as_cisco_documents_it() -> None:
     fake = _canary_cisco()
 

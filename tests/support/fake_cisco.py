@@ -44,6 +44,8 @@ _EOX_OS_TYPES = frozenset({"IOS", "IOS-XE", "NX-OS"})
 """The OS types Cisco documents for `release,OSType`; a path value may carry one."""
 SUGGESTION_PREFIX = "/software/suggestion/v2/suggestions/releases/productIds/"
 COMPATIBLE_PREFIX = "/software/suggestion/v2/suggestions/compatible/productId/"
+# The documented currentRelease sample: the only one the probe sends, so the only one allowed.
+CURRENT_RELEASE_SAMPLE = "currentRelease=15.0.24T7"
 TOKEN_PATH = "/oauth2/default/v1/token"
 
 
@@ -119,7 +121,7 @@ class FakeCisco:
             msg = f"left the fence: {request.host}:{request.port}"
             raise LeftTheFenceError(msg)
         self.requests.append(request)
-        if "currentRelease" in request.path:
+        if "currentRelease" in request.path and CURRENT_RELEASE_SAMPLE not in request.path:
             msg = "a path carried currentRelease, which is never sent"
             raise UnsafeValueSentError(msg)
         if self.on_request is not None:

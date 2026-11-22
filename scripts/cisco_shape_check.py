@@ -524,6 +524,15 @@ def _suggestion_probes(inputs: Inputs) -> list[Probe]:
             f"{compatible}CISCO2811?supportedHardware=HWIC-1FE&pageIndex=1",
             Kind.COMPATIBLE,
         ),
+        # Another documented filter, `currentRelease`, on the same documented base. If this one
+        # answers too, only `supportedHardware` is refused; if not, the filters fail together.
+        Probe(
+            "Software Suggestion compatible list, Cisco's documented sample base with a "
+            "documented currentRelease filter (CISCO2811, currentRelease in the dotted form)",
+            CiscoEndpoint.COMPATIBLE,
+            f"{compatible}CISCO2811?currentRelease=15.0.24T7&pageIndex=1",
+            Kind.COMPATIBLE,
+        ),
     ]
     if inputs.pid is not None:
         pid = wire_pid(inputs.pid)
