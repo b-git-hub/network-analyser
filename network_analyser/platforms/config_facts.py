@@ -71,7 +71,7 @@ from network_analyser.records.unknown import Unknown
 _LINE_HEADER: Final = re.compile(r"line\s+(con(?:sole)?|vty|aux|tty)\b", re.IGNORECASE)
 _TRANSPORT_INPUT: Final = re.compile(r"transport\s+input\s+(.+)", re.IGNORECASE)
 _ACCESS_CLASS_IN: Final = re.compile(r"^access-class\s+\S+\s+in(?:\s|$)", re.IGNORECASE)
-_EXEC_TIMEOUT: Final = re.compile(r"^exec-timeout\s+(\S+)", re.IGNORECASE)
+_EXEC_TIMEOUT: Final = re.compile(r"^exec-timeout\s+(\S+)(?:\s+(\S+))?", re.IGNORECASE)
 _SSH_VERSION: Final = re.compile(r"^ip\s+ssh\s+version\s+([12])\s*$", re.IGNORECASE)
 _AAA_LOGIN: Final = re.compile(r"^aaa\s+authentication\s+login\s+\S+\s+(.*)$", re.IGNORECASE)
 _AAA_AUTHORIZATION: Final = re.compile(r"^aaa\s+authorization\b", re.IGNORECASE)
@@ -326,7 +326,8 @@ def _exec_timeout_disabled(lines: list[str]) -> tuple[str, ...]:
     """The console and vty blocks that explicitly disable the idle timeout (`exec-timeout 0`).
 
     An absent line is the vendor default (10 minutes on IOS/IOS-XE), not a hit; an AUX line's
-    `exec-timeout 0 1` is a hardening recommendation (research #76, X12), not a hit.
+    `exec-timeout 0 1` is a hardening recommendation (research #76, X12), not a hit. A timeout
+    of 0 minutes and some seconds (`exec-timeout 0 30`) is a real timeout, not a disabled one.
     """
     disabled: list[str] = []
     for kind, header, settings in _line_blocks(lines):
@@ -334,7 +335,7 @@ def _exec_timeout_disabled(lines: list[str]) -> tuple[str, ...]:
             continue
         setting = _setting(settings, "exec-timeout")
         match = None if setting is None else _EXEC_TIMEOUT.match(setting)
-        if match is not None and match.group(1) == "0":
+        if match is not None and match.group(1) == "0" and match.group(2) in {None, "0"}:
             disabled.append(header)
     return tuple(disabled)
 
@@ -522,10 +523,16 @@ def _fhrp_facts(lines: list[str]) -> dict[str, FactValue]:
 
 
 def _icmp_facts(platform: Platform, lines: list[str]) -> dict[str, FactValue]:
-    """How many L3 interfaces have each insecure ICMP setting, by the Platform's default."""
+    """How many live L3 interfaces have each insecure ICMP setting, by the Platform's default.
+
+    A shut-down interface and a loopback send no ICMP to a neighbour, so neither is counted.
+    The running config cannot show line state, so the Check also needs a live L3 interface.
+    """
     redirects = unreachables = proxy_arp = 0
-    for _, body in _interface_blocks(lines):
+    for header, body in _interface_blocks(lines):
         commands = {text.lower() for _, text in body}
+        if "shutdown" in commands or _is_loopback(header):
+            continue
         if not any(_L3_ADDRESS.match(text) for _, text in body):
             continue
         redirects += int("no ip redirects" not in commands)
@@ -539,6 +546,11 @@ def _icmp_facts(platform: Platform, lines: list[str]) -> dict[str, FactValue]:
         ICMP_UNREACHABLES_L3_INTERFACES: unreachables,
         PROXY_ARP_L3_INTERFACES: proxy_arp,
     }
+
+
+def _is_loopback(header: str) -> bool:
+    """Whether an `interface <name>` header names a loopback."""
+    return header.lower().startswith("interface loopback")
 
 
 def _interface_blocks(lines: list[str]) -> list[tuple[str, list[tuple[int, str]]]]:

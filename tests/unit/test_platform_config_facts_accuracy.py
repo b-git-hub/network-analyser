@@ -9,11 +9,15 @@ config is a `CANARY-...` value, and none may reach a fact.
 from network_analyser import platforms
 from network_analyser.records import Platform
 from network_analyser.records.config_facts import (
+    EXEC_TIMEOUT_DISABLED_LINES,
     FHRP_GROUPS,
     FHRP_GROUPS_WITHOUT_AUTHENTICATION,
+    ICMP_REDIRECTS_L3_INTERFACES,
+    ICMP_UNREACHABLES_L3_INTERFACES,
     NTP_AUTHENTICATED,
     NTP_CONFIGURED,
     NTP_MD5_AUTHENTICATION,
+    PROXY_ARP_L3_INTERFACES,
     REMOTE_SYSLOG_SERVERS,
     SECRET_TYPE_0,
     SECRET_TYPE_5,
@@ -390,3 +394,50 @@ def test_one_interface_can_run_two_protocols_with_the_same_number() -> None:
 
     assert facts[FHRP_GROUPS] == 2
     assert facts[FHRP_GROUPS_WITHOUT_AUTHENTICATION] == 1
+
+
+# -- Exec timeout ------------------------------------------------------------------------------
+
+
+def test_exec_timeout_with_seconds_is_not_disabled() -> None:
+    config = "line con 0\n exec-timeout 0 30\nline vty 0 4\n exec-timeout 5 0\n"
+
+    assert _ios(config)[EXEC_TIMEOUT_DISABLED_LINES] == ()
+
+
+def test_exec_timeout_of_zero_minutes_and_zero_seconds_is_disabled() -> None:
+    config = (
+        "line con 0\n exec-timeout 0 0\nline vty 0 4\n exec-timeout 0\n"
+        "line vty 5 15\n exec-timeout 0 1\n"
+    )
+
+    assert _ios(config)[EXEC_TIMEOUT_DISABLED_LINES] == ("line con 0", "line vty 0 4")
+
+
+# -- ICMP counts -------------------------------------------------------------------------------
+
+
+def test_icmp_counts_skip_shutdown_and_loopback_interfaces() -> None:
+    config = (
+        "interface Vlan10\n"
+        " ip address 192.0.2.1 255.255.255.0\n"
+        "interface Vlan20\n"
+        " ip address 198.51.100.1 255.255.255.0\n"
+        " shutdown\n"
+        "interface Loopback0\n"
+        " ip address 203.0.113.1 255.255.255.255\n"
+    )
+
+    for facts in (_ios(config), _nxos(config)):
+        assert facts[ICMP_REDIRECTS_L3_INTERFACES] == 1
+        assert facts[ICMP_UNREACHABLES_L3_INTERFACES] == 1
+
+
+def test_icmp_counts_still_count_a_live_interface_that_sets_nothing() -> None:
+    config = "interface Vlan10\n ip address 192.0.2.1 255.255.255.0\n no ip unreachables\n"
+
+    facts = _ios(config)
+
+    assert facts[ICMP_REDIRECTS_L3_INTERFACES] == 1
+    assert facts[ICMP_UNREACHABLES_L3_INTERFACES] == 0
+    assert facts[PROXY_ARP_L3_INTERFACES] == 1
