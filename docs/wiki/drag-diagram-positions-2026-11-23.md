@@ -2,7 +2,7 @@
 
 On 2026-11-23 the operator decided, for [#73](https://github.com/b-git-hub/network-analyser/issues/73), that positions dragged in `diagram.html` are **saved in the browser**: `localStorage` under `network-analyser.diagram.layout.v1:` plus the page's `location.pathname`. A **Reset layout** control returns to the generated positions. Rejected for now: session-only positions (lost on every reload) and an exported positions file (one more file for the operator to manage).
 
-Built on branch `ticket/73-drag-positions` from `b-git-hub/network-analyser@6a9d4f7`, delivered as a draft PR to `main` (see #73). As of `b-git-hub/network-analyser@72ee926`:
+Built on branch `ticket/73-drag-positions` from `b-git-hub/network-analyser@6a9d4f7`, delivered as draft PR #199 to `main`. As of `b-git-hub/network-analyser@72ee926`:
 
 - every `.node` can be dragged — Visited Device, Unvisited Device, Shared Segment and Subnet; edges and area labels cannot;
 - positions live in the page's existing `POS`/`SPOS` maps, so Physical, Routing, VLAN and the Findings tab keep the same place (story 144);
