@@ -50,3 +50,16 @@ def test_a_root_already_set_is_left_alone(tmp_path: Path) -> None:
 
     assert seed_pytest_temp_root(environment) is None
     assert environment == {"PYTEST_DEBUG_TEMPROOT": str(shared)}
+
+
+def test_an_empty_root_counts_as_unset(made_roots: list[Path]) -> None:
+    # pytest treats "" as no root (`from_env or tempfile.gettempdir()`), so leaving it alone
+    # would put a direct run back on the shared root.
+    environment = {"PYTEST_DEBUG_TEMPROOT": ""}
+
+    root = seed_pytest_temp_root(environment)
+
+    assert root is not None
+    made_roots.append(root)
+    assert root.is_dir()
+    assert environment["PYTEST_DEBUG_TEMPROOT"] == str(root)

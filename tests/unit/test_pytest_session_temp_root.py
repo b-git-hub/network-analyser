@@ -26,7 +26,8 @@ def test_the_session_keeps_its_temp_files_under_a_private_root(
     assert root.is_dir(), "pytest needs the root to exist before it starts"
     shared = Path(tempfile.gettempdir()).resolve()
     assert root != shared, "a direct run must not fall back to the shared system temp folder"
-    assert shared in root.parents, "the private root sits in the system temp folder"
+    # The root's parent is deliberately not constrained: the documented workaround may point
+    # at a directory inside the worktree, which pytest then uses just as happily.
     assert root in tmp_path_factory.getbasetemp().resolve().parents, (
         "pytest must build its base temp directory under the private root"
     )
