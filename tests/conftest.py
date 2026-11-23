@@ -3,13 +3,20 @@
 Spec #37: tests need no device. Every test also gets its own `%LOCALAPPDATA%` and working
 folder under `tmp_path`, so nothing a command creates (the per-user data folder, the lock
 file, a Run folder under a relative `--runs-dir`) lands in the real profile or the repo.
+
+#193: every run gets a temp root of its own too, so two direct runs in two worktrees never
+share pytest's `pytest-current` link. A root set by `scripts/check.py` (#167) is left alone.
 """
 
+import os
 import socket
 
 import pytest
 
 from network_analyser.advisories import pacing
+from tests.support.pytest_temp_root import seed_pytest_temp_root
+
+seed_pytest_temp_root(os.environ)
 
 
 class NetworkUsedInTestError(RuntimeError):
