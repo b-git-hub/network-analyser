@@ -71,7 +71,7 @@ The facts ride `DeviceRecord.config_facts`; the cli puts them in `AnalysisInput.
 | `hardening-weak-secret-types` | High | `secret_type_0`, `_4`, `_5` (IOS and IOS-XE, not NX-OS; see below), `_7` |
 | `hardening-enable-secret` | High | `enable_secret`, `enable_password` (IOS/IOS-XE only) |
 | `hardening-snmp-v1-v2c` | High; Critical when a read-write community has a default name or no ACL | the four `snmp_v1_v2c_*` facts |
-| `hardening-snmp-v3-priv` | High | `snmp_v3_configured`, `snmp_v3_users`, `snmp_v3_users_without_priv`, `snmp_v3_groups_without_priv`, `snmp_global_enforce_priv` (NX-OS) |
+| `hardening-snmp-v3-priv` | High | `snmp_v3_configured`, `snmp_v3_users`, `snmp_v3_users_without_priv`, `snmp_v3_groups_without_priv`, `snmp_global_enforce_priv` (NX-OS); IOS/IOS-XE read their users from `show snmp user` instead |
 | `hardening-insecure-mode` | High | `insecure_mode` (IOS-XE only) |
 | `hardening-http-server` | High | `http_server` |
 | `hardening-legacy-services` | High | `ip_source_route` (IOS/IOS-XE only), `legacy_services` |

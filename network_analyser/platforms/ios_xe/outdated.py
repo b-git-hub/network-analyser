@@ -17,7 +17,6 @@ from typing import Final
 from network_analyser.platforms.collection import (
     DEVICE_ROLE_CHECK,
     DEVICE_ROLE_LEVEL,
-    DEVICE_ROLE_OUT_OF_DATE,
     DeviceRoleOutOfDate,
     outdated_role,
 )
@@ -29,7 +28,6 @@ __all__ = [
     "CHECK_IDS_BY_COMMAND",
     "DEVICE_ROLE_CHECK",
     "DEVICE_ROLE_LEVEL",
-    "DEVICE_ROLE_OUT_OF_DATE",
     "DeviceRoleOutOfDate",
     "role_out_of_date",
 ]
