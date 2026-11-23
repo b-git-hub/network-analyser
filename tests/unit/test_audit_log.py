@@ -36,8 +36,12 @@ def _scan() -> SecretScan:
     return scan
 
 
-def _open(tmp_path: Path, scan: SecretScan | None = None) -> run_output.AuditLog:
-    return run_output.open_audit_log(_folder(tmp_path), scan or _scan(), now=lambda: WHEN)
+def _open(
+    tmp_path: Path, request: pytest.FixtureRequest, scan: SecretScan | None = None
+) -> run_output.AuditLog:
+    log = run_output.open_audit_log(_folder(tmp_path), scan or _scan(), now=lambda: WHEN)
+    request.addfinalizer(log.close)
+    return log
 
 
 def _lines(tmp_path: Path) -> list[dict[str, object]]:
@@ -52,9 +56,9 @@ def _command(command: str = "show version") -> CommandSent:
 
 
 def test_an_event_is_one_json_line_with_time_event_severity_and_its_fields(
-    tmp_path: Path,
+    tmp_path: Path, request: pytest.FixtureRequest
 ) -> None:
-    log = _open(tmp_path)
+    log = _open(tmp_path, request)
     log.record(_command())
 
     assert _lines(tmp_path) == [
@@ -71,25 +75,29 @@ def test_an_event_is_one_json_line_with_time_event_severity_and_its_fields(
     ]
 
 
-def test_each_line_is_on_disk_as_soon_as_it_is_recorded(tmp_path: Path) -> None:
-    log = _open(tmp_path)
+def test_each_line_is_on_disk_as_soon_as_it_is_recorded(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
+    log = _open(tmp_path, request)
     log.record(_command("terminal length 0"))
     log.record(_command("show version"))
 
     assert [line["command"] for line in _lines(tmp_path)] == ["terminal length 0", "show version"]
 
 
-def test_severity_follows_the_event(tmp_path: Path) -> None:
-    log = _open(tmp_path)
+def test_severity_follows_the_event(tmp_path: Path, request: pytest.FixtureRequest) -> None:
+    log = _open(tmp_path, request)
     log.record(LoginAttempted(DEVICE, 1, "netops-ro", LoginResult.FAILED))
     log.record(RunEnded(RunEnding.CRASHED, 0, 0, 0, 0))
 
     assert [line["severity"] for line in _lines(tmp_path)] == ["warning", "error"]
 
 
-def test_a_secret_in_any_field_is_blocked_and_counted(tmp_path: Path) -> None:
+def test_a_secret_in_any_field_is_blocked_and_counted(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
     scan = _scan()
-    log = _open(tmp_path, scan)
+    log = _open(tmp_path, request, scan)
     log.record(LoginAttempted(DEVICE, 1, f"x{CANARY}", LoginResult.SUCCEEDED))
 
     text = (tmp_path / "20261118T101530Z" / "audit.log").read_text(encoding="utf-8")
@@ -98,18 +106,22 @@ def test_a_secret_in_any_field_is_blocked_and_counted(tmp_path: Path) -> None:
     assert scan.hits == 1
 
 
-def test_a_secret_with_characters_json_escapes_is_still_blocked(tmp_path: Path) -> None:
+def test_a_secret_with_characters_json_escapes_is_still_blocked(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
     tricky = 'CANARY-"pw"\\é'
     scan = SecretScan()
     scan.watch(Secret(tricky))
-    log = _open(tmp_path, scan)
+    log = _open(tmp_path, request, scan)
     log.record(_command(f"show {tricky}"))
 
     assert _lines(tmp_path)[0]["command"] == "show [blocked]"
 
 
-def test_control_characters_never_reach_the_file_raw(tmp_path: Path) -> None:
-    log = _open(tmp_path)
+def test_control_characters_never_reach_the_file_raw(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
+    log = _open(tmp_path, request)
     log.record(_command("show\x1b[2J\x9b version"))
 
     raw = (tmp_path / "20261118T101530Z" / "audit.log").read_bytes()
@@ -118,12 +130,14 @@ def test_control_characters_never_reach_the_file_raw(tmp_path: Path) -> None:
     assert _lines(tmp_path)[0]["command"] == "show\x1b[2J\x9b version"
 
 
-def test_an_event_type_off_the_schema_is_refused(tmp_path: Path) -> None:
+def test_an_event_type_off_the_schema_is_refused(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
     @dataclass(frozen=True, slots=True)
     class WithOutput(CommandSent):
         output: str
 
-    log = _open(tmp_path)
+    log = _open(tmp_path, request)
     sneaky = WithOutput(DEVICE, "show version", 1, 1, CommandResult.OK, "hostname sw-a")
 
     with pytest.raises(run_output.AuditEventRefusedError):
@@ -131,8 +145,10 @@ def test_an_event_type_off_the_schema_is_refused(tmp_path: Path) -> None:
     assert _lines(tmp_path) == []
 
 
-def test_a_value_that_is_not_plain_data_is_refused(tmp_path: Path) -> None:
-    log = _open(tmp_path)
+def test_a_value_that_is_not_plain_data_is_refused(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
+    log = _open(tmp_path, request)
     leak = LoginAttempted(DEVICE, 1, cast("str", Secret(CANARY)), LoginResult.FAILED)
 
     with pytest.raises(run_output.AuditEventRefusedError):
@@ -169,11 +185,14 @@ def test_an_existing_audit_log_is_never_appended_to(tmp_path: Path) -> None:
         run_output.open_audit_log(folder, _scan())
 
 
-def test_a_failed_write_raises_and_every_later_write_does_too(tmp_path: Path) -> None:
+def test_a_failed_write_raises_and_every_later_write_does_too(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
     def disk_full(_handle: int, _data: bytes) -> int:
         raise OSError(28, "No space left on device")
 
     log = run_output.open_audit_log(_folder(tmp_path), _scan(), write=disk_full)
+    request.addfinalizer(log.close)
 
     with pytest.raises(run_output.AuditLogError):
         log.record(_command())
@@ -181,7 +200,7 @@ def test_a_failed_write_raises_and_every_later_write_does_too(tmp_path: Path) ->
         log.record(_command())
 
 
-def test_a_short_write_is_finished(tmp_path: Path) -> None:
+def test_a_short_write_is_finished(tmp_path: Path, request: pytest.FixtureRequest) -> None:
     import os  # noqa: PLC0415 (only this test needs the real write)
 
     def one_byte_at_a_time(handle: int, data: bytes) -> int:
@@ -190,6 +209,7 @@ def test_a_short_write_is_finished(tmp_path: Path) -> None:
     log = run_output.open_audit_log(
         _folder(tmp_path), _scan(), now=lambda: WHEN, write=one_byte_at_a_time
     )
+    request.addfinalizer(log.close)
     log.record(_command())
 
     assert _lines(tmp_path)[0]["command"] == "show version"

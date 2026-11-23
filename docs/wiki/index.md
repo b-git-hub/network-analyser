@@ -13,6 +13,7 @@ A dated, historical record kept by the coordinating (chief-of-staff) session and
 - [review-fixes-implementer-brief-2026-11-22](review-fixes-implementer-brief-2026-11-22.md): the brief every #129 implementer follows on 2026-11-22.
 - [review-fixes-merger-brief-2026-11-22](review-fixes-merger-brief-2026-11-22.md): how a #129 ticket PR is merged into `build/review-fixes-0.3.1`.
 - [review-fixes-gate-baseline-2026-11-22](review-fixes-gate-baseline-2026-11-22.md): the 21 known Windows failures and the two intermittents at `6ce2cf9`.
+- [pytest-temp-roots](pytest-temp-roots.md): how each pytest run, gate (#167) or direct (#193), gets a private temp root, and the false friends around it; 2026-11-23.
 - [review-fixes-retro-2026-11-22](review-fixes-retro-2026-11-22.md): what went wrong in the #129 parallel build and the fixes (gate race, Log-tail conflicts, shell friction).
 - [review-fixes-status-2026-11-22](review-fixes-status-2026-11-22.md): final state of the #129 build: `build/review-fixes-0.3.1` at `a6d7d19`, PR #195, gate counts, partial and operator-only tickets.
 - [review-fixes-closeout-2026-11-23](review-fixes-closeout-2026-11-23.md): the two open #129 children on 2026-11-23: the #165 one-release-per-call match rule and NX-OS OSType decision (PR #198), and #142's code-complete, lab-outstanding state.

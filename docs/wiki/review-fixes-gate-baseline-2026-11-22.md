@@ -54,6 +54,12 @@ workaround below is retired. A plain `uv run --locked python scripts/check.py` i
 worktrees at once was observed to print full summaries with no `PermissionError`. The text
 below is kept as the dated record of the earlier race.
 
+**Extended to direct runs on 2026-11-23 (`ticket-193-pytest-temp-root@39f47d7`, PR
+[#200](https://github.com/b-git-hub/network-analyser/pull/200), [#193](https://github.com/b-git-hub/network-analyser/issues/193)):**
+`tests/conftest.py` now seeds a private `pytest-na-*` root for a direct `pytest` or
+`pytest -m security` run too, unless one is already set. The workaround below is retired for
+every run that collects this repo's `tests/` tree. See [pytest-temp-roots](pytest-temp-roots.md).
+
 Until [#167](https://github.com/b-git-hub/network-analyser/issues/167) lands, two gates run
 at once race on pytest's shared `pytest-current` temp link and one crashes at session finish
 with `PermissionError [WinError 5]` and no summary. Set a worktree-local root before the gate:
