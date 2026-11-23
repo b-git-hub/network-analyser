@@ -1,10 +1,14 @@
 """`ask_cisco`: the lookup questions in, Cisco's answers out (#95; story 18; ADR 0007).
 
-One request per distinct question. EoX takes 20 values per call and Software Suggestion 10;
+One request per distinct question. EoX allows 20 values per call and Software Suggestion 10;
 openVuln takes one release at a time, and the compatible list one chassis PID at a time, paged
-(#127). Software EoX goes in Cisco's query form, `input1` to `input20` as `<release>,<OSType>`;
-hardware EoX stays in the path (#165). Every value is de-duplicated again here, and every value
-is checked against its pattern before a Session is made. A value out of pattern is dropped
+(#127). Hardware EoX stays in the path, up to the 20-PID cap. Software EoX goes in Cisco's query
+form, `input1=<release>,<OSType>`, and every software call carries exactly one release
+(2026-11-23, #165): Cisco echoes the whole `input1=...` text in `EOXInputValue`, and that echo
+never equalled the value sent on the probe, so it is never read. With one release per call every
+record and every unanswered entry belongs to that call's release. Every value is
+de-duplicated again here, and every value is checked against its pattern before a Session is
+made. A value out of pattern is dropped
 on its own and never sent, and the rest of the lookup is still asked: the questions are built
 from pattern-checked device data (ticket #104), so one that arrives here is a bug or an
 attack, and either way it must not leave the PC (story 13, #130). Only when no value is left
@@ -14,7 +18,7 @@ is the call refused whole, with nothing sent.
 """
 
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Final
 
 from network_analyser.advisories.pacing import Pacer
@@ -66,7 +70,11 @@ from network_analyser.records.cisco import (
 )
 
 EOX_BATCH_SIZE: Final = 20
-"""Cisco's EoX limit: 20 PIDs or release strings per call (story 18)."""
+"""Cisco's EoX limit: 20 PIDs or release strings per call (story 18).
+
+Hardware EoX still batches up to it; software EoX asks one release per call (2026-11-23, #165),
+so it is a cap that is never reached, never a batch size.
+"""
 
 SUGGESTION_BATCH_SIZE: Final = 10
 """Cisco's Software Suggestion limit: 10 base PIDs per call (story 18)."""
@@ -77,17 +85,20 @@ EOX_BY_RELEASE: Final = "EOXBySWReleaseString"
 SOFTWARE_OS_TYPE: Final = {
     CiscoOsType.IOS: "IOS",
     CiscoOsType.IOS_XE: "IOS-XE",
+    CiscoOsType.NX_OS: "NX-OS",
 }
-"""The `OSType` names Cisco's software EoX query takes, for the families we know.
+"""The `OSType` names Cisco's software EoX query takes, one per OS family.
 
-NX-OS is left out on purpose: its `OSType` name is not confirmed (#165), and a guessed name
-would send a value we cannot stand behind.
+All three are in the EoX API reference's `SWReleaseStringType` (`OSType`), including `NX-OS`
+(2026-11-23, #165): https://developer.cisco.com/docs/support-apis/eox
 """
 
-SOFTWARE_OS_UNVERIFIED: Final = (
-    "NX-OS software EoX was not asked: its Cisco OSType name is unverified"
-)
-"""Fixed reason for an NX-OS release left out of the software EoX query (#165)."""
+SOFTWARE_OS_UNNAMED: Final = "software EoX was not asked: Cisco has no OSType name for this OS type"
+"""Fail-closed reason for an OS type that has no Cisco `OSType` name (2026-11-23, #165).
+
+Every OS family the tool knows has a name today; this stays for a future one added without
+one, so a release is never sent with a guessed value.
+"""
 
 EOX_MAX_PAGES: Final = 20
 """The most pages one EoX batch may take: a reply naming more is refused, not chased."""
@@ -264,15 +275,20 @@ class _EoxValue:
 def _software_eox(
     session: Session, questions: Sequence[SoftwareEoxQuestion]
 ) -> EoxAnswer | SourceUnavailable:
-    """Ask software EoX in Cisco's query form, one `<release>,<OSType>` per input.
+    """Ask software EoX one release per call, stamping every answer with that release.
 
-    The OS type is sent by its Cisco name; a family whose name is not confirmed is not sent,
-    and that release is `unanswered` with a fixed reason (#165). Batches stay at 20 inputs.
+    Cisco's query form echoes the whole `input1=<release>,<OSType>` text in `EOXInputValue`, and
+    the echo never equalled the value sent on the probe (2026-11-23, #165). It is never read as
+    ownership. Instead each call carries exactly one release, so every record and every
+    unanswered entry in its reply belongs to the release this tool asked about: both are stamped
+    with `_EoxValue.key`, the release the Run keeps and answers by. The 20-input cap is never
+    exceeded because no call asks about more than one release. A family with no Cisco `OSType`
+    name is not sent and is `unanswered` with a fixed reason.
     """
-    unsent = tuple(
-        EoxUnanswered(question.release, SOFTWARE_OS_UNVERIFIED)
+    unnamed = tuple(
+        EoxUnanswered(question.release, SOFTWARE_OS_UNNAMED)
         for question in questions
-        if (os_type := SOFTWARE_OS_TYPE.get(question.os_type)) is None
+        if SOFTWARE_OS_TYPE.get(question.os_type) is None
     )
     values = tuple(
         _EoxValue(question.release, f"{question.release},{os_type}")
@@ -280,11 +296,23 @@ def _software_eox(
         if (os_type := SOFTWARE_OS_TYPE.get(question.os_type)) is not None
     )
     if not values:
-        return EoxAnswer(records=(), unanswered=unsent)
-    answer = _eox(session, EOX_BY_RELEASE, values)
-    if isinstance(answer, SourceUnavailable):
-        return answer
-    return EoxAnswer(records=answer.records, unanswered=unsent + answer.unanswered)
+        return EoxAnswer(records=(), unanswered=unnamed)
+    records: list[EoxRecord] = []
+    unanswered: list[EoxUnanswered] = list(unnamed)
+    for index, value in enumerate(values):
+        if (refusing := session.source_stopped(CiscoEndpoint.EOX)) is not None:
+            unanswered.extend(EoxUnanswered(left.key, refusing) for left in values[index:])
+            break
+        answer = _eox(session, EOX_BY_RELEASE, (value,))
+        if isinstance(answer, SourceUnavailable):
+            if (stopped := session.source_stopped(CiscoEndpoint.EOX)) is None:
+                return answer
+            unanswered.append(EoxUnanswered(value.key, answer.reason))
+            unanswered.extend(EoxUnanswered(left.key, stopped) for left in values[index + 1 :])
+            break
+        records.extend(replace(record, input_value=value.key) for record in answer.records)
+        unanswered.extend(EoxUnanswered(value.key, item.reason) for item in answer.unanswered)
+    return EoxAnswer(records=tuple(records), unanswered=tuple(unanswered))
 
 
 def _eox(session: Session, kind: str, values: Sequence[_EoxValue]) -> EoxAnswer | SourceUnavailable:
@@ -381,7 +409,12 @@ def _eox_values_one_at_a_time(
 
 
 def _eox_path(kind: str, page: int, batch: tuple[_EoxValue, ...]) -> str:
-    """Build one EoX path: hardware in the path, software as `input1..inputN` (#165)."""
+    """Build one EoX path: hardware in the path, software as one `input1` (#165).
+
+    Software EoX is asked one release per call (2026-11-23, #165), so this renders exactly
+    `input1=<release>,<OSType>`; the loop stays for the documented 20-input shape, which a
+    software call never exceeds.
+    """
     base = f"/supporttools/eox/rest/5/{kind}/{page}"
     if kind == EOX_BY_RELEASE:
         inputs = "&".join(

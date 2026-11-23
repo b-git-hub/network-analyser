@@ -15,6 +15,7 @@ A dated, historical record kept by the coordinating (chief-of-staff) session and
 - [review-fixes-gate-baseline-2026-11-22](review-fixes-gate-baseline-2026-11-22.md): the 21 known Windows failures and the two intermittents at `6ce2cf9`.
 - [review-fixes-retro-2026-11-22](review-fixes-retro-2026-11-22.md): what went wrong in the #129 parallel build and the fixes (gate race, Log-tail conflicts, shell friction).
 - [review-fixes-status-2026-11-22](review-fixes-status-2026-11-22.md): final state of the #129 build: `build/review-fixes-0.3.1` at `a6d7d19`, PR #195, gate counts, partial and operator-only tickets.
+- [review-fixes-closeout-2026-11-23](review-fixes-closeout-2026-11-23.md): the two open #129 children on 2026-11-23: the #165 one-release-per-call match rule and NX-OS OSType decision (PR #198), and #142's code-complete, lab-outstanding state.
 - [cloud-container-checks](cloud-container-checks.md): how to run the project's checks in a Linux cloud container (uv 0.13.9 shim).
 - [usage-limits](usage-limits.md): 2026-11-18 rate limit stopped four implementers; how they were resumed and what to change.
 - [agent-worktree-friction](agent-worktree-friction.md): known quirks of agent worktrees and how briefs work around them.
