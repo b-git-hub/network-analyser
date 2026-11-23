@@ -153,7 +153,9 @@ class EoxRecord:
     """One EoX record Cisco returned for a PID or release.
 
     Attributes:
-        input_value: the PID or release Cisco says this record is about.
+        input_value: the PID or release this record belongs to. Hardware keeps Cisco's own
+            echo; software carries the release its one-release call asked about, never Cisco's
+            `EOXInputValue` text (#165).
         input_type: `PID` or `Software`, as the reply names it.
         product_id: the product or software id the record is for.
         description: Cisco's description of it.

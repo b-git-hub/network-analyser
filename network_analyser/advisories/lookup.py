@@ -1,6 +1,6 @@
 """`ask_cisco`: the lookup questions in, Cisco's answers out (#95; story 18; ADR 0007).
 
-One request per distinct question. EoX takes 20 values per call and Software Suggestion 10;
+One request per distinct question. EoX allows 20 values per call and Software Suggestion 10;
 openVuln takes one release at a time, and the compatible list one chassis PID at a time, paged
 (#127). Hardware EoX stays in the path, up to the 20-PID cap. Software EoX goes in Cisco's query
 form, `input1=<release>,<OSType>`, and every software call carries exactly one release
