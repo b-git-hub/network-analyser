@@ -18,6 +18,7 @@ A dated, historical record kept by the coordinating (chief-of-staff) session and
 - [cloud-container-checks](cloud-container-checks.md): how to run the project's checks in a Linux cloud container (uv 0.13.9 shim).
 - [usage-limits](usage-limits.md): 2026-11-18 rate limit stopped four implementers; how they were resumed and what to change.
 - [agent-worktree-friction](agent-worktree-friction.md): known quirks of agent worktrees and how briefs work around them.
+- [windows-check-baseline-2026-11-23](windows-check-baseline-2026-11-23.md): the 2026-11-23 local gate baseline (21 known Windows pytest failures), the `--basetemp` workaround, and the temp headless-browser harness.
 
 ## Decisions
 - [spec-37-implementation-calls](spec-37-implementation-calls.md): 2026-11-18 calls on CI, uv packaging, secret holders and config sinks while building spec #37; 2026-11-19 calls on `diagram.drawio` (#65) and `run-report.html` (#66).
@@ -25,6 +26,7 @@ A dated, historical record kept by the coordinating (chief-of-staff) session and
 - [run-report-analysis-2026-11-21](run-report-analysis-2026-11-21.md): 2026-11-21 Run report summary, Needs attention, Critical/High table and Cisco notes for #110.
 - [operator-wants-cml-build](operator-wants-cml-build.md): 2026-11-18 standing instruction to finish a CML-testable Windows build unattended.
 - [delivery-one-draft-pr](delivery-one-draft-pr.md): spec #37 ships as one draft PR from the integration branch.
+- [drag-diagram-positions-2026-11-23](drag-diagram-positions-2026-11-23.md): 2026-11-23 call to save dragged positions in the browser per diagram file, with Reset, and how #73 was verified.
 
 ## Releases
 - [release-0.3.1-2026-11-22](release-0.3.1-2026-11-22.md): release 0.3.1 (2026-11-22): the #129 review fixes, version and changelog, the no-breaking-change decision, and the gates it passed.

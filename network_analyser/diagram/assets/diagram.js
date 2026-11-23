@@ -62,6 +62,61 @@
   const LABELS = arr(DATA.layout && DATA.layout.labels);
   const posOf = id => POS.get(id) || SPOS.get(id);
 
+  /* ---------- where the operator put each box, in this browser and this file only (#73) ---------- */
+  const LAYOUT_KEY = 'network-analyser.diagram.layout.v1:' + location.pathname;
+  const round1 = n => Math.round(n * 10) / 10;
+  const coord = v => (typeof v === 'number' && isFinite(v) && Math.abs(v) <= 1e6 ? v : null);
+  /* The generated places are kept apart from POS and SPOS, which the drag writes into. */
+  const GENERATED = new Map(), SGENERATED = new Map();
+  for (const [id, p] of POS) GENERATED.set(id, { x: p.x, y: p.y });
+  for (const [id, p] of SPOS) SGENERATED.set(id, { x: p.x, y: p.y });
+
+  /* The saved value is ids and numbers only, never device text. A missing, malformed or
+     unreachable store leaves the generated positions: dragging must still work. */
+  function loadLayout() {
+    let saved;
+    try {
+      saved = JSON.parse(window.localStorage.getItem(LAYOUT_KEY) || 'null');
+    } catch (_) {
+      return; /* storage disabled, or the value is not JSON: keep the generated layout */
+    }
+    if (!saved || saved.version !== 1 || !saved.positions || typeof saved.positions !== 'object') return;
+    for (const id of Object.keys(saved.positions)) {
+      const p = POS.get(id) || SPOS.get(id), xy = saved.positions[id];
+      if (!p || !Array.isArray(xy) || xy.length !== 2) continue;
+      const x = coord(xy[0]), y = coord(xy[1]);
+      if (x === null || y === null) continue;
+      p.x = round1(x);
+      p.y = round1(y);
+    }
+  }
+  function saveLayout() {
+    /* one flat map over every box, so a device keeps its place in every view (story 144) */
+    const positions = [];
+    for (const map of [POS, SPOS]) for (const [id, p] of map) positions.push([id, [round1(p.x), round1(p.y)]]);
+    try {
+      window.localStorage.setItem(LAYOUT_KEY, JSON.stringify({ version: 1, positions: Object.fromEntries(positions) }));
+    } catch (_) {
+      /* storage unavailable (disabled, full, private mode): the drag holds for this viewing */
+    }
+  }
+  function resetLayout() {
+    for (const map of [[POS, GENERATED], [SPOS, SGENERATED]]) {
+      for (const [id, p] of map[1]) {
+        const at = map[0].get(id);
+        if (at) { at.x = p.x; at.y = p.y; }
+      }
+    }
+    try {
+      window.localStorage.removeItem(LAYOUT_KEY);
+    } catch (_) {
+      /* storage unavailable: nothing was saved to remove */
+    }
+    draw(false);
+    canvas.fit(boundsOf(current));
+  }
+  loadLayout();
+
   /* ---------- the Findings tab's model, worked out by the tool (#108) ---------- */
   const FT = DATA.findings && typeof DATA.findings === 'object' ? DATA.findings : {};
   const CHIPS = arr(FT.chips);
@@ -478,21 +533,48 @@
     return isFinite(x0) ? { x0, y0, x1, y1 } : { x0: -100, y0: -100, x1: 100, y1: 100 };
   }
 
-  function attachCanvas(svg, onPick) {
+  function attachCanvas(svg, onPick, onMove) {
     const g = svg.querySelector('.vp'), s = { x: 0, y: 0, k: 1 };
     const apply = () => {
       g.setAttribute('transform', 'translate(' + s.x.toFixed(1) + ' ' + s.y.toFixed(1) + ') scale(' + s.k.toFixed(4) + ')');
       svg.classList.toggle('far', s.k < 0.45);
     };
     let drag = null, moved = false;
-    svg.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, sx: s.x, sy: s.y, id: e.pointerId }; moved = false; });
+    svg.addEventListener('pointerdown', e => {
+      const node = e.button === 0 ? e.target.closest('.node[data-id]') : null;
+      const id = node ? node.getAttribute('data-id') : null;
+      const p = id ? posOf(id) : null;
+      if (p) {
+        drag = { kind: 'node', id, x: e.clientX, y: e.clientY, px: p.x, py: p.y, pointer: e.pointerId };
+        svg.classList.add('dragging');
+      } else {
+        drag = { kind: 'pan', x: e.clientX, y: e.clientY, sx: s.x, sy: s.y, pointer: e.pointerId };
+      }
+      moved = false;
+    });
     svg.addEventListener('pointermove', e => {
       if (!drag) return;
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-      if (!moved && Math.abs(dx) + Math.abs(dy) > 4) { moved = true; try { svg.setPointerCapture(drag.id); } catch (_) { /* not captured */ } }
-      if (moved) { s.x = drag.sx + dx; s.y = drag.sy + dy; apply(); }
+      if (!moved && Math.abs(dx) + Math.abs(dy) > 4) { moved = true; try { svg.setPointerCapture(drag.pointer); } catch (_) { /* not captured */ } }
+      if (!moved) return;
+      if (drag.kind === 'node') {
+        const p = posOf(drag.id);
+        if (!p) return;
+        /* in diagram coordinates: the screen delta over the zoom (#73) */
+        p.x = round1(drag.px + dx / s.k);
+        p.y = round1(drag.py + dy / s.k);
+        onMove();
+        return;
+      }
+      s.x = drag.sx + dx; s.y = drag.sy + dy; apply();
     });
-    const end = () => { drag = null; };
+    const end = () => {
+      if (drag && drag.kind === 'node') {
+        svg.classList.remove('dragging');
+        if (moved) saveLayout();
+      }
+      drag = null;
+    };
     svg.addEventListener('pointerup', end);
     svg.addEventListener('pointercancel', end);
     svg.addEventListener('click', e => {
@@ -803,7 +885,8 @@
       '<span>' + sample('st-inferred') + 'inferred</span><span>' + sample('bundle st-confirmed', true) + 'Bundle</span>' +
       '<span>' + sample('segment') + 'to a Shared Segment</span>' +
       '<span><b class="mk bad">!</b> ' + markCount('bad') + ' mismatch</span><span><b class="mk noisy">~</b> ' + markCount('noisy') + ' one end only</span>' +
-      '<span><b class="mk unknown">?</b> ' + markCount('unknown') + ' not checked</span><span><b class="mk conflict">≠</b> ' + markCount('conflict') + ' conflict</span>' + markerLegend();
+      '<span><b class="mk unknown">?</b> ' + markCount('unknown') + ' not checked</span><span><b class="mk conflict">≠</b> ' + markCount('conflict') + ' conflict</span>' + markerLegend() +
+      '<span>Drag a box, Shared Segment or Subnet to move it</span>';
   }
   app.innerHTML = '<header class="top gut"><h1>Network diagram</h1><div class="stats">' +
     stat(DEV.size, 'Visited Device', 'Visited Devices') + stat(UNV.size, 'Unvisited Device', 'Unvisited Devices') +
@@ -820,7 +903,7 @@
     '<div class="asof gut" id="asof" hidden></div>' +
     '<div class="body"><aside class="side" id="side" hidden></aside>' +
     '<section class="main"><div class="stage"><div class="crumb" id="crumb" hidden></div><svg class="canvas" id="map" role="img" aria-label="Diagram of the Topology"><g class="vp"></g></svg>' +
-    '<div class="zoom"><button data-z="in" aria-label="Zoom in">+</button><button data-z="out" aria-label="Zoom out">−</button><button data-z="fit" aria-label="Fit to view">⤢</button></div></div>' +
+    '<div class="zoom"><button data-z="in" aria-label="Zoom in">+</button><button data-z="out" aria-label="Zoom out">−</button><button data-z="fit" aria-label="Fit to view">⤢</button><button data-z="reset" aria-label="Reset layout" title="Reset layout to the generated positions">↺</button></div></div>' +
     '<div class="detail gut" id="detail" aria-live="polite"></div></section></div>';
 
   const svg = document.getElementById('map'), vp = svg.querySelector('.vp'), panel = document.getElementById('detail');
@@ -835,6 +918,10 @@
   function markSelected() {
     side.querySelectorAll('.chk').forEach(b => b.classList.toggle('on', b.getAttribute('data-check') === S.check));
   }
+  function redraw() {
+    current = scene();
+    render(vp, current);
+  }
   function draw(refit) {
     app.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', String(b.getAttribute('data-tab') === S.tab)));
     app.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-selected', String(b.getAttribute('data-view') === S.view)));
@@ -847,8 +934,7 @@
     crumb.hidden = S.tab !== 'findings' || !label;
     crumb.textContent = label;
     svg.setAttribute('aria-label', S.tab === 'findings' ? 'Map of the Topology with the picked Check lit' : (S.view === 'routing' ? 'Routing (L3) view' : S.view === 'vlan' ? 'VLAN view' : 'Physical view') + ' of the Topology');
-    current = scene();
-    render(vp, current);
+    redraw();
     keyBox.innerHTML = keyHtml();
     const vsel = document.getElementById('vsel');
     if (vsel) vsel.addEventListener('change', () => { S.vlan = parseInt(vsel.value, 10); draw(false); });
@@ -869,10 +955,13 @@
   const canvas = attachCanvas(svg, id => {
     S.pick = id ? { id } : null;
     draw(false);
-  });
+  }, redraw);
   app.querySelectorAll('.zoom button').forEach(b => b.addEventListener('click', () => {
     const z = b.getAttribute('data-z');
-    if (z === 'in') canvas.zoom(1.3); else if (z === 'out') canvas.zoom(1 / 1.3); else canvas.fit(boundsOf(current));
+    if (z === 'in') canvas.zoom(1.3);
+    else if (z === 'out') canvas.zoom(1 / 1.3);
+    else if (z === 'reset') resetLayout();
+    else canvas.fit(boundsOf(current));
   }));
   app.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => {
     const t = b.getAttribute('data-tab');
