@@ -344,8 +344,9 @@ def test_eox_becomes_one_answer_per_pid_and_per_release_asked() -> None:
     assert hardware.items[0].kind is EoxKind.HARDWARE
     assert hardware.items[0].last_date_of_support == "2027-01-01"
     assert software.release == "17.9.4"
-    assert software.items == ()
-    assert software.unanswered == run_analysis.SOFTWARE_EOX_MATCH_PENDING
+    assert software.items[0].kind is EoxKind.SOFTWARE
+    assert software.items[0].name == "17.9.4"
+    assert software.unanswered is None
 
 
 def test_an_eox_no_record_becomes_that_pids_unanswered_reason() -> None:
@@ -382,12 +383,12 @@ def test_an_eox_value_outside_the_safe_pattern_is_marked_not_sent() -> None:
     assert "safe pattern" in hardware.unanswered
 
 
-def test_a_software_release_no_record_becomes_that_release_s_unanswered_reason() -> None:
+def test_a_software_release_no_record_is_silence_and_a_refusal_keeps_its_reason() -> None:
     replies = replace(
         _replies(),
         software_eox=EoxAnswer(
             records=(_eox(input_type="Software"),),
-            unanswered=(EoxUnanswered("17.12.1", "SSA_ERR_026"),),
+            unanswered=(EoxUnanswered("17.99.1", "SSA_ERR_026"),),
         ),
     )
     asked = replace(
@@ -395,6 +396,7 @@ def test_a_software_release_no_record_becomes_that_release_s_unanswered_reason()
         software_releases=(
             SoftwareEoxQuestion(CiscoOsType.IOS_XE, "17.9.4"),
             SoftwareEoxQuestion(CiscoOsType.IOS_XE, "17.12.1"),
+            SoftwareEoxQuestion(CiscoOsType.IOS_XE, "17.99.1"),
         ),
     )
 
@@ -402,17 +404,18 @@ def test_a_software_release_no_record_becomes_that_release_s_unanswered_reason()
 
     assert isinstance(answers.eox, tuple)
     (eox,) = answers.eox
-    assert [(item.release, item.unanswered) for item in eox.software] == [
-        ("17.9.4", run_analysis.SOFTWARE_EOX_MATCH_PENDING),
-        ("17.12.1", "SSA_ERR_026"),
+    assert [(item.release, item.unanswered, bool(item.items)) for item in eox.software] == [
+        ("17.9.4", None, True),
+        ("17.12.1", None, False),
+        ("17.99.1", "SSA_ERR_026", False),
     ]
 
 
-def test_a_software_record_the_match_rule_cannot_name_is_could_not_check_not_no_eox() -> None:
+def test_a_software_record_stamped_to_another_release_is_never_attached() -> None:
     replies = replace(
         _replies(),
         software_eox=EoxAnswer(
-            records=(replace(_eox(input_type="Software"), input_value="17.9.4,IOS-XE"),),
+            records=(replace(_eox(input_type="Software"), input_value="17.12.1"),),
             unanswered=(),
         ),
     )
@@ -423,7 +426,7 @@ def test_a_software_record_the_match_rule_cannot_name_is_could_not_check_not_no_
     (eox,) = answers.eox
     (software,) = eox.software
     assert software.items == ()
-    assert software.unanswered == run_analysis.SOFTWARE_EOX_MATCH_PENDING
+    assert software.unanswered is None
 
 
 def test_an_unavailable_software_eox_leaves_the_hardware_eox_answered() -> None:
@@ -445,7 +448,7 @@ def test_an_unavailable_hardware_eox_leaves_the_software_eox_answered() -> None:
     assert isinstance(answers.eox, tuple)
     (eox,) = answers.eox
     assert [item.unanswered for item in eox.hardware] == ["Cisco did not answer"]
-    assert [item.unanswered for item in eox.software] == [run_analysis.SOFTWARE_EOX_MATCH_PENDING]
+    assert [item.unanswered for item in eox.software] == [None]
 
 
 def test_suggestions_keep_only_the_releases_cisco_suggests() -> None:

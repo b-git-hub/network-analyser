@@ -101,9 +101,6 @@ LOOKUPS_DID_NOT_RUN: Final = "Cisco lookups did not run"
 _VALUE_REFUSED: Final = "Cisco was not asked: the value did not match the safe pattern"
 """The per-value counterpart of `advisories.REFUSED`, for one value of a source (#153)."""
 
-SOFTWARE_EOX_MATCH_PENDING: Final = "software EoX match rule not decided"
-"""Why a software EoX record is "could not check" until the operator's probe decides it (#165)."""
-
 _TRAIN: Final = re.compile(r"^\d{1,3}\.\d{1,3}(?:[.(]|$)")
 _CISCO_OS: Final = {
     OsType.IOS: CiscoOsType.IOS,
@@ -367,7 +364,7 @@ def _hardware_eox_answers(
 def _software_eox_answers(
     source: EoxAnswer | CiscoSourceUnavailable, asked: CiscoQuestions
 ) -> tuple[SoftwareEox, ...]:
-    """One software answer per release asked, never "no EoX" from an undecided match (#165)."""
+    """One software answer per release asked, matched by the release stamped on each record."""
     if isinstance(source, CiscoSourceUnavailable):
         return tuple(
             SoftwareEox(question.release, unanswered=source.reason)
@@ -383,30 +380,26 @@ def _software_eox_answers(
 def _software_eox_answer(
     release: str, source: EoxAnswer, unanswered: dict[str, str]
 ) -> SoftwareEox:
-    """One release's software EoX, with Cisco's reason or the undecided-rule fallback."""
+    """One release's software EoX: its stamped records, and a gap only when Cisco refused it."""
     if not is_safe_release(release):
         return SoftwareEox(release, unanswered=_VALUE_REFUSED)
-    matched = _software_records_for(release, source.records)
-    gap = unanswered.get(release)
-    if matched is None:
-        return SoftwareEox(release, unanswered=gap or SOFTWARE_EOX_MATCH_PENDING)
-    return SoftwareEox(release, items=_items(EoxKind.SOFTWARE, matched), unanswered=gap)
+    return SoftwareEox(
+        release,
+        items=_items(EoxKind.SOFTWARE, _software_records_for(release, source.records)),
+        unanswered=unanswered.get(release),
+    )
 
 
-def _software_records_for(
-    release: str, records: tuple[EoxRecord, ...]
-) -> tuple[EoxRecord, ...] | None:
-    """Return the software EoX records for `release`, or None while the match rule is undecided.
+def _software_records_for(release: str, records: tuple[EoxRecord, ...]) -> tuple[EoxRecord, ...]:
+    """Return the software EoX records stamped with `release`, by exact match only.
 
-    The rule is NOT decided. #148's query-form runs never showed an `EOXInputValue` equal to
-    the release sent, so an exact echo is disproved; the echo for a real release has not been
-    seen. A loose substring match is forbidden because it could attach another release's EoX
-    to this one. The operator's probe in #165 will show what Cisco echoes for a real
-    `release,OSType`; only then may this function match. Until then it matches nothing, so a
-    release with a record reads "could not check", never "no EoX".
+    Every software EoX call carries one release, so `advisories` stamps each record and each
+    unanswered entry with the release it asked about (2026-11-23, #165). Cisco's
+    `EOXInputValue` echo is never the key, and no substring match is allowed: it could attach
+    another release's EoX. A 200 reply with no record for the release means no EoX (silence);
+    a release Cisco explicitly refused carries its reason in `unanswered`.
     """
-    del release, records  # no rule yet; see the docstring and #165
-    return None
+    return tuple(record for record in records if record.input_value == release)
 
 
 def _eox_unanswered(answer: EoxAnswer) -> dict[str, str]:

@@ -45,8 +45,8 @@ class SoftwareEoxQuestion:
     Cisco's query form takes `<release>,<OSType>`, so the OS type travels with the release.
 
     Attributes:
-        os_type: the release's OS family. IOS and IOS-XE are sent; NX-OS is not until its
-            Cisco `OSType` name is confirmed (#165).
+        os_type: the release's OS family. IOS, IOS-XE and NX-OS are each sent by the `OSType`
+            name Cisco's EoX API reference gives (#165).
         release: the release to ask about, already normalised for its family.
     """
 
