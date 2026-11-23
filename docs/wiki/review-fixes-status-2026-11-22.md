@@ -5,6 +5,9 @@ Final state of the #129 review-fix build on 2026-11-22. Every claim is true at
 operator owns the merge, the tag, the GitHub Release and `build.ps1`; none of those were done by
 this session.
 
+**Superseded for #142 and #165 on 2026-11-23** by
+[the closeout page](review-fixes-closeout-2026-11-23.md); everything else here still stands.
+
 ## Integration branch and PR
 
 - **Branch:** `build/review-fixes-0.3.1`, latest sha `a6d7d19`, 106 commits ahead of
