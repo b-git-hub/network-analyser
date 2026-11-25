@@ -22,7 +22,7 @@ None.
 
 ### Changed
 
-- **A password containing `à` cannot be typed at the masked prompt** (#68): the prompt reads keys with `msvcrt.getwch()`, which sends `à` (U+00E0) as the same code that starts an arrow or function key, so `à` and the key typed after it are dropped and the password is read wrong. A login with that wrong password counts towards the device's AAA lockout. Change such a password, or use a Credential Set whose password does not contain `à`. The same applies to the Backup Passphrase and the Cisco API Key. This is documented, not changed: the operator chose to keep the current reader. No command, allow-list entry or Device Role changes.
+- **A password containing `à` cannot be typed at the masked prompt** (#68): the prompt reads keys with `msvcrt.getwch()`, which sends `à` (U+00E0) as the same code that starts an arrow or function key, so `à` and the key typed after it are dropped and the password is read wrong. A login with that wrong password counts towards the device's AAA lockout. Change such a password, or use a Credential Set whose password does not contain `à`. The Backup Passphrase and the Cisco API Key are read the same way: an `à` and the key after it are left out of them too, so such a passphrase is two characters shorter than typed for each `à`. This is documented, not changed: the operator chose to keep the current reader. No command, allow-list entry or Device Role changes.
 
 ### Fixed
 
