@@ -8,9 +8,10 @@ It never writes a typed character anywhere, and it returns a `Secret`, never a `
 Ctrl+C at any prompt raises KeyboardInterrupt, and input that ends before the answer raises
 EOFError; `cli.app` turns both into exit code 3 with no traceback.
 
-A known limit of `getwch()`: it returns the letter a-grave (U+00E0) as the same code that
-starts an arrow or function key, so that letter, and the key typed after it, never reach the
-secret. The lab checklist (G6) records how this behaves on Windows.
+A known limit, kept on purpose (#68, operator decision 2026-11-25): `getwch()` returns the
+letter a-grave (U+00E0) as the code that starts an arrow or function key, so that letter and
+the key typed after it never reach the secret. A password containing it cannot be typed here.
+The lab checklist (G6) records how this behaves on Windows.
 """
 
 import sys
@@ -98,6 +99,17 @@ class Prompter:
 
 
 def _read_masked(console: Console, prompt: str) -> Secret:
+    """Read a secret key by key, showing one `*` per character kept.
+
+    `msvcrt.getwch()` returns an arrow or function key as two codes: a prefix (0x00 or 0xE0)
+    and then the key's own code. The prefix 0xE0 is also the code for the letter a-grave
+    (U+00E0), and `getwch()` cannot tell them apart. So a typed a-grave is read as a
+    prefix: it and the key typed after it are both dropped, and the secret comes back wrong.
+    Logging in with that wrong password counts as a failed attempt towards the device's AAA
+    lockout. The operator decided on #68 (2026-11-25) to keep this loop and document the limit
+    rather than read key events with `ReadConsoleInputW`:
+    https://github.com/b-git-hub/network-analyser/issues/68
+    """
     console.write(prompt)
     typed: list[str] = []
     try:

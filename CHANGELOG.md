@@ -20,6 +20,10 @@ None.
 
 None.
 
+### Changed
+
+- **A password containing `à` cannot be typed at the masked prompt** (#68): the prompt reads keys with `msvcrt.getwch()`, which sends `à` (U+00E0) as the same code that starts an arrow or function key, so `à` and the key typed after it are dropped and the password is read wrong. A login with that wrong password counts towards the device's AAA lockout. Change such a password, or use a Credential Set whose password does not contain `à`. The same applies to the Backup Passphrase and the Cisco API Key. This is documented, not changed: the operator chose to keep the current reader. No command, allow-list entry or Device Role changes.
+
 ### Fixed
 
 - **Software end-of-life now answers per release** (#165): each software EoX call carries exactly one release, `EOXBySWReleaseString/<page>?input1=<release>,<OSType>`, so every record and every unanswered entry in Cisco's reply belongs to the release the tool asked about. Cisco's `EOXInputValue` echo is never read as ownership, and no substring match is used. NX-OS software end-of-life is now asked as `NX-OS`, the name Cisco's EoX API reference gives, instead of reading "could not check". A release Cisco answers with no EoX now reads as silence, while a release Cisco explicitly refuses still reads "could not check" with its reason. Hardware EoX keeps its 20-PID batches. No `format_version` change.
