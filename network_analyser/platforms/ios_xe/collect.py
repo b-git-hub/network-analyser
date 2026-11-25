@@ -153,9 +153,15 @@ def _interfaces(
     if shown is None:
         return part.reading(())
     if router:  # no switchports, trunks or bundles to ask about (#72)
+        no_ports: dict[str, parsers.Switchport] = {}
+        no_trunks: dict[str, parsers.Trunk] = {}
+        no_bundles: dict[str, str] = {}
         part.take(c.SHOW_IP_INTERFACE, ips)
         return part.reading(
-            tuple(_interface(one, {}, {}, ips, {}, stacked=stacked) for one in shown)
+            tuple(
+                _interface(one, no_ports, no_trunks, ips, no_bundles, stacked=stacked)
+                for one in shown
+            )
         )
     ports = asker.ask(c.SHOW_INTERFACES_SWITCHPORT, parsers.switchports)
     trunks = asker.ask(c.SHOW_INTERFACES_TRUNK, parsers.trunks)

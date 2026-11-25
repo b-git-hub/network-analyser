@@ -13,6 +13,7 @@ from network_analyser.records.device import DeviceRecord, UnvisitedReason, Versi
 from network_analyser.records.events import DeviceOutcome
 from network_analyser.records.topology import EvidenceSource, UnknownInterfaceName
 from network_analyser.records.unknown import Unknown
+from network_analyser.topology.devices import NO_VLANS_ON_A_ROUTER
 from tests.support.topology_records import (
     CDP,
     NOT_IN_TEST,
@@ -110,7 +111,7 @@ def test_a_routers_parts_that_do_not_apply_are_not_skipped_checks() -> None:
     built = topology.build([router])
 
     assert not {s.data for s in built.skipped} & {"vlans", "port_channels", "mac"}
-    assert built.devices[0].vlan_database == Unknown("VLANs do not apply to a router")
+    assert built.devices[0].vlan_database == Unknown(NO_VLANS_ON_A_ROUTER)
 
 
 def test_the_topology_holds_no_username() -> None:

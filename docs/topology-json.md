@@ -61,7 +61,7 @@ Ids hold only letters, digits, `.`, `-` and `_`. Items point at devices by id.
 | `findings` | things to look at (conflicts, Bundle member mismatches, VLAN Mismatches) |
 | `adjacencies` | L3 Adjacencies (#62). Empty when there are none |
 | `subnets` | Subnets (#62): a prefix in one VRF shared by three or more devices. Empty when there are none |
-| `skipped` | data not collected, per device, so its checks were skipped (story 126) |
+| `skipped` | data not collected, per device, so its checks were skipped (story 126). A part that does not apply (an IOS-XE router's VLANs, port-channels and MAC table, #72) is not listed |
 | `unknown_interface_names` | interface names the table did not know (story 127) |
 | `cisco_lookups` | optional (#104, read by #108): whether Cisco was asked during the Run and when |
 | `analysis` | Analysis's advice and per-Check list (#94), or `null` before Analysis has run |
@@ -83,7 +83,7 @@ Ids hold only letters, digits, `.`, `-` and `_`. Items point at devices by id.
 `advice` (#105, written from #124, read by #107, #108 and #109): the per-device Analysis advice: `outcome` (its Advisory outcome as text: "N Advisories match", "no known Critical/High Advisories for release X" or "could not check: reason"), `upgrade_target` (the release to move to, or the fixed text "no fix in Train T" / "no Critical/High Advisories" / "not available"), `latest_release` (newest overall; `latest_in_train` holds the newest in its Train), `latest_release_lifecycle` and `latest_in_train_lifecycle` (Cisco's lifecycle code beside each Latest Release, or `null` when there is none, #127), `train` (for example `17.12`, so the pages can say "no fix in Train T") and `not_cleared` (`0` when the target clears every Advisory, otherwise how many Advisories have no fix in the Train, #124). Optional, so a file from before #105, or a device Analysis did not advise, has none and the pages show "not available" rather than guessing (#89). The same record also stays in `analysis.advice[]` (`advisory_outcome` in its structured form). A version-3 file always records `not_cleared`; when a hand-edited or damaged file holds no usable count (absent, negative, fractional, true/false, text or null), `render` shows "count not recorded" beside the target rather than 0, because 0 would claim the target clears every Advisory (#146).
 
 
-`vlan_database` (#64): the VLANs in the device's VLAN database, active or not, as `[first, last]` ranges. Unknown when it was not collected or is incomplete. A trunk's effective VLANs are its `allowed_vlans` that are also here (#61's rule). A file written before #64 lacks the key, which reads as unknown.
+`vlan_database` (#64): the VLANs in the device's VLAN database, active or not, as `[first, last]` ranges. Unknown when it was not collected or is incomplete. On an IOS-XE router (#72) it is Unknown with the reason "VLANs do not apply to a router": the VLAN database is not read there, and the value stays Unknown rather than null so older files and `render` read it unchanged. A trunk's effective VLANs are its `allowed_vlans` that are also here (#61's rule). A file written before #64 lacks the key, which reads as unknown.
 
 `interfaces[]`: every interface, down ones included: `name`, `description`, `admin_up`, `line_up`, `speed`, `mode` (`access` / `trunk` / `routed` / `other`), `access_vlan`, `native_vlan`, `allowed_vlans`, `ip` (`vrf`, `addresses[]` primary first, `unnumbered`), `bundle` (port-channel short name), `stack_member`.
 
