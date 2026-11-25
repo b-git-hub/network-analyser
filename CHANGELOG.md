@@ -23,6 +23,7 @@ None.
 ### Fixed
 
 - **Software end-of-life now answers per release** (#165): each software EoX call carries exactly one release, `EOXBySWReleaseString/<page>?input1=<release>,<OSType>`, so every record and every unanswered entry in Cisco's reply belongs to the release the tool asked about. Cisco's `EOXInputValue` echo is never read as ownership, and no substring match is used. NX-OS software end-of-life is now asked as `NX-OS`, the name Cisco's EoX API reference gives, instead of reading "could not check". A release Cisco answers with no EoX now reads as silence, while a release Cisco explicitly refuses still reads "could not check" with its reason. Hardware EoX keeps its 20-PID batches. No `format_version` change.
+- **Windows automatic proxy detection (WPAD) is now noticed** (#192): the tool reads the AutoDetect flag and the auto-config URL from Windows' binary `DefaultConnectionSettings` value. When WPAD is the only proxy setting, `run` says "Windows automatic proxy detection (WPAD) is on; the tool does not use WPAD and connects directly." and connects directly, as before. A PAC URL found in that value is refused like `AutoConfigURL`. Nothing is fetched: no WPAD lookup and no PAC download. A fixed `ProxyServer` still wins, and the bypass list is still not honoured.
 
 ## [0.3.1] - 2026-11-22
 

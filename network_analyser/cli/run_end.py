@@ -21,13 +21,15 @@ output (story 120, #143).
 
 import sys
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
 from network_analyser import backup_store
-from network_analyser.advisories import LookupInterrupted, ProxyConfig
+from network_analyser._winsys import WindowsProxy, system_proxy
+from network_analyser.advisories import LookupInterrupted, ProxyConfig, wpad_ignored
 from network_analyser.advisories.session import REJECTED, TOKEN_EXPIRED
 from network_analyser.cli import run_analysis, run_topology
 from network_analyser.cli.parser import PROG
@@ -50,6 +52,12 @@ NO_KEY_NOTICE: Final = (
     f'"{PROG} cisco-key set", or pass --cisco-lookups off.'
 )
 """The one notice a Run with no key prints before the first prompt (story 35)."""
+
+WPAD_NOTICE: Final = (
+    "Windows automatic proxy detection (WPAD) is on; the tool does not use WPAD and "
+    "connects directly. Pass --proxy HOST:PORT to use a proxy."
+)
+"""The notice a Run gives when WPAD is Windows' only proxy setting (#192)."""
 
 NO_KEY_ATTENTION: Final = (
     "No Cisco API key is stored, so Cisco lookups did not run. Add one with "
@@ -114,6 +122,18 @@ def missing_key_notice(*, lookups_enabled: bool, key_file: Path) -> str | None:
     """Return the notice to print before the first prompt, or None when none is due."""
     if lookups_enabled and not key_file.is_file():
         return NO_KEY_NOTICE
+    return None
+
+
+def wpad_notice(
+    *,
+    lookups_enabled: bool,
+    proxy: ProxyConfig,
+    system: Callable[[], WindowsProxy | None] = system_proxy,
+) -> str | None:
+    """Return the WPAD notice to print before the first prompt, or None when none is due."""
+    if lookups_enabled and wpad_ignored(proxy, system=system):
+        return WPAD_NOTICE
     return None
 
 

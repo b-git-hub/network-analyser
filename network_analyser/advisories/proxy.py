@@ -9,6 +9,9 @@ or a PAC script with no fixed proxy beside it) is refused rather than ignored, s
 quietly goes direct when the operator expected a proxy. A fixed `ProxyServer` wins over a PAC
 script, because it is the setting the tool can honour. The fence itself is unaffected: whatever
 the proxy, it only ever learns the exact Cisco host and port.
+
+Windows' automatic detection (WPAD) alone is not used: the tool connects directly and the Run
+prints a notice (`wpad_ignored`, #192); nothing is fetched.
 """
 
 import re
@@ -103,13 +106,34 @@ def resolve_proxy(
     return _windows(system())
 
 
+def wpad_ignored(
+    config: ProxyConfig, *, system: Callable[[], WindowsProxy | None] = system_proxy
+) -> bool:
+    """Whether Windows' only proxy setting is WPAD, which the tool does not use (#192).
+
+    True only in Windows mode with AutoDetect on and no fixed proxy or PAC URL; the Run then
+    connects directly and says so. Nothing is fetched.
+    """
+    if config.mode is not ProxyMode.WINDOWS:
+        return False
+    setting = system()
+    return (
+        setting is not None
+        and setting.auto_detect
+        and setting.server is None
+        and setting.script is None
+    )
+
+
 def _windows(setting: WindowsProxy | None) -> ProxyTarget | ProxyNotUsable | None:
     if setting is None:
         return None
     if setting.server is None:
-        return ProxyNotUsable(
-            "the Windows proxy setting is a PAC script, which the tool cannot use"
-        )
+        if setting.script is not None:
+            return ProxyNotUsable(
+                "the Windows proxy setting is a PAC script, which the tool cannot use"
+            )
+        return None  # WPAD alone is not used: connect directly (#192)
     address = _chosen_address(setting.server)
     if address is None:
         return ProxyNotUsable("the Windows proxy setting names no HTTP proxy")

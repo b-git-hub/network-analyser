@@ -40,6 +40,7 @@ from network_analyser.advisories.proxy import (
     ProxyNotUsable,
     ProxyTarget,
     resolve_proxy,
+    wpad_ignored,
 )
 from network_analyser.advisories.transport import (
     HttpRequest,
@@ -71,4 +72,5 @@ __all__ = [
     "is_safe_platform_alias",
     "is_safe_release",
     "resolve_proxy",
+    "wpad_ignored",
 ]

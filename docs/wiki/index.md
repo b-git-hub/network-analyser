@@ -29,6 +29,7 @@ A dated, historical record kept by the coordinating (chief-of-staff) session and
 - [operator-wants-cml-build](operator-wants-cml-build.md): 2026-11-18 standing instruction to finish a CML-testable Windows build unattended.
 - [delivery-one-draft-pr](delivery-one-draft-pr.md): spec #37 ships as one draft PR from the integration branch.
 - [drag-diagram-positions-2026-11-23](drag-diagram-positions-2026-11-23.md): 2026-11-23 call to save dragged positions in the browser per diagram file, with Reset, and how #73 was verified.
+- [wininet-autodetect-2026-11-25](wininet-autodetect-2026-11-25.md): 2026-11-25 #192 parser-only scope: WinINET AutoDetect read and noticed (direct connection kept), blob PAC URL refused; bypass list and by-hand check stay with the operator.
 
 ## Releases
 - [release-0.3.1-2026-11-22](release-0.3.1-2026-11-22.md): release 0.3.1 (2026-11-22): the #129 review fixes, version and changelog, the no-breaking-change decision, and the gates it passed.
