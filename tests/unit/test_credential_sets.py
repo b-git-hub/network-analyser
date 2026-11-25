@@ -10,7 +10,14 @@ import threading
 
 import pytest
 
-from network_analyser.credentials import MAX_SETS, CredentialSet, CredentialSets, Secret
+from network_analyser.credentials import (
+    MAX_SETS,
+    PASSWORD_MIN,
+    CredentialSet,
+    CredentialSets,
+    Secret,
+    password_problem,
+)
 from network_analyser.records import CredentialSetResult, CredentialSetView, Platform
 
 CANARY = "CANARY-pw-5b2e"
@@ -49,6 +56,19 @@ def test_an_empty_password_is_refused() -> None:
 def test_an_empty_username_is_refused() -> None:
     with pytest.raises(ValueError, match="needs a username"):
         CredentialSet("  ", Secret(CANARY), None)
+
+
+def test_a_credential_set_password_under_four_characters_has_a_problem() -> None:
+    assert PASSWORD_MIN == 4
+    for value in ("a", "ab", "abc"):
+        assert password_problem(Secret(value)) == (
+            "a Credential Set password must be at least 4 characters"
+        )
+
+
+def test_a_credential_set_password_of_four_or_more_characters_has_no_problem() -> None:
+    assert password_problem(Secret("abcd")) is None
+    assert password_problem(Secret("CANARY-pw-ok")) is None
 
 
 def test_a_run_takes_one_to_five_sets() -> None:

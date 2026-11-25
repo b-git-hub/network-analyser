@@ -3,7 +3,9 @@
 Every line bound for `audit.log`, the console, and later `topology.json`, the diagram and the
 Run report passes through `SecretScan.contains_secret` first. It looks for the Run's own
 Credential Set passwords and its Backup Passphrase, exactly and case-sensitively, and replaces
-each match with `[blocked]`. The Run carries on; the hit count is kept so the Run can warn once,
+each match with `[blocked]`. A secret shorter than eight characters is not matched where a
+letter or digit at its edge runs straight into a letter or digit of ordinary text; longer ones
+match anywhere (#70). The Run carries on; the hit count is kept so the Run can warn once,
 never saying which set matched.
 
 The scan lives in `credentials`, so the modules that write never hold a secret: they hand text
@@ -20,6 +22,7 @@ The fingerprints are dropped by `forget()` once every output is written.
 """
 
 import hmac
+import re
 import secrets
 import threading
 from collections.abc import Mapping
@@ -32,6 +35,14 @@ BLOCKED: Final = "[blocked]"
 _PREFIX: Final = 4
 """Characters of a secret the rolling hash screens on; the fingerprint decides every match. A
 secret shorter than this is hashed window by window instead."""
+_WHOLE_WORD_BELOW: Final = 8
+"""A secret shorter than this is not matched where a letter or digit at its edge runs straight
+into a letter or digit of ordinary text. Longer secrets match anywhere, as before (#70)."""
+_ESCAPED_BEFORE: Final = re.compile(
+    r"\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[tnr])\Z"
+)
+"""An escape the tool writes for a control or non-ASCII character: a boundary, not a letter."""
+_ESCAPE_REACH: Final = 10
 _DIGEST: Final = "sha256"
 _MASK: Final = (1 << 64) - 1
 _KEY_BYTES: Final = 32
@@ -167,8 +178,36 @@ class SecretScan:
 
 
 def _matches(text: str, watching: _Watching) -> list[tuple[int, int]]:
-    """Every (start, stop) where a watched secret occurs, overlapping occurrences included."""
-    return [*_short_matches(text, watching), *_prefix_matches(text, watching)]
+    """Every (start, stop) where a watched secret occurs, overlapping occurrences included.
+
+    A secret shorter than `_WHOLE_WORD_BELOW` counts only where it stands alone (#70).
+    """
+    found = [*_short_matches(text, watching), *_prefix_matches(text, watching)]
+    covered = {index for start, stop in found for index in range(start, stop)}
+    return [(start, stop) for start, stop in found if _counts(text, start, stop, covered)]
+
+
+def _counts(text: str, start: int, stop: int, covered: set[int]) -> bool:
+    r"""Say whether a match at text[start:stop] is blocked: long, or standing alone (#70).
+
+    It is glued on a side only where its own edge character and the one beside it are both
+    letters or digits, that neighbour is not part of another match, and (before it) the
+    neighbour does not end an escape such as `\x09`.
+    """
+    if stop - start >= _WHOLE_WORD_BELOW:
+        return True
+    before = (
+        start == 0
+        or not (text[start - 1].isalnum() and text[start].isalnum())
+        or start - 1 in covered
+        or _ESCAPED_BEFORE.search(text, max(0, start - _ESCAPE_REACH), start) is not None
+    )
+    after = (
+        stop == len(text)
+        or not (text[stop].isalnum() and text[stop - 1].isalnum())
+        or stop in covered
+    )
+    return before and after
 
 
 def _short_matches(text: str, watching: _Watching) -> list[tuple[int, int]]:

@@ -10,18 +10,22 @@ from network_analyser.credentials.secret import Secret
 from network_analyser.credentials.sets import (
     MAX_FAILURE_BUDGET,
     MAX_SETS,
+    PASSWORD_MIN,
     CredentialSet,
     CredentialSets,
     LoginLease,
+    password_problem,
 )
 
 __all__ = [
     "BLOCKED",
     "MAX_FAILURE_BUDGET",
     "MAX_SETS",
+    "PASSWORD_MIN",
     "CredentialSet",
     "CredentialSets",
     "LoginLease",
     "Secret",
     "SecretScan",
+    "password_problem",
 ]
