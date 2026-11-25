@@ -45,6 +45,16 @@ def supports_insecure_configuration(version: VersionFacts) -> bool:
     return numbers >= _INSECURE_CONFIGURATION_FLOOR
 
 
+def is_router(version: VersionFacts) -> bool:
+    """Say whether `show version` marks the device as an IOS-XE router (#72).
+
+    Only a router prints `Router operating mode:` (autonomous or controller-managed); a
+    Catalyst switch and classic IOS print none, so an unmarked device keeps every switch
+    command and no switch data is ever skipped on a guess.
+    """
+    return version.router_operating_mode is not None
+
+
 def read_version(text: str) -> VersionFacts:
     """Return the hostname, model, software version, stack serials and operating mode."""
     rows = parse(_TEMPLATES, SHOW_VERSION, text)

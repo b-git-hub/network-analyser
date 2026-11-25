@@ -20,10 +20,16 @@ None.
 
 None.
 
+### Changed
+
+- **A password containing `à` cannot be typed at the masked prompt** (#68): the prompt reads keys with `msvcrt.getwch()`, which sends `à` (U+00E0) as the same code that starts an arrow or function key, so `à` and the key typed after it are dropped and the password is read wrong. A login with that wrong password counts towards the device's AAA lockout. Change such a password, or use a Credential Set whose password does not contain `à`. The Backup Passphrase and the Cisco API Key are read the same way: an `à` and the key after it are left out of them too, so such a passphrase is two characters shorter than typed for each `à`. This is documented, not changed: the operator chose to keep the current reader. No command, allow-list entry or Device Role changes.
+
 ### Fixed
 
+- **IOS-XE routers are no longer reported as denying switch commands** (#72): a device whose `show version` prints `Router operating mode:` is now treated as a router and is not sent `show interfaces switchport`, `show interfaces trunk`, `show etherchannel summary`, `show vlan brief` or `show mac address-table`. Its interfaces are recorded as routed, and its VLAN, port-channel and MAC data read as not applicable, so the Run report no longer lists them under "Not collected, so not checked". A switch, or a router whose release prints no such line, is sent every command as before. The allow-list is unchanged. No `format_version` change.
 - **Software end-of-life now answers per release** (#165): each software EoX call carries exactly one release, `EOXBySWReleaseString/<page>?input1=<release>,<OSType>`, so every record and every unanswered entry in Cisco's reply belongs to the release the tool asked about. Cisco's `EOXInputValue` echo is never read as ownership, and no substring match is used. NX-OS software end-of-life is now asked as `NX-OS`, the name Cisco's EoX API reference gives, instead of reading "could not check". A release Cisco answers with no EoX now reads as silence, while a release Cisco explicitly refuses still reads "could not check" with its reason. Hardware EoX keeps its 20-PID batches. No `format_version` change.
 - **Windows automatic proxy detection (WPAD) is now noticed** (#192): the tool reads the AutoDetect flag and the auto-config URL from Windows' binary `DefaultConnectionSettings` value. When WPAD is the only proxy setting, `run` says "Windows automatic proxy detection (WPAD) is on; the tool does not use WPAD and connects directly." and connects directly, as before. A PAC URL found in that value is refused like `AutoConfigURL`. Nothing is fetched: no WPAD lookup and no PAC download. A fixed `ProxyServer` still wins, and the bypass list is still not honoured.
+- **A short Credential Set password no longer blocks ordinary text** (#70): a Credential Set password must now be at least 4 characters, refused at its prompt before it joins the secret scan. A secret shorter than 8 characters is blocked only where it stands alone, with no letter or digit beside it, so it no longer blocks letters inside prompts, usernames, device output or the Run folder path, and no longer refuses the Run because of the default `%LOCALAPPDATA%\NetworkAnalyser\runs` path. Secrets of 8 or more characters, the Backup Passphrase among them, are matched anywhere, as before.
 
 ## [0.3.1] - 2026-11-22
 

@@ -26,6 +26,7 @@ from network_analyser.credentials import (
     CredentialSets,
     Secret,
     SecretScan,
+    password_problem,
 )
 from network_analyser.records import Platform
 
@@ -165,11 +166,19 @@ def _username(ask: Prompter, number: int) -> str:
 
 
 def _password(ask: Prompter, shown_username: str) -> Secret:
+    """Ask until a password the Run can take is typed; it joins the scan only after (#70)."""
     while True:
         password = ask.secret(f"Password for {shown_username}: ")
-        if not password.is_empty():
+        if password.is_empty():
+            ask.say("  A Credential Set needs a password. Type it again (Ctrl+C cancels the Run).")
+            continue
+        problem = password_problem(password)
+        if problem is None:
             return password
-        ask.say("  A Credential Set needs a password. Type it again (Ctrl+C cancels the Run).")
+        ask.say(
+            f"  Refused: {problem}, so the secret scan can tell it\n"
+            "  apart from ordinary text. Type it again (Ctrl+C cancels the Run)."
+        )
 
 
 def _platform_limit(ask: Prompter, shown_username: str) -> Platform | None:
