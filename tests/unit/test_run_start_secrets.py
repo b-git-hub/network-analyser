@@ -315,6 +315,7 @@ def test_a_short_password_inside_the_run_folder_path_does_not_refuse_the_run(
     got = run(*FLAGS, typed=answers)
 
     assert got.code == ExitCode.CLEAN
+    assert "[blocked]" not in got.out + got.err
     assert "Run folder's path" not in got.err
     (folder,) = _run_folders()
     assert f"Run folder created: {folder}\n" in got.out

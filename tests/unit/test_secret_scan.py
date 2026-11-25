@@ -186,6 +186,25 @@ def test_a_secret_of_eight_or_more_characters_is_blocked_inside_a_word() -> None
     assert _scan("CANARY-8").contains_secret("xCANARY-8y") == ("x[blocked]y", 1)
 
 
+def test_a_short_secret_with_a_symbol_at_its_edge_is_blocked_beside_a_letter() -> None:
+    assert _scan("!ab3").contains_secret("x!ab3") == ("x[blocked]", 1)
+    assert _scan("ab3!").contains_secret("ab3!x") == ("[blocked]x", 1)
+    assert _scan("!@#$").contains_secret("a!@#$b") == ("a[blocked]b", 1)
+    assert _scan("ops1").contains_secret("netops1") == ("netops1", 0)
+
+
+def test_a_short_secret_right_after_an_escaped_character_is_blocked() -> None:
+    scan = _scan("ops1")
+    assert scan.contains_secret(r"key x\x09ops1") == (r"key x\x09[blocked]", 1)
+    assert scan.contains_secret(r"a\u00a0ops1") == (r"a\u00a0[blocked]", 1)
+    assert scan.contains_secret(r"a\tops1") == (r"a\t[blocked]", 1)
+
+
+def test_a_short_secret_beside_another_secret_is_blocked() -> None:
+    assert _scan("ops1", "CANARY-long-1").contains_secret("CANARY-long-1ops1") == ("[blocked]", 1)
+    assert _scan("ops1", "abc9").contains_secret("pw ops1abc9 end") == ("pw [blocked] end", 1)
+
+
 def test_a_short_secret_inside_the_run_folder_path_does_not_hold_a_secret() -> None:
     path = r"C:\Users\op\AppData\Local\NetworkAnalyser\runs\20261125T000000Z_lab"
     assert not _scan("n", "lyse", "work").holds_secret(path)
