@@ -129,7 +129,7 @@ def _after_folder_checks(
         return loaded
     lookups = _lookups_enabled(args, loaded)
     _print_missing_key_notice(data, lookups=lookups)
-    _print_wpad_notice(args, lookups=lookups)
+    _print_wpad_notice(args, data, lookups=lookups)
     ask = Prompter.for_this_process()
     request = run_start.scope_and_seeds(args, loaded, ask)
     if isinstance(request, ExitCode):
@@ -313,11 +313,15 @@ def _print_missing_key_notice(data: run_output.DataFolder, *, lookups: bool) -> 
         print(notice)
 
 
-def _print_wpad_notice(args: argparse.Namespace, *, lookups: bool) -> None:
+def _print_wpad_notice(
+    args: argparse.Namespace, data: run_output.DataFolder, *, lookups: bool
+) -> None:
     """Print the WPAD notice once, before the first prompt (#192)."""
     address = getattr(args, "proxy", None)
     config = ProxyConfig.explicit(address) if address else ProxyConfig()
-    notice = run_end.wpad_notice(lookups_enabled=lookups, proxy=config)
+    notice = run_end.wpad_notice(
+        lookups_enabled=lookups, key_file=data.cisco_key_file, proxy=config
+    )
     if notice is not None:
         print(notice)
 

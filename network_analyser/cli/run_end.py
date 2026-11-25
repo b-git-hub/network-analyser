@@ -128,11 +128,13 @@ def missing_key_notice(*, lookups_enabled: bool, key_file: Path) -> str | None:
 def wpad_notice(
     *,
     lookups_enabled: bool,
+    key_file: Path,
     proxy: ProxyConfig,
-    system: Callable[[], WindowsProxy | None] = system_proxy,
+    system: Callable[[], WindowsProxy | None] | None = None,
 ) -> str | None:
     """Return the WPAD notice to print before the first prompt, or None when none is due."""
-    if lookups_enabled and wpad_ignored(proxy, system=system):
+    read = system_proxy if system is None else system
+    if lookups_enabled and key_file.is_file() and wpad_ignored(proxy, system=read):
         return WPAD_NOTICE
     return None
 

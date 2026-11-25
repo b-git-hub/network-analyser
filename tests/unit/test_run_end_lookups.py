@@ -692,9 +692,47 @@ def test_a_rejected_key_never_says_the_lookups_did_not_run_after_an_answer() -> 
     assert "cisco-key set" in line
 
 
-def test_wpad_alone_gives_one_notice() -> None:
+def test_a_run_with_wpad_alone_prints_the_notice_once_before_the_prompts(
+    run: Runner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _store_key()
+    _serve(monkeypatch, _fake())
+    monkeypatch.setattr(run_end, "system_proxy", lambda: WindowsProxy(auto_detect=True))
+
+    got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
+
+    assert got.out.count(run_end.WPAD_NOTICE) == 1
+    assert got.out.index(run_end.WPAD_NOTICE) < got.out.index("Scope (")
+
+
+def test_a_run_with_proxy_gives_no_wpad_notice(
+    run: Runner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _store_key()
+    _serve(monkeypatch, _fake())
+    monkeypatch.setattr(run_end, "system_proxy", lambda: WindowsProxy(auto_detect=True))
+
+    got = run(
+        *FLAGS,
+        "--cisco-lookups",
+        "on",
+        "--proxy",
+        "proxy.example:8080",
+        typed=later_run(),
+    )
+
+    assert run_end.WPAD_NOTICE not in got.out
+
+
+def test_wpad_alone_gives_one_notice(tmp_path: Path) -> None:
+    key_file = tmp_path / "k"
+    key_file.write_bytes(b"x")
+
     notice = run_end.wpad_notice(
-        lookups_enabled=True, proxy=ProxyConfig(), system=lambda: WindowsProxy(auto_detect=True)
+        lookups_enabled=True,
+        key_file=key_file,
+        proxy=ProxyConfig(),
+        system=lambda: WindowsProxy(auto_detect=True),
     )
 
     assert notice == run_end.WPAD_NOTICE
@@ -710,10 +748,31 @@ def test_wpad_alone_gives_one_notice() -> None:
     ],
 )
 def test_no_wpad_notice_when_it_does_not_apply(
-    *, lookups_enabled: bool, proxy: ProxyConfig, setting: WindowsProxy | None
+    *,
+    lookups_enabled: bool,
+    proxy: ProxyConfig,
+    setting: WindowsProxy | None,
+    tmp_path: Path,
 ) -> None:
+    key_file = tmp_path / "k"
+    key_file.write_bytes(b"x")
+
     notice = run_end.wpad_notice(
-        lookups_enabled=lookups_enabled, proxy=proxy, system=lambda: setting
+        lookups_enabled=lookups_enabled,
+        key_file=key_file,
+        proxy=proxy,
+        system=lambda: setting,
+    )
+
+    assert notice is None
+
+
+def test_no_wpad_notice_without_a_stored_key(tmp_path: Path) -> None:
+    notice = run_end.wpad_notice(
+        lookups_enabled=True,
+        key_file=tmp_path / "missing",
+        proxy=ProxyConfig(),
+        system=lambda: WindowsProxy(auto_detect=True),
     )
 
     assert notice is None
