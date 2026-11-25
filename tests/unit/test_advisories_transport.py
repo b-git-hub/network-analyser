@@ -13,7 +13,13 @@ import truststore
 
 from network_analyser._winsys import WindowsProxy
 from network_analyser.advisories import transport
-from network_analyser.advisories.proxy import ProxyConfig, ProxyMode, ProxyNotUsable, resolve_proxy
+from network_analyser.advisories.proxy import (
+    ProxyConfig,
+    ProxyMode,
+    ProxyNotUsable,
+    resolve_proxy,
+    wpad_ignored,
+)
 from network_analyser.advisories.transport import (
     HttpRequest,
     HttpResponse,
@@ -445,3 +451,70 @@ def test_a_reply_that_arrives_inside_the_deadline_is_kept(monkeypatch: pytest.Mo
 def test_every_request_carries_a_total_deadline_by_default() -> None:
     assert request().total_timeout_s == transport.TOTAL_TIMEOUT_S
     assert transport.TOTAL_TIMEOUT_S >= transport.READ_TIMEOUT_S
+
+
+def test_windows_auto_detect_alone_connects_directly() -> None:
+    """WPAD alone is not a proxy the tool can use, so it connects directly (#192)."""
+    target = resolve_proxy(ProxyConfig(), system=lambda: WindowsProxy(auto_detect=True))
+
+    assert target is None
+
+
+def test_a_windows_fixed_proxy_is_used_beside_auto_detect() -> None:
+    """A fixed ProxyServer is still the setting the tool can honour (#192)."""
+    target = resolve_proxy(
+        ProxyConfig(), system=lambda: WindowsProxy(server="proxy.example:8080", auto_detect=True)
+    )
+
+    assert not isinstance(target, ProxyNotUsable)
+    assert target is not None
+    assert (target.host, target.port) == ("proxy.example", 8080)
+
+
+def test_a_pac_script_beside_auto_detect_reads_as_a_pac_script() -> None:
+    """A blob PAC URL is refused through the same text as `AutoConfigURL` (#192)."""
+    target = resolve_proxy(
+        ProxyConfig(),
+        system=lambda: WindowsProxy(script="http://wpad.example/wpad.dat", auto_detect=True),
+    )
+
+    assert isinstance(target, ProxyNotUsable)
+    assert "PAC script" in target.reason
+
+
+def test_windows_auto_detect_alone_fetches_nothing_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One direct connection to Cisco, and no WPAD or PAC fetch (#192)."""
+    opener = FakeOpener(connection=FakeConnection(response=FakeResponse(200)))
+    monkeypatch.setattr(transport, "open_https", opener)
+    fenced = HttpsTransport(
+        proxy=ProxyConfig(), system_proxy=lambda: WindowsProxy(auto_detect=True)
+    )
+
+    reply = fenced(request())
+
+    assert isinstance(reply, HttpResponse)
+    assert len(opener.opened) == 1
+    assert opener.opened[0]["host"] == "apix.cisco.com"
+
+
+@pytest.mark.parametrize(
+    ("config", "setting", "expected"),
+    [
+        (ProxyConfig(), WindowsProxy(auto_detect=True), True),
+        (ProxyConfig(), WindowsProxy(server="proxy.example:8080", auto_detect=True), False),
+        (
+            ProxyConfig(),
+            WindowsProxy(script="http://wpad.example/wpad.dat", auto_detect=True),
+            False,
+        ),
+        (ProxyConfig(), None, False),
+        (ProxyConfig.direct(), WindowsProxy(auto_detect=True), False),
+        (ProxyConfig.explicit("proxy.example:8080"), WindowsProxy(auto_detect=True), False),
+    ],
+)
+def test_wpad_is_ignored_only_when_it_is_the_whole_windows_setting(
+    config: ProxyConfig, setting: WindowsProxy | None, *, expected: bool
+) -> None:
+    assert wpad_ignored(config, system=lambda: setting) is expected

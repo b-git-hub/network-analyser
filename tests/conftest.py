@@ -44,6 +44,12 @@ def _own_per_user_folder(
 
 
 @pytest.fixture(autouse=True)
+def _no_windows_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test reads this PC's proxy setting through the Run's WPAD notice (#192)."""
+    monkeypatch.setattr("network_analyser.cli.run_end.system_proxy", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_pacing_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     """Count every default Pacer's wait on a fake clock, so the gate never waits for real.
 

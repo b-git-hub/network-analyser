@@ -17,7 +17,8 @@ from typing import Any
 import pytest
 
 from network_analyser import analysis, backup_store, device_gateway
-from network_analyser.advisories import HttpResponse, TransportFailed
+from network_analyser._winsys import WindowsProxy
+from network_analyser.advisories import HttpResponse, ProxyConfig, TransportFailed
 from network_analyser.cli import ExitCode, run_end
 from network_analyser.credentials import CredentialSets, Secret, SecretScan
 from network_analyser.records.analysis import AnalysisInput, CiscoAnswers, SourceUnavailable
@@ -689,3 +690,93 @@ def test_a_rejected_key_never_says_the_lookups_did_not_run_after_an_answer() -> 
     assert line.startswith(f"Cisco lookups stopped: {REJECTED}.")
     assert "did not run" not in line
     assert "cisco-key set" in line
+
+
+def test_a_run_with_wpad_alone_prints_the_notice_once_before_the_prompts(
+    run: Runner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _store_key()
+    _serve(monkeypatch, _fake())
+    monkeypatch.setattr(run_end, "system_proxy", lambda: WindowsProxy(auto_detect=True))
+
+    got = run(*FLAGS, "--cisco-lookups", "on", typed=later_run())
+
+    assert got.out.count(run_end.WPAD_NOTICE) == 1
+    assert got.out.index(run_end.WPAD_NOTICE) < got.out.index("Scope (")
+
+
+def test_a_run_with_proxy_gives_no_wpad_notice(
+    run: Runner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _store_key()
+    _serve(monkeypatch, _fake())
+    monkeypatch.setattr(run_end, "system_proxy", lambda: WindowsProxy(auto_detect=True))
+
+    got = run(
+        *FLAGS,
+        "--cisco-lookups",
+        "on",
+        "--proxy",
+        "proxy.example:8080",
+        typed=later_run(),
+    )
+
+    assert run_end.WPAD_NOTICE not in got.out
+
+
+def test_wpad_alone_gives_one_notice(tmp_path: Path) -> None:
+    key_file = tmp_path / "k"
+    key_file.write_bytes(b"x")
+
+    notice = run_end.wpad_notice(
+        lookups_enabled=True,
+        key_file=key_file,
+        proxy=ProxyConfig(),
+        system=lambda: WindowsProxy(auto_detect=True),
+    )
+
+    assert notice == run_end.WPAD_NOTICE
+
+
+@pytest.mark.parametrize(
+    ("lookups_enabled", "proxy", "setting"),
+    [
+        (False, ProxyConfig(), WindowsProxy(auto_detect=True)),
+        (True, ProxyConfig.explicit("proxy.example:8080"), WindowsProxy(auto_detect=True)),
+        (True, ProxyConfig(), WindowsProxy(server="proxy.example:8080", auto_detect=True)),
+        (True, ProxyConfig(), None),
+    ],
+)
+def test_no_wpad_notice_when_it_does_not_apply(
+    *,
+    lookups_enabled: bool,
+    proxy: ProxyConfig,
+    setting: WindowsProxy | None,
+    tmp_path: Path,
+) -> None:
+    key_file = tmp_path / "k"
+    key_file.write_bytes(b"x")
+
+    notice = run_end.wpad_notice(
+        lookups_enabled=lookups_enabled,
+        key_file=key_file,
+        proxy=proxy,
+        system=lambda: setting,
+    )
+
+    assert notice is None
+
+
+def test_no_wpad_notice_without_a_stored_key(tmp_path: Path) -> None:
+    notice = run_end.wpad_notice(
+        lookups_enabled=True,
+        key_file=tmp_path / "missing",
+        proxy=ProxyConfig(),
+        system=lambda: WindowsProxy(auto_detect=True),
+    )
+
+    assert notice is None
+
+
+def test_the_wpad_notice_is_ascii() -> None:
+    assert run_end.WPAD_NOTICE.isascii()
