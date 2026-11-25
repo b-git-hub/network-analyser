@@ -23,6 +23,7 @@ None.
 ### Fixed
 
 - **Software end-of-life now answers per release** (#165): each software EoX call carries exactly one release, `EOXBySWReleaseString/<page>?input1=<release>,<OSType>`, so every record and every unanswered entry in Cisco's reply belongs to the release the tool asked about. Cisco's `EOXInputValue` echo is never read as ownership, and no substring match is used. NX-OS software end-of-life is now asked as `NX-OS`, the name Cisco's EoX API reference gives, instead of reading "could not check". A release Cisco answers with no EoX now reads as silence, while a release Cisco explicitly refuses still reads "could not check" with its reason. Hardware EoX keeps its 20-PID batches. No `format_version` change.
+- **A short Credential Set password no longer blocks ordinary text** (#70): a Credential Set password must now be at least 4 characters, refused at its prompt before it joins the secret scan. A secret shorter than 8 characters is blocked only where it stands alone, with no letter or digit beside it, so it no longer blocks letters inside prompts, usernames, device output or the Run folder path, and no longer refuses the Run because of the default `%LOCALAPPDATA%\NetworkAnalyser\runs` path. Secrets of 8 or more characters, the Backup Passphrase among them, are matched anywhere, as before.
 
 ## [0.3.1] - 2026-11-22
 

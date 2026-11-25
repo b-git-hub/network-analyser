@@ -287,6 +287,39 @@ def test_an_empty_password_is_refused_and_asked_again(run: Runner) -> None:
     assert got.err.count("Password for netops-ro: ") == 2
 
 
+def test_a_password_under_four_characters_is_refused_before_the_scan_and_asked_again(
+    run: Runner,
+) -> None:
+    answers = typed(
+        "YES", BACKUP_CANARY, BACKUP_CANARY, "abc-ops", "abc", DEVICE_CANARY, "", "n", "y"
+    )
+
+    got = run(*FLAGS, typed=answers)
+
+    assert got.code == ExitCode.CLEAN
+    assert (
+        "  Refused: a Credential Set password must be at least 4 characters, so the secret "
+        "scan can tell it\n  apart from ordinary text. Type it again (Ctrl+C cancels the Run)."
+    ) in got.err
+    assert got.err.count("Password for abc-ops: ") == 2
+    assert "Limit abc-ops to a Platform?" in got.err  # the refused password was never watched
+    assert "[blocked]" not in got.out + got.err
+
+
+def test_a_short_password_inside_the_run_folder_path_does_not_refuse_the_run(
+    run: Runner,
+) -> None:
+    run.seed.password = "lyse"  # inside "NetworkAnalyser", never a word of its own
+    answers = typed("YES", BACKUP_CANARY, BACKUP_CANARY, "netops-ro", "lyse", "", "n", "y")
+
+    got = run(*FLAGS, typed=answers)
+
+    assert got.code == ExitCode.CLEAN
+    assert "Run folder's path" not in got.err
+    (folder,) = _run_folders()
+    assert f"Run folder created: {folder}\n" in got.out
+
+
 def test_an_empty_username_is_asked_again(run: Runner) -> None:
     answers = typed(
         "YES", BACKUP_CANARY, BACKUP_CANARY, "  ", "netops-ro", DEVICE_CANARY, "", "n", "y"

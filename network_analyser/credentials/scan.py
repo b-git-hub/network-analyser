@@ -3,7 +3,9 @@
 Every line bound for `audit.log`, the console, and later `topology.json`, the diagram and the
 Run report passes through `SecretScan.contains_secret` first. It looks for the Run's own
 Credential Set passwords and its Backup Passphrase, exactly and case-sensitively, and replaces
-each match with `[blocked]`. The Run carries on; the hit count is kept so the Run can warn once,
+each match with `[blocked]`. A secret shorter than eight characters counts only where it stands
+alone, with no letter or digit beside it, so a short password inside an ordinary word is not a
+match (#70). The Run carries on; the hit count is kept so the Run can warn once,
 never saying which set matched.
 
 The scan lives in `credentials`, so the modules that write never hold a secret: they hand text
@@ -32,6 +34,9 @@ BLOCKED: Final = "[blocked]"
 _PREFIX: Final = 4
 """Characters of a secret the rolling hash screens on; the fingerprint decides every match. A
 secret shorter than this is hashed window by window instead."""
+_WHOLE_WORD_BELOW: Final = 8
+"""A secret shorter than this counts only where it stands alone: no letter or digit right
+before or after it. Longer secrets match anywhere, as before (#70)."""
 _DIGEST: Final = "sha256"
 _MASK: Final = (1 << 64) - 1
 _KEY_BYTES: Final = 32
@@ -167,8 +172,21 @@ class SecretScan:
 
 
 def _matches(text: str, watching: _Watching) -> list[tuple[int, int]]:
-    """Every (start, stop) where a watched secret occurs, overlapping occurrences included."""
-    return [*_short_matches(text, watching), *_prefix_matches(text, watching)]
+    """Every (start, stop) where a watched secret occurs, overlapping occurrences included.
+
+    A secret shorter than `_WHOLE_WORD_BELOW` counts only where it stands alone (#70).
+    """
+    found = [*_short_matches(text, watching), *_prefix_matches(text, watching)]
+    return [(start, stop) for start, stop in found if _counts(text, start, stop)]
+
+
+def _counts(text: str, start: int, stop: int) -> bool:
+    """Say whether a match at text[start:stop] is blocked: long, or standing alone (#70)."""
+    if stop - start >= _WHOLE_WORD_BELOW:
+        return True
+    before = start == 0 or not text[start - 1].isalnum()
+    after = stop == len(text) or not text[stop].isalnum()
+    return before and after
 
 
 def _short_matches(text: str, watching: _Watching) -> list[tuple[int, int]]:

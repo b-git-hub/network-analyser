@@ -43,9 +43,9 @@ def test_matching_is_exact_and_case_sensitive() -> None:
 
 
 def test_overlapping_secrets_leave_no_part_of_either_showing() -> None:
-    scan = _scan("abcd", "cdef")
+    scan = _scan("CANARY-pw-abcdef", "abcdef-CANARY-x")
 
-    assert scan.contains_secret("x abcdef y") == ("x [blocked] y", 1)
+    assert scan.contains_secret("x CANARY-pw-abcdef-CANARY-x y") == ("x [blocked] y", 1)
 
 
 def test_a_secret_inside_another_is_blocked_with_it() -> None:
@@ -55,7 +55,7 @@ def test_a_secret_inside_another_is_blocked_with_it() -> None:
 
 
 def test_repeated_secret_runs_are_blocked_without_leaving_a_tail() -> None:
-    assert _scan("aa").contains_secret("aaa") == ("[blocked]", 1)
+    assert _scan("abababab").contains_secret("ababababab") == ("[blocked]", 1)
 
 
 def test_an_empty_scan_finds_nothing() -> None:
@@ -131,7 +131,7 @@ def test_a_secret_with_a_non_ascii_character_is_blocked() -> None:
 def test_a_secret_with_fewer_characters_than_the_window_is_blocked() -> None:
     scan = _scan("ab")
 
-    assert scan.contains_secret("xaby") == ("x[blocked]y", 1)
+    assert scan.contains_secret("x ab y") == ("x [blocked] y", 1)
 
 
 def test_a_secret_at_either_end_of_a_long_text_is_found() -> None:
@@ -143,7 +143,7 @@ def test_a_secret_at_either_end_of_a_long_text_is_found() -> None:
 
 
 def test_overlapping_occurrences_across_a_long_text_are_all_blocked() -> None:
-    scan = _scan("aa")
+    scan = _scan("aaaaaaaa")
     long = "a" * 5000
 
     assert scan.contains_secret(long) == ("[blocked]", 1)
@@ -166,3 +166,27 @@ def test_holds_secret_says_whether_text_holds_one_without_counting_a_hit() -> No
     assert scan.holds_secret(f"C:/runs/{CANARY}/x")
     assert not scan.holds_secret("C:/runs/x")
     assert scan.hits == 0
+
+
+def test_a_short_secret_inside_a_longer_word_is_not_blocked() -> None:
+    scan = _scan("ops1", "n")
+    text = "Limit netops1 to a Platform. Credential Run"
+    assert scan.contains_secret(text) == (text, 0)
+    assert scan.hits == 0
+
+
+def test_a_short_secret_standing_alone_is_blocked() -> None:
+    scan = _scan("ops1")
+    assert scan.contains_secret("pw ops1, ok") == ("pw [blocked], ok", 1)
+    assert scan.contains_secret("ops1") == ("[blocked]", 1)
+    assert scan.contains_secret("x_ops1-y") == ("x_[blocked]-y", 1)
+
+
+def test_a_secret_of_eight_or_more_characters_is_blocked_inside_a_word() -> None:
+    assert _scan("CANARY-8").contains_secret("xCANARY-8y") == ("x[blocked]y", 1)
+
+
+def test_a_short_secret_inside_the_run_folder_path_does_not_hold_a_secret() -> None:
+    path = r"C:\Users\op\AppData\Local\NetworkAnalyser\runs\20261125T000000Z_lab"
+    assert not _scan("n", "lyse", "work").holds_secret(path)
+    assert _scan("runs").holds_secret(path)

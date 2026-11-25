@@ -36,6 +36,19 @@ from network_analyser.records import CredentialSetResult, CredentialSetView, Pla
 MAX_SETS: Final = 5
 MAX_FAILURE_BUDGET: Final = 5
 """The failure budget is 3 by default; the operator may lower it, never raise it above 5."""
+PASSWORD_MIN: Final = 4
+"""The shortest Credential Set password a Run takes: a shorter one cannot be told apart from
+ordinary text by the secret scan (#70)."""
+
+
+def password_problem(password: Secret) -> str | None:
+    """Return why `password` cannot be a Credential Set password, or None (#70).
+
+    Checks only the length, so an empty password is the caller's own message.
+    """
+    if len(password.reveal()) < PASSWORD_MIN:
+        return f"a Credential Set password must be at least {PASSWORD_MIN} characters"
+    return None
 
 
 @final
