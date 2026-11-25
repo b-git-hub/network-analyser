@@ -34,6 +34,7 @@ NO_DECISION = "no crawl decision was recorded for it"
 NO_NAME = "no name was advertised"
 NO_PLATFORM = "no Platform string was advertised"
 INCOMPLETE_VLAN_DATABASE = "the VLAN database is incomplete"
+NO_VLANS_ON_A_ROUTER = "VLANs do not apply to a router"
 _NOT_READ = "show version not read"
 
 
@@ -118,6 +119,8 @@ def visited_device(known: Known, addresses: dict[IPv4Address, str]) -> VisitedDe
 def vlan_database(device: Known) -> frozenset[int] | Unknown:
     """Return the VLANs in a device's VLAN database, active or not; unknown if incomplete."""
     reading = device.collected.vlans
+    if reading is None:
+        return Unknown(NO_VLANS_ON_A_ROUTER)
     if not isinstance(reading, Reading):
         return reading
     if reading.gaps:

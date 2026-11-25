@@ -57,6 +57,24 @@ Configuration register is 0x102
 Router operating mode: Controller-Managed
 """
 
+IOS_XE_ROUTER_SHOW_VERSION = """\
+Cisco IOS XE Software, Version 17.09.04a
+Cisco IOS Software [Cupertino], ISR Software (X86_64_LINUX_IOSD-UNIVERSALK9-M), \
+Version 17.9.4a, RELEASE SOFTWARE (fc5)
+Copyright (c) 1986-2023 by Cisco Systems, Inc.
+
+ROM: IOS-XE ROMMON
+rtr-c uptime is 1 week, 2 days, 3 hours, 4 minutes
+System returned to ROM by Reload Command
+System image file is "bootflash:packages.conf"
+
+cisco C8300-1N1S-4T2X (X86) processor with 1392536K/6147K bytes of memory.
+Processor board ID TEST0000C01
+Configuration register is 0x102
+Router operating mode: Autonomous
+"""
+"""`rtr-c`, an autonomous-mode IOS-XE router: no switch member table (#72)."""
+
 NXOS_SHOW_VERSION = """\
 Cisco Nexus Operating System (NX-OS) Software
 Software
