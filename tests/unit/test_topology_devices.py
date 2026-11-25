@@ -3,6 +3,7 @@
 Stories 126, 138 and 140-141: synthetic records in, Topology out, with no device.
 """
 
+from dataclasses import replace
 from ipaddress import IPv4Address
 
 from network_analyser import topology
@@ -96,6 +97,20 @@ def test_a_visited_device_with_nothing_collected_lists_every_part_as_skipped() -
     assert device.stack_members == Unknown(NOT_COLLECTED)
     assert {s.data for s in built.skipped} == set(Collected.__dataclass_fields__)
     assert {s.reason for s in built.skipped} == {NOT_COLLECTED}
+
+
+def test_a_routers_parts_that_do_not_apply_are_not_skipped_checks() -> None:
+    record = visited("192.0.2.1", "S1", "rtr-c")
+    assert record.collected is not None
+    router = replace(
+        record,
+        collected=replace(record.collected, vlans=None, port_channels=None, mac=None),
+    )
+
+    built = topology.build([router])
+
+    assert not {s.data for s in built.skipped} & {"vlans", "port_channels", "mac"}
+    assert built.devices[0].vlan_database == Unknown("VLANs do not apply to a router")
 
 
 def test_the_topology_holds_no_username() -> None:

@@ -19,6 +19,10 @@ and BGP neighbours and static routes with the per-VRF templates. OSPF needs no p
 The 0.2.0 Analysis commands (#97) are asked last. `show system insecure configuration` is
 asked only when `show version` names IOS-XE 17.18.2 or later (story 68); on an older release
 its part is None, meaning "does not apply", never "Cisco found nothing".
+
+A router (`show version` prints `Router operating mode:`, #72) is never sent the switch-only
+commands (switchport, trunk, etherchannel, VLAN, MAC table): its interfaces are routed and
+its VLAN, port-channel and MAC parts are None, meaning "does not apply", never "denied".
 """
 
 from collections.abc import Callable
@@ -30,7 +34,10 @@ from network_analyser.platforms.collection import Collection, Send
 from network_analyser.platforms.ios_xe import commands as c
 from network_analyser.platforms.ios_xe import parsers
 from network_analyser.platforms.ios_xe.asking import Asker, Part
-from network_analyser.platforms.ios_xe.identify import supports_insecure_configuration
+from network_analyser.platforms.ios_xe.identify import (
+    is_router,
+    supports_insecure_configuration,
+)
 from network_analyser.platforms.ios_xe.parsers import DEFAULT_VRF, Peer
 from network_analyser.records.collected import (
     NOT_COLLECTED,
@@ -70,6 +77,7 @@ type Ips = dict[str, InterfaceIp | None]
 def collect(send: Send, version: VersionFacts) -> Collection:
     """Collect every part of a Visited IOS/IOS-XE device's data through `send`."""
     asker = Asker(send)
+    router = is_router(version)
     stack = _stack(asker, version)
     ips = asker.ask(c.SHOW_IP_INTERFACE, parsers.ip_interfaces)
     shown_vrfs = asker.ask(c.SHOW_VRF, parsers.vrfs)
@@ -81,15 +89,17 @@ def collect(send: Send, version: VersionFacts) -> Collection:
     stacked = isinstance(stack, Reading) and len(stack.value) > 1
     collected = Collected(
         stack_members=stack,
-        interfaces=_interfaces(asker, ips, stacked=stacked),
+        interfaces=_interfaces(asker, ips, stacked=stacked, router=router),
         cdp=Unknown(NOT_COLLECTED),  # the crawl's own reading goes here (#50)
         lldp=Unknown(NOT_COLLECTED),
-        vlans=_single(asker, c.SHOW_VLAN_BRIEF, parsers.vlans),
-        port_channels=_single(asker, c.SHOW_ETHERCHANNEL_SUMMARY, parsers.port_channels),
+        vlans=None if router else _single(asker, c.SHOW_VLAN_BRIEF, parsers.vlans),
+        port_channels=(
+            None if router else _single(asker, c.SHOW_ETHERCHANNEL_SUMMARY, parsers.port_channels)
+        ),
         vpc=None,
         vrfs=_vrfs(shown_vrfs),
         arp=_arp(asker, vrf_names),
-        mac=_single(asker, c.SHOW_MAC_ADDRESS_TABLE, parsers.mac_table),
+        mac=None if router else _single(asker, c.SHOW_MAC_ADDRESS_TABLE, parsers.mac_table),
         routing_neighbours=_routing(asker, ips, vrf_names),
         static_routes=_static_routes(asker, vrf_names),
         fhrp=_fhrp(asker),
@@ -136,12 +146,17 @@ def _stack(asker: Asker, version: VersionFacts) -> Reading[tuple[StackMember, ..
 
 
 def _interfaces(
-    asker: Asker, ips: Ips | Unknown, *, stacked: bool
+    asker: Asker, ips: Ips | Unknown, *, stacked: bool, router: bool
 ) -> Reading[tuple[Interface, ...]] | Unknown:
     part = Part()
     shown = part.take(c.SHOW_INTERFACES, asker.ask(c.SHOW_INTERFACES, parsers.interfaces))
     if shown is None:
         return part.reading(())
+    if router:  # no switchports, trunks or bundles to ask about (#72)
+        part.take(c.SHOW_IP_INTERFACE, ips)
+        return part.reading(
+            tuple(_interface(one, {}, {}, ips, {}, stacked=stacked) for one in shown)
+        )
     ports = asker.ask(c.SHOW_INTERFACES_SWITCHPORT, parsers.switchports)
     trunks = asker.ask(c.SHOW_INTERFACES_TRUNK, parsers.trunks)
     channels = asker.ask(c.SHOW_ETHERCHANNEL_SUMMARY, parsers.port_channels)

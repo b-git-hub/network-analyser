@@ -42,6 +42,17 @@ from tests.support import device_text, ios_xe_text
 DENIED = "                 ^\n% Invalid input detected at '^' marker.\n"
 SHOW_VERSION = "show version"
 CRAWL_COMMANDS = frozenset({"show cdp neighbors detail", "show lldp neighbors detail"})
+SWITCH_ONLY = frozenset(
+    {
+        "show interfaces switchport",
+        "show interfaces trunk",
+        "show etherchannel summary",
+        "show vlan brief",
+        "show mac address-table",
+    }
+)
+ROUTER_REPLIES = {k: v for k, v in ios_xe_text.REPLIES.items() if k not in SWITCH_ONLY}
+ROUTER_VERSIONS = (device_text.IOS_XE_ROUTER_SHOW_VERSION, device_text.IOS_XE_SDWAN_SHOW_VERSION)
 
 
 class Device:
@@ -310,6 +321,54 @@ def test_a_denied_switchport_command_leaves_modes_unknown_not_routed() -> None:
     port = {i.name.short: i for i in interfaces.value}["Gi1/0/1"]
     assert (port.mode, port.allowed_vlans, port.access_vlan) == (reason, reason, reason)
     assert port.bundle == "Po10"
+
+
+# -- A router (#72) ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("version", ROUTER_VERSIONS)
+def test_a_router_is_never_sent_switch_only_commands(version: str) -> None:
+    device = Device(ROUTER_REPLIES)
+
+    collect(device, version)
+
+    assert not SWITCH_ONLY & set(device.asked)
+    assert set(device.asked) == set(ROUTER_REPLIES) | {SHOW_VERSION}
+
+
+def test_a_routers_vlans_port_channels_and_mac_table_do_not_apply() -> None:
+    collection = collect(Device(ROUTER_REPLIES), device_text.IOS_XE_ROUTER_SHOW_VERSION)
+
+    assert collection.collected.vlans is None
+    assert collection.collected.port_channels is None
+    assert collection.collected.mac is None
+    assert collection.problems == ()
+
+
+def test_a_routers_interfaces_are_routed_with_no_vlans_or_bundle() -> None:
+    interfaces = collect(
+        Device(ROUTER_REPLIES), device_text.IOS_XE_ROUTER_SHOW_VERSION
+    ).collected.interfaces
+
+    assert isinstance(interfaces, Reading)
+    assert interfaces.commands == ("show interfaces", "show ip interface")
+    assert interfaces.gaps == ()
+    assert interfaces.value
+    for interface in interfaces.value:
+        assert interface.mode is SwitchportMode.ROUTED
+        assert interface.access_vlan is None
+        assert interface.native_vlan is None
+        assert interface.allowed_vlans is None
+        assert interface.bundle is None
+        assert interface.stack_member is None
+
+
+def test_a_switch_is_still_sent_every_switch_command() -> None:
+    device = Device()
+
+    collect(device)
+
+    assert SWITCH_ONLY.issubset(device.asked)
 
 
 # -- Port-channels, VLANs, VRFs ----------------------------------------------------------------

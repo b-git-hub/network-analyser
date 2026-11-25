@@ -464,12 +464,13 @@ class Collected:
         interfaces: every interface, down ones included, with IPs, VRF and Bundle membership.
         cdp: the CDP neighbour entries.
         lldp: the LLDP neighbour entries.
-        vlans: the VLAN database.
-        port_channels: the port-channel summary.
+        vlans: the VLAN database; None when it does not apply (an IOS-XE router, #72).
+        port_channels: the port-channel summary; None when it does not apply (an IOS-XE
+            router, #72).
         vpc: the vPC domain; None when the device has none (IOS/IOS-XE, or not configured).
         vrfs: the VRFs.
         arp: the ARP entries, every VRF.
-        mac: the MAC address table.
+        mac: the MAC address table; None when it does not apply (an IOS-XE router, #72).
         routing_neighbours: OSPF, EIGRP and BGP neighbours, every VRF.
         static_routes: the static routes, every VRF.
         fhrp: HSRP, VRRP and GLBP groups.
@@ -492,12 +493,12 @@ class Collected:
     interfaces: Reading[tuple[Interface, ...]] | Unknown
     cdp: Reading[tuple[Neighbour, ...]] | Unknown
     lldp: Reading[tuple[Neighbour, ...]] | Unknown
-    vlans: Reading[tuple[Vlan, ...]] | Unknown
-    port_channels: Reading[tuple[PortChannel, ...]] | Unknown
+    vlans: Reading[tuple[Vlan, ...]] | Unknown | None
+    port_channels: Reading[tuple[PortChannel, ...]] | Unknown | None
     vpc: Reading[VpcState] | Unknown | None
     vrfs: Reading[tuple[Vrf, ...]] | Unknown
     arp: Reading[tuple[ArpEntry, ...]] | Unknown
-    mac: Reading[tuple[MacEntry, ...]] | Unknown
+    mac: Reading[tuple[MacEntry, ...]] | Unknown | None
     routing_neighbours: Reading[tuple[RoutingNeighbour, ...]] | Unknown
     static_routes: Reading[tuple[StaticRoute, ...]] | Unknown
     fhrp: Reading[tuple[FhrpGroup, ...]] | Unknown
